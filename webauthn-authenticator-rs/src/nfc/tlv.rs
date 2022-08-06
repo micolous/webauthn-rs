@@ -1,5 +1,6 @@
 pub(crate) struct CompactTlv<'a> {
-    it: std::slice::Iter<'a, u8>
+    // it: std::slice::Iter<'a, u8>
+    b: &'a [u8],
 }
 
 impl CompactTlv<'_> {
@@ -13,25 +14,28 @@ impl CompactTlv<'_> {
             i += 1;
         }
 
-        let it = (&tlv[i..]).iter();
-        CompactTlv { it }
+        CompactTlv { b: &tlv[i..] }
     }
 }
 
-impl Iterator for CompactTlv<'_> {
-    type Item = (u8, Vec<u8>);
+impl<'a> Iterator for CompactTlv<'a> {
+    type Item = (u8, &'a [u8]);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let tl = self.it.next()?;
-        let tag = tl >> 4;
-        let len = tl & 0xf;
-
-        let mut v: Vec<u8> = Vec::with_capacity(len as usize);
-        for _ in 0..len {
-            let i = self.it.next()?;
-            v.push(*i);
+        if self.b.len() == 0 {
+            return None;
         }
-        
+        let tl = self.b[0];
+        let tag = tl >> 4;
+        let len: usize = (tl & 0xf).into();
+
+        if self.b.len() < len + 1 {
+            return None
+        }
+        let v = &self.b[1..len + 1];
+
+        // Slide the buffer along
+        self.b = &self.b[len + 1..];
         Some((tag, v))
     }
 }

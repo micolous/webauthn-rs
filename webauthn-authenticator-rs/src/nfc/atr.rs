@@ -50,11 +50,15 @@ impl<'a> TryFrom<&[u8]> for Atr {
         let mut extended_lc = false;
 
         let t1 = &atr[i..i + t1_len];
+
+        if t1[0] != 0x80 {
+            panic!("wrong category byte");
+        }
         // TODO: handle PC/SC's brokenness (where they actually use Simple-TLV)
         // See PC/SC Spec Part 3, s3.1.3.2.3.2: Contactless Storage Cards
         // FIDO tokens won't be storage cards, but it means we don't barf if
         // someone tries to put their transit card in there.
-        let tlv = CompactTlv::new(t1);
+        let tlv = CompactTlv::new(&t1[1..]);
         for (t, v) in tlv {
             trace!("tlv: {:02x?} = {:02x?}", t, v);
             if t == 7 {
