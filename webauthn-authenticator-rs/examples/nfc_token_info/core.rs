@@ -4,7 +4,7 @@ use std::ffi::CStr;
 use webauthn_authenticator_rs::nfc::apdu::*;
 use webauthn_authenticator_rs::nfc::*;
 
-fn access_card(card: NFCCard<'_>) {
+fn access_card(card: NFCCard) {
     info!("Card detected ...");
 
     match card.select_u2f_v2_applet() {

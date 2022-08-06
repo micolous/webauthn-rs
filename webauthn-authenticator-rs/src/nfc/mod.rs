@@ -8,8 +8,13 @@ use std::ffi::CString;
 use std::fmt;
 
 pub mod apdu;
+pub mod atr;
+pub mod iso7816;
+mod tlv;
 
 use self::apdu::*;
+use self::atr::*;
+use self::iso7816::*;
 
 pub struct NFCReader {
     ctx: Context,
@@ -17,21 +22,22 @@ pub struct NFCReader {
     rdr_state: Vec<ReaderState>,
 }
 
-pub struct NFCCard<'a> {
-    rdr: &'a NFCReader,
+pub struct NFCCard {
+    // rdr: &'a NFCReader,
     card_ref: Card,
+    atr: Atr,
 }
 
-pub enum Selected<'a> {
+pub enum Selected {
     // FIDO_2_1(),
-    FIDO_2_1_PRE(Ctap2_1_pre<'a>),
+    FIDO_2_1_PRE(Ctap2_1_pre),
     // FIDO_2_0(),
     // U2F(),
 }
 
-pub struct Ctap2_1_pre<'a> {
+pub struct Ctap2_1_pre {
     tokinfo: AuthenticatorGetInfoResponse,
-    card: NFCCard<'a>,
+    card: NFCCard,
 }
 
 impl fmt::Debug for NFCReader {
@@ -72,7 +78,7 @@ impl Default for NFCReader {
 }
 
 impl NFCReader {
-    pub fn wait_for_card(&mut self) -> Result<NFCCard<'_>, ()> {
+    pub fn wait_for_card(&mut self) -> Result<NFCCard, ()> {
         loop {
             for read_state in &mut self.rdr_state {
                 read_state.sync_current_state();
@@ -92,10 +98,7 @@ impl NFCReader {
                             .ctx
                             .connect(&self.rdr_id, ShareMode::Shared, Protocols::ANY)
                             .expect("Failed to access NFC card");
-                        return Ok(NFCCard {
-                            card_ref,
-                            rdr: self,
-                        });
+                        return Ok(NFCCard::new(card_ref));
                     } else if state.contains(State::EMPTY) {
                         info!("Card removed");
                     } else {
@@ -113,7 +116,44 @@ enum Pdu<'b> {
     Complete(&'b [u8]),
 }
 
-impl<'a> NFCCard<'a> {
+fn transmit(card: &Card, request: ISO7816RequestAPDU) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
+    let mut resp = vec![0; (request.ne + 2).into()];
+    let req = request.to_bytes();
+    trace!(">>> {:02x?}", req);
+
+    let rapdu = card
+        .transmit(&req, &mut resp)
+        .map_err(|e| {
+            error!("Failed to transmit APDU command to card: {}", e);
+            WebauthnCError::ApduTransmission
+        })?;
+
+    trace!("<<< {:02x?}", rapdu);
+    
+    ISO7816ResponseAPDU::try_from(rapdu).map_err(|e| {
+        error!("Failed to parse card response: {}", e);
+        WebauthnCError::ApduTransmission
+    })
+}
+
+impl NFCCard {
+    pub fn new(card_ref: Card) -> NFCCard {
+        let mut names_buf = vec![0; MAX_BUFFER_SIZE];
+        let mut atr_buf = vec![0; MAX_ATR_SIZE];
+
+        let card_status = card_ref.status2(&mut names_buf, &mut atr_buf).expect("error getting status");
+
+        trace!("ATR: {:02x?}", card_status.atr());
+        let atr = Atr::try_from(card_status.atr()).expect("oops atr");
+        trace!("Parsed: {:?}", &atr);
+
+        let card = NFCCard {
+            card_ref,
+            atr: atr,
+        };
+        return card;
+    }
+
     fn transmit_raw(
         &mut self,
         tx_buf: &[u8],
@@ -135,6 +175,27 @@ impl<'a> NFCCard<'a> {
         let (data, status) = rapdu.split_at(rapdu.len() - 2);
         rx_buf.extend_from_slice(data);
         Ok(status.try_into().expect("Status not 2 bytes??!?!?!"))
+    }
+
+    fn transmit(&mut self, request: ISO7816RequestAPDU) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
+        let mut resp = vec![0; (request.ne + 2).into()];
+        let req = request.to_bytes();
+        trace!(">>> {:02x?}", req);
+
+        let rapdu = self
+            .card_ref
+            .transmit(&req, &mut resp)
+            .map_err(|e| {
+                error!("Failed to transmit APDU command to card: {}", e);
+                WebauthnCError::ApduTransmission
+            })?;
+
+        trace!("<<< {:02x?}", rapdu);
+        
+        ISO7816ResponseAPDU::try_from(rapdu).map_err(|e| {
+            error!("Failed to parse card response: {}", e);
+            WebauthnCError::ApduTransmission
+        })
     }
 
     // This handles frag/defrag
@@ -222,20 +283,30 @@ impl<'a> NFCCard<'a> {
     }
 
     // Need a way to select the type of card now.
-    pub fn select_u2f_v2_applet(mut self) -> Result<Selected<'a>, WebauthnCError> {
-        let mut ans = Vec::with_capacity(MAX_SHORT_BUFFER_SIZE);
+    pub fn select_u2f_v2_applet(mut self) -> Result<Selected, WebauthnCError> {
+        let resp = self
+            .transmit(select_by_df_name(&APPLET_DF))
+            .expect("Failed to select CTAP2.1 applet");
+
+        if !resp.is_ok() {
+            error!("Error selecting applet: {:02x} {:02x}", resp.sw1, resp.sw2);
+            return Err(WebauthnCError::NotSupported);
+        }
+        // let mut ans = Vec::with_capacity(MAX_SHORT_BUFFER_SIZE);
+
+        /*
+        self
+            .transmit_raw(&BAD_APPLET_SELECT_CMD, &mut ans)
+            .expect("Failed to screw up");
 
         let status = self
             .transmit_raw(&APPLET_SELECT_CMD, &mut ans)
             .expect("Failed to select CTAP2.1 applet");
+        */
 
-        if status != ISO7816_STATUS_OK {
-            error!("Error selecting applet: {:02x?}", status);
-            return Err(WebauthnCError::NotSupported);
-        }
 
-        if ans != &APPLET_U2F_V2 {
-            error!("Unsupported applet: {:02x?}", ans);
+        if resp.data != &APPLET_U2F_V2 {
+            error!("Unsupported applet: {:02x?}", &resp.data);
             return Err(WebauthnCError::NotSupported);
         }
 
@@ -256,15 +327,15 @@ impl<'a> NFCCard<'a> {
     }
 }
 
-impl<'a> fmt::Debug for Ctap2_1_pre<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Ctap2_1_pre<'_>")
+impl fmt::Debug for Ctap2_1_pre {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Ctap2_1_pre")
             .field("token_info", &self.tokinfo)
             .finish()
     }
 }
 
-impl<'a> Ctap2_1_pre<'a> {
+impl Ctap2_1_pre {
     pub fn hack_make_cred(&mut self) -> Result<(), WebauthnCError> {
         let mc = AuthenticatorMakeCredential {
             client_data_hash: vec![
