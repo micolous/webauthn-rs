@@ -178,24 +178,7 @@ impl NFCCard {
     }
 
     fn transmit(&mut self, request: ISO7816RequestAPDU) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
-        let mut resp = vec![0; (request.ne + 2).into()];
-        let req = request.to_bytes();
-        trace!(">>> {:02x?}", req);
-
-        let rapdu = self
-            .card_ref
-            .transmit(&req, &mut resp)
-            .map_err(|e| {
-                error!("Failed to transmit APDU command to card: {}", e);
-                WebauthnCError::ApduTransmission
-            })?;
-
-        trace!("<<< {:02x?}", rapdu);
-        
-        ISO7816ResponseAPDU::try_from(rapdu).map_err(|e| {
-            error!("Failed to parse card response: {}", e);
-            WebauthnCError::ApduTransmission
-        })
+        transmit(&self.card_ref, request)
     }
 
     // This handles frag/defrag
@@ -292,18 +275,6 @@ impl NFCCard {
             error!("Error selecting applet: {:02x} {:02x}", resp.sw1, resp.sw2);
             return Err(WebauthnCError::NotSupported);
         }
-        // let mut ans = Vec::with_capacity(MAX_SHORT_BUFFER_SIZE);
-
-        /*
-        self
-            .transmit_raw(&BAD_APPLET_SELECT_CMD, &mut ans)
-            .expect("Failed to screw up");
-
-        let status = self
-            .transmit_raw(&APPLET_SELECT_CMD, &mut ans)
-            .expect("Failed to select CTAP2.1 applet");
-        */
-
 
         if resp.data != &APPLET_U2F_V2 {
             error!("Unsupported applet: {:02x?}", &resp.data);

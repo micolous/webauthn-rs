@@ -1,7 +1,3 @@
-// Iterate over compact-tlv
-
-// skip null
-
 pub(crate) struct CompactTlv<'a> {
     it: std::slice::Iter<'a, u8>
 }
