@@ -1,5 +1,5 @@
+/// Iterative Compact-TLV parser.
 pub(crate) struct CompactTlv<'a> {
-    // it: std::slice::Iter<'a, u8>
     b: &'a [u8],
 }
 
@@ -19,6 +19,7 @@ impl CompactTlv<'_> {
 }
 
 impl<'a> Iterator for CompactTlv<'a> {
+    /// A Compact-TLV item, a tuple of `tag, value`.
     type Item = (u8, &'a [u8]);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -30,7 +31,8 @@ impl<'a> Iterator for CompactTlv<'a> {
         let len: usize = (tl & 0xf).into();
 
         if self.b.len() < len + 1 {
-            return None
+            // The length of the tag extends out of bounds
+            return None;
         }
         let v = &self.b[1..len + 1];
 

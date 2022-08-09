@@ -109,8 +109,8 @@ pub fn select_by_df_name<'a>(df: &'a [u8]) -> ISO7816RequestAPDU<'a> {
     ISO7816RequestAPDU {
         cla: 0x00,
         ins: 0xA4, // SELECT
-        p1: 0x04, // By DF name
-        p2: 0x00, // First or only occurrence
+        p1: 0x04,  // By DF name
+        p2: 0x00,  // First or only occurrence
         data: df,
         ne: 256,
     }
@@ -124,5 +124,5 @@ pub const GET_HISTORICAL_BYTES: ISO7816RequestAPDU<'static> = ISO7816RequestAPDU
     p1: 0x5F,
     p2: 0x51,
     data: &EMPTY,
-    ne: 32
+    ne: 32,
 };

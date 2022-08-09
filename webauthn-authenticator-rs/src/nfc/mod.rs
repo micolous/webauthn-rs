@@ -116,20 +116,21 @@ enum Pdu<'b> {
     Complete(&'b [u8]),
 }
 
-fn transmit(card: &Card, request: ISO7816RequestAPDU) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
+fn transmit(
+    card: &Card,
+    request: ISO7816RequestAPDU,
+) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
     let mut resp = vec![0; (request.ne + 2).into()];
     let req = request.to_bytes();
     trace!(">>> {:02x?}", req);
 
-    let rapdu = card
-        .transmit(&req, &mut resp)
-        .map_err(|e| {
-            error!("Failed to transmit APDU command to card: {}", e);
-            WebauthnCError::ApduTransmission
-        })?;
+    let rapdu = card.transmit(&req, &mut resp).map_err(|e| {
+        error!("Failed to transmit APDU command to card: {}", e);
+        WebauthnCError::ApduTransmission
+    })?;
 
     trace!("<<< {:02x?}", rapdu);
-    
+
     ISO7816ResponseAPDU::try_from(rapdu).map_err(|e| {
         error!("Failed to parse card response: {}", e);
         WebauthnCError::ApduTransmission
@@ -141,16 +142,15 @@ impl NFCCard {
         let mut names_buf = vec![0; MAX_BUFFER_SIZE];
         let mut atr_buf = vec![0; MAX_ATR_SIZE];
 
-        let card_status = card_ref.status2(&mut names_buf, &mut atr_buf).expect("error getting status");
+        let card_status = card_ref
+            .status2(&mut names_buf, &mut atr_buf)
+            .expect("error getting status");
 
         trace!("ATR: {:02x?}", card_status.atr());
         let atr = Atr::try_from(card_status.atr()).expect("oops atr");
         trace!("Parsed: {:?}", &atr);
 
-        let card = NFCCard {
-            card_ref,
-            atr: atr,
-        };
+        let card = NFCCard { card_ref, atr: atr };
         return card;
     }
 
@@ -177,7 +177,10 @@ impl NFCCard {
         Ok(status.try_into().expect("Status not 2 bytes??!?!?!"))
     }
 
-    fn transmit(&mut self, request: ISO7816RequestAPDU) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
+    fn transmit(
+        &mut self,
+        request: ISO7816RequestAPDU,
+    ) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
         transmit(&self.card_ref, request)
     }
 
