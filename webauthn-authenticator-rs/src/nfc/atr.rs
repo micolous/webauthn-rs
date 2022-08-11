@@ -38,7 +38,8 @@ pub struct Atr {
     /// `Ne` (maximum expected response length) values from 257 to 65536 bytes.
     ///
     /// If this value is set to None, the card did not provide a "card
-    /// capabilities" value (ISO/IEC 7816-4:2005 §8.1.1.2.7).
+    /// capabilities" value (§8.1.1.2.7), and therefore does not support
+    /// extended fields (§5.1).
     ///
     /// **Note:** Some devices falsely report that they support extended
     /// `Lc`/`Le`, eg: [Yubikey](https://smartcard-atr.apdu.fr/parse?ATR=3b+8d+80+01+80+73+c0+21+c0+57+59+75+62+69+4b+65+79+f9)
@@ -91,7 +92,7 @@ impl<'a> TryFrom<&[u8]> for Atr {
             i += 1;
 
             // skip Ta, Tb, Tc fields
-            i += ((y & 0x7) as usize);
+            i += (y & 0x7) as usize;
             if y & 0x8 == 0 {
                 /* Td = 0 */
                 break;

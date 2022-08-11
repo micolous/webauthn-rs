@@ -119,9 +119,14 @@ enum Pdu<'b> {
 fn transmit(
     card: &Card,
     request: ISO7816RequestAPDU,
+    form: ISO7816LengthForm,
 ) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
+    let req = request.to_bytes(form).map_err(|e| {
+        error!("Failed to build APDU command: {:?}", e);
+        WebauthnCError::ApduConstruction
+    })?;
     let mut resp = vec![0; (request.ne + 2).into()];
-    let req = request.to_bytes();
+
     trace!(">>> {:02x?}", req);
 
     let rapdu = card.transmit(&req, &mut resp).map_err(|e| {
@@ -132,7 +137,7 @@ fn transmit(
     trace!("<<< {:02x?}", rapdu);
 
     ISO7816ResponseAPDU::try_from(rapdu).map_err(|e| {
-        error!("Failed to parse card response: {}", e);
+        error!("Failed to parse card response: {:?}", e);
         WebauthnCError::ApduTransmission
     })
 }
@@ -180,8 +185,9 @@ impl NFCCard {
     fn transmit(
         &mut self,
         request: ISO7816RequestAPDU,
+        form: ISO7816LengthForm,
     ) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
-        transmit(&self.card_ref, request)
+        transmit(&self.card_ref, request, form)
     }
 
     // This handles frag/defrag
@@ -271,7 +277,7 @@ impl NFCCard {
     // Need a way to select the type of card now.
     pub fn select_u2f_v2_applet(mut self) -> Result<Selected, WebauthnCError> {
         let resp = self
-            .transmit(select_by_df_name(&APPLET_DF))
+            .transmit(select_by_df_name(&APPLET_DF), ISO7816LengthForm::ShortOnly)
             .expect("Failed to select CTAP2.1 applet");
 
         if !resp.is_ok() {
