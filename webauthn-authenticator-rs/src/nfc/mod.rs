@@ -29,6 +29,7 @@ pub struct NFCCard {
     atr: Atr,
 }
 
+#[allow(non_camel_case_types)]
 pub enum Selected {
     // FIDO_2_1(),
     FIDO_2_1_PRE(Ctap2_1_pre),
@@ -36,6 +37,7 @@ pub enum Selected {
     // U2F(),
 }
 
+#[allow(non_camel_case_types)]
 pub struct Ctap2_1_pre {
     tokinfo: GetInfoResponse,
     card: NFCCard,
@@ -111,11 +113,6 @@ impl NFCReader {
     }
 }
 
-#[derive(Debug)]
-enum Pdu<'b> {
-    Fragment(&'b [u8]),
-    Complete(&'b [u8]),
-}
 
 fn transmit(
     card: &Card,
@@ -170,8 +167,10 @@ impl NFCCard {
 
     /// Transmit multiple chunks of data to the card, and handle a chunked
     /// response.
-    fn transmit_chunks(&mut self, requests: &[ISO7816RequestAPDU]) -> Result<ISO7816ResponseAPDU, WebauthnCError>
-    {
+    fn transmit_chunks(
+        &mut self,
+        requests: &[ISO7816RequestAPDU],
+    ) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
         let mut r = EMPTY_RESPONSE;
 
         for chunk in requests {
@@ -203,89 +202,14 @@ impl NFCCard {
         Ok(r)
     }
 
-    /*
-    // This handles frag/defrag
-    fn transmit_pdu(&mut self, apdu: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
-        let mut ans = Vec::with_capacity(MAX_SHORT_BUFFER_SIZE);
-        let mut tx_buf = Vec::with_capacity(MAX_SHORT_BUFFER_SIZE);
-
-        // Fragmentation works by sending chunks with a frag_cmd, until you complete the chunks
-        // with a cmd that has the correct apply header.
-        //
-        // We reverse the list, so that if there is only a single chunk we apply the correct header
-        // in a generic way.
-        let mut pdu_chunk_iter = apdu.chunks(FRAG_MAX as usize).rev();
-
-        // For the "last" chunk, we need to signal that we are done, so we send this with the
-        // applet header.
-        let mut chunks = Vec::new();
-        match pdu_chunk_iter.next() {
-            Some(chunk_last) => chunks.push(Pdu::Complete(chunk_last)),
-            None => return Err(WebauthnCError::ApduTransmission),
-        };
-        // Now push the fragments
-        for chunk_next in pdu_chunk_iter {
-            chunks.push(Pdu::Fragment(chunk_next));
-        }
-
-        trace!("{:x?}", chunks);
-
-        let mut need_more = false;
-        for pdu in chunks.into_iter().rev() {
-            tx_buf.clear();
-            match pdu {
-                Pdu::Fragment(data) => {
-                    tx_buf.extend_from_slice(&FRAG_HDR);
-                    tx_buf.push(data.len() as u8);
-                    tx_buf.extend_from_slice(data);
-                }
-                Pdu::Complete(data) => {
-                    tx_buf.extend_from_slice(&HDR);
-                    tx_buf.push(data.len() as u8);
-                    tx_buf.extend_from_slice(data);
-                    tx_buf.push(0x00);
-                }
-            }
-            let status = self.transmit_raw(&tx_buf, &mut ans)?;
-
-            match pdu {
-                Pdu::Fragment(data) => {
-                    debug_assert!(ans.len() == 0);
-                    if status != ISO7816_STATUS_OK {
-                        return Err(WebauthnCError::ApduTransmission);
-                    }
-                }
-                Pdu::Complete(data) => {
-                    if status == ISO7816_STATUS_OK {
-                        // All good :)
-                        continue;
-                    } else if status == [0x61, 0x00] {
-                        need_more = true;
-                    } else {
-                        return Err(WebauthnCError::ApduTransmission);
-                    }
-                }
-            }
-            trace!(?need_more);
-        }
-
-        if need_more {
-            // We need to req more ...
-        }
-
-        // https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html#error-responses
-        let ctap_status = ans.remove(0);
-        debug!("{:x?}", ctap_status);
-
-        Ok(ans)
-    }
-    */
 
     fn authenticator_get_info(&mut self) -> Result<GetInfoResponse, WebauthnCError> {
         let apdus = (GetInfoRequest {}).to_short_apdus();
         let resp = self.transmit_chunks(&apdus)?;
-        GetInfoResponse::try_from(resp.data.as_slice()).map_err(|e| {
-            error!(?e);
+
+        // CTAP has its own extra status code over NFC in the first byte.
+        GetInfoResponse::try_from(&resp.data[1..]).map_err(|e| {
+            error!("error: {:?}", e);
             WebauthnCError::Cbor
         })
     }

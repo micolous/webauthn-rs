@@ -1,12 +1,11 @@
-use serde::{Deserialize, Serialize};
-use serde_cbor::{from_slice, value::to_value, Value};
+use serde::{Serialize};
+use serde_cbor::{from_slice, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use webauthn_rs_proto::{PubKeyCredParams, RelyingParty, User};
 
 #[cfg(feature = "nfc")]
-use crate::nfc::iso7816::ISO7816RequestAPDU;
-#[cfg(feature = "nfc")]
 use crate::nfc::apdu::FRAG_MAX;
+#[cfg(feature = "nfc")]
+use crate::nfc::iso7816::ISO7816RequestAPDU;
 
 pub mod get_info;
 pub mod make_credential;
@@ -14,14 +13,13 @@ pub mod make_credential;
 pub use self::get_info::*;
 pub use self::make_credential::*;
 
-
 pub trait CBORCommand: Serialize + Sized {
     /// CTAP comand byte
     const CMD: u8;
 
     /// If true (default), then the command has a payload, which will be
     /// serialized into CBOR format.
-    /// 
+    ///
     /// If false, then the command has no payload.
     const HAS_PAYLOAD: bool = true;
 
@@ -142,4 +140,21 @@ fn value_to_u32(v: Value, loc: &str) -> Option<u32> {
         error!("Invalid type for {}: {:?}", loc, v);
         None
     }
+}
+
+// TODO: switch to #derive
+#[macro_export]
+macro_rules! deserialize_cbor {
+    ($name:ident) => {
+        impl TryFrom<&[u8]> for $name {
+            type Error = ();
+
+            fn try_from(i: &[u8]) -> Result<Self, Self::Error> {
+                from_slice(&i).map_err(|e| {
+                    error!("deserialise: {:?}", e);
+                    ()
+                })
+            }
+        }
+    };
 }

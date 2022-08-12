@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_cbor::{from_slice, value::to_value, Value};
+use serde_cbor::Value;
 
 use self::CBORCommand;
 use super::*;
@@ -38,6 +38,7 @@ impl TryFrom<GetInfoResponseDict> for GetInfoResponse {
     type Error = &'static str;
 
     fn try_from(mut raw: GetInfoResponseDict) -> Result<Self, Self::Error> {
+        trace!("raw = {:?}", raw);
         let versions = raw
             .keys
             .remove(&0x01)
@@ -161,17 +162,58 @@ impl TryFrom<GetInfoResponseDict> for GetInfoResponse {
     }
 }
 
-impl TryFrom<&[u8]> for GetInfoResponse {
-    type Error = ();
+crate::deserialize_cbor!(GetInfoResponse);
 
-    fn try_from(rapdu: &[u8]) -> Result<Self, Self::Error> {
-        if cfg!(debug) {
-            let v: Result<Value, _> = from_slice(&rapdu);
-            trace!("got APDU Value response: {:?}", v);
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        let agir = from_slice(&rapdu);
-        trace!(?agir);
-        agir.map_err(|e| ())
+    #[test]
+    fn get_info_response_nfc_usb() {
+        let _ = tracing_subscriber::fmt().try_init();
+
+        let raw_apdu: Vec<u8> = vec![
+            170, 1, 131, 102, 85, 50, 70, 95, 86, 50, 104, 70, 73, 68, 79, 95, 50, 95, 48, 108, 70,
+            73, 68, 79, 95, 50, 95, 49, 95, 80, 82, 69, 2, 130, 107, 99, 114, 101, 100, 80, 114,
+            111, 116, 101, 99, 116, 107, 104, 109, 97, 99, 45, 115, 101, 99, 114, 101, 116, 3, 80,
+            47, 192, 87, 159, 129, 19, 71, 234, 177, 22, 187, 90, 141, 185, 32, 42, 4, 165, 98,
+            114, 107, 245, 98, 117, 112, 245, 100, 112, 108, 97, 116, 244, 105, 99, 108, 105, 101,
+            110, 116, 80, 105, 110, 245, 117, 99, 114, 101, 100, 101, 110, 116, 105, 97, 108, 77,
+            103, 109, 116, 80, 114, 101, 118, 105, 101, 119, 245, 5, 25, 4, 176, 6, 129, 1, 7, 8,
+            8, 24, 128, 9, 130, 99, 110, 102, 99, 99, 117, 115, 98, 10, 130, 162, 99, 97, 108, 103,
+            38, 100, 116, 121, 112, 101, 106, 112, 117, 98, 108, 105, 99, 45, 107, 101, 121, 162,
+            99, 97, 108, 103, 39, 100, 116, 121, 112, 101, 106, 112, 117, 98, 108, 105, 99, 45,
+            107, 101, 121,
+        ];
+
+        let a = GetInfoResponse::try_from(raw_apdu.as_slice()).expect("Falied to decode apdu");
+
+        // Assert the content
+        // info!(?a);
+
+        assert!(a.versions.len() == 3);
+        assert!(a.versions.contains("U2F_V2"));
+        assert!(a.versions.contains("FIDO_2_0"));
+        assert!(a.versions.contains("FIDO_2_1_PRE"));
+
+        assert!(a.extensions == Some(vec!["credProtect".to_string(), "hmac-secret".to_string()]));
+        assert!(
+            a.aaguid
+                == vec![47, 192, 87, 159, 129, 19, 71, 234, 177, 22, 187, 90, 141, 185, 32, 42]
+        );
+
+        let m = a.options.as_ref().unwrap();
+        assert!(m.len() == 5);
+        assert!(m.get("clientPin") == Some(&true));
+        assert!(m.get("credentialMgmtPreview") == Some(&true));
+        assert!(m.get("plat") == Some(&false));
+        assert!(m.get("rk") == Some(&true));
+        assert!(m.get("up") == Some(&true));
+
+        assert!(a.max_msg_size == Some(1200));
+        assert!(a.max_cred_count_in_list == Some(8));
+        assert!(a.max_cred_id_len == Some(128));
+
+        assert!(a.transports == Some(vec!["nfc".to_string(), "usb".to_string()]));
     }
 }
