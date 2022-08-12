@@ -172,8 +172,14 @@ impl ISO7816ResponseAPDU {
         }
     }
 
+    /// **CTAP proprietary**: `true` if the card expects a `NFCCTAP_GETRESPONSE`
+    /// command to get the actual response.
+    pub fn ctap_needs_get_response(&self) -> bool {
+        self.sw1 == 0x91 && self.sw2 == 0x00
+    }
+
     pub fn is_success(&self) -> bool {
-        self.is_ok() || self.bytes_available() > 0
+        self.is_ok() || self.bytes_available() > 0 || self.ctap_needs_get_response()
     }
 }
 

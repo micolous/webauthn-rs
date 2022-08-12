@@ -180,6 +180,10 @@ impl NFCCard {
             }
         }
 
+        if r.ctap_needs_get_response() {
+            unimplemented!("NFCCTAP_GETRESPONSE");
+        }
+
         if r.bytes_available() == 0 {
             return Ok(r);
         }

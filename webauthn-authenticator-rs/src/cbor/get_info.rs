@@ -38,7 +38,7 @@ impl TryFrom<GetInfoResponseDict> for GetInfoResponse {
     type Error = &'static str;
 
     fn try_from(mut raw: GetInfoResponseDict) -> Result<Self, Self::Error> {
-        trace!("raw = {:?}", raw);
+        // trace!("raw = {:?}", raw);
         let versions = raw
             .keys
             .remove(&0x01)
