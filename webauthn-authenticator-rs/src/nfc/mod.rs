@@ -28,6 +28,7 @@ pub struct NFCCard {
     atr: Atr,
 }
 
+#[warn(non_camel_case_types)]
 pub enum Selected {
     // FIDO_2_1(),
     FIDO_2_1_PRE(Ctap2_1_pre),
@@ -35,6 +36,7 @@ pub enum Selected {
     // U2F(),
 }
 
+#[warn(non_camel_case_types)]
 pub struct Ctap2_1_pre {
     tokinfo: AuthenticatorGetInfoResponse,
     card: NFCCard,
@@ -118,7 +120,7 @@ enum Pdu<'b> {
 
 fn transmit(
     card: &Card,
-    request: ISO7816RequestAPDU,
+    request: &ISO7816RequestAPDU,
     form: ISO7816LengthForm,
 ) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
     let req = request.to_bytes(form).map_err(|e| {
@@ -159,37 +161,50 @@ impl NFCCard {
         return card;
     }
 
-    fn transmit_raw(
-        &mut self,
-        tx_buf: &[u8],
-        rx_buf: &mut Vec<u8>,
-    ) -> Result<[u8; 2], WebauthnCError> {
-        trace!(">>> {:02x?}", tx_buf);
-        let mut rapdu_buf = vec![0; MAX_SHORT_BUFFER_SIZE];
-        // The returned slice gives us the correct lengths of what
-        // was filled to buf.
-        let rapdu = self
-            .card_ref
-            .transmit(&tx_buf, &mut rapdu_buf)
-            .map_err(|e| {
-                error!("Failed to transmit APDU command to card: {}", e);
-                WebauthnCError::ApduTransmission
-            })?;
-
-        trace!("<<< {:02x?}", rapdu);
-        let (data, status) = rapdu.split_at(rapdu.len() - 2);
-        rx_buf.extend_from_slice(data);
-        Ok(status.try_into().expect("Status not 2 bytes??!?!?!"))
-    }
-
     fn transmit(
         &mut self,
-        request: ISO7816RequestAPDU,
+        request: &ISO7816RequestAPDU,
         form: ISO7816LengthForm,
     ) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
         transmit(&self.card_ref, request, form)
     }
 
+    /// Transmit multiple chunks of data to the card, and handle a chunked
+    /// response.
+    fn transmit_chunks(&mut self, requests: &[ISO7816RequestAPDU]) -> Result<ISO7816ResponseAPDU, WebauthnCError>
+    {
+        let mut r = EMPTY_RESPONSE;
+
+        for chunk in requests {
+            r = self.transmit(chunk, ISO7816LengthForm::ShortOnly)?;
+            if !r.is_success() {
+                return Err(WebauthnCError::ApduTransmission);
+            }
+        }
+
+        if r.bytes_available() == 0 {
+            return Ok(r);
+        }
+
+        let mut response_data = Vec::new();
+        response_data.extend_from_slice(&r.data);
+
+        while r.bytes_available() > 0 {
+            r = self.transmit(
+                &get_response(0x80, r.bytes_available()),
+                ISO7816LengthForm::ShortOnly,
+            )?;
+            if !r.is_success() {
+                return Err(WebauthnCError::ApduTransmission);
+            }
+            response_data.extend_from_slice(&r.data);
+        }
+
+        r.data = response_data;
+        Ok(r)
+    }
+
+    /*
     // This handles frag/defrag
     fn transmit_pdu(&mut self, apdu: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
         let mut ans = Vec::with_capacity(MAX_SHORT_BUFFER_SIZE);
@@ -265,10 +280,12 @@ impl NFCCard {
 
         Ok(ans)
     }
+    */
 
     fn authenticator_get_info(&mut self) -> Result<AuthenticatorGetInfoResponse, WebauthnCError> {
-        let rapdu = self.transmit_pdu(&AUTHENTICATOR_GET_INFO_APDU)?;
-        AuthenticatorGetInfoResponse::try_from(rapdu.as_slice()).map_err(|e| {
+        let apdus = (AuthenticatorGetInfo {}).to_short_apdus();
+        let resp = self.transmit_chunks(&apdus)?;
+        AuthenticatorGetInfoResponse::try_from(resp.data.as_slice()).map_err(|e| {
             error!(?e);
             WebauthnCError::Cbor
         })
@@ -277,7 +294,7 @@ impl NFCCard {
     // Need a way to select the type of card now.
     pub fn select_u2f_v2_applet(mut self) -> Result<Selected, WebauthnCError> {
         let resp = self
-            .transmit(select_by_df_name(&APPLET_DF), ISO7816LengthForm::ShortOnly)
+            .transmit(&select_by_df_name(&APPLET_DF), ISO7816LengthForm::ShortOnly)
             .expect("Failed to select CTAP2.1 applet");
 
         if !resp.is_ok() {
@@ -340,8 +357,9 @@ impl Ctap2_1_pre {
             pin_uv_auth_proto: None,
             enterprise_attest: None,
         };
-        let pdu = mc.to_apdu();
-        let rapdu = self.card.transmit_pdu(&pdu)?;
+        // TODO: handle extended APDUs
+        let pdus = mc.to_short_apdus();
+        let rapdu = self.card.transmit_chunks(&pdus)?;
         trace!("got encoded APDU: {:x?}", rapdu);
 
         Ok(())

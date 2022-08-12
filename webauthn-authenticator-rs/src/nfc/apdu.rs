@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use base64urlsafedata::Base64UrlSafeData;
 use webauthn_rs_proto::{PubKeyCredParams, PublicKeyCredentialDescriptor, RelyingParty, User};
 
+use super::iso7816::*;
+
 // https://en.wikipedia.org/wiki/Smart_card_application_protocol_data_unit
 
 pub const ISO7816_STATUS_OK: [u8; 2] = [0x90, 0x00];
@@ -15,26 +17,7 @@ pub const APPLET_DF: [u8; 8] = [
     /* RID */ 0xA0, 0x00, 0x00, 0x06, 0x47, /* PIX */ 0x2F, 0x00, 0x01,
 ];
 
-pub const APPLET_SELECT_CMD: [u8; 13] = [
-    /* CLA */ 0x00, /* INS */ 0xA4, /* P1 */ 0x04, /* P2 */ 0x00,
-    /* Lc: len(RID + PIX) */ 0x08, /* RID */ 0xA0, 0x00, 0x00, 0x06, 0x47,
-    /* PIX */ 0x2F, 0x00, 0x01, /* Le = 256 */
-];
-
-// HACK HACK
-pub const BAD_APPLET_SELECT_CMD: [u8; 21] = [
-    /* CLA */ 0x00, /* INS */ 0xA4, /* P1 */ 0x04, /* P2 */ 0x00,
-    /* Lc: len(RID + PIX) */ 0, 0, 0x0b, /* RID */ 0xA0, 0x00, 0x00, 0, 0,
-    /* PIX */ 1, 1, 1, 1, 1, 1, /* Le = 256 */ 0x00, 0, 0,
-];
-
-pub const FRAG_MAX: u8 = 0xF0;
-pub const FRAG_HDR: [u8; 4] = [0x90, 0x10, 0x00, 0x00];
-pub const HDR: [u8; 4] = [0x80, 0x10, 0x00, 0x00];
-
-// https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html#authenticatorGetInfo
-pub const AUTHENTICATOR_GET_INFO_APDU: [u8; 1] = [0x4];
-
+pub const FRAG_MAX: usize = 0xF0;
 pub const MAX_SHORT_BUFFER_SIZE: usize = 256;
 pub const MAX_EXT_BUFFER_SIZE: usize = 65536;
 
@@ -268,17 +251,66 @@ impl TryFrom<&[u8]> for AuthenticatorGetInfoResponse {
     }
 }
 
-pub trait ToNfcApdu: Serialize + Sized {
+pub trait ToISO7816RequestAPDU: Serialize + Sized {
     const CMD: u8;
+    const HAS_PAYLOAD: bool = true;
 
-    fn to_apdu(&self) -> Vec<u8> {
+    fn cbor(&self) -> Vec<u8> {
+        if !Self::HAS_PAYLOAD {
+            return vec![Self::CMD];
+        }
+
+        // CTAP v2.1, s8.3.5 (Framing)
         let b = serde_cbor::to_vec(self).unwrap();
-
         let mut x = Vec::with_capacity(b.len() + 1);
         x.push(Self::CMD);
         x.extend_from_slice(&b);
         x
     }
+
+    fn to_short_apdus(&self) -> Vec<ISO7816RequestAPDU> {
+        let cbor = self.cbor();
+        let chunks = cbor.chunks(FRAG_MAX).rev();
+        let mut o = Vec::with_capacity(chunks.len());
+        let mut last = true;
+
+        for chunk in chunks {
+            o.insert(
+                0,
+                ISO7816RequestAPDU {
+                    cla: if last { 0x80 } else { 0x90 },
+                    ins: 0x10,
+                    p1: 0x00,
+                    p2: 0x00,
+                    data: chunk.to_vec(),
+                    ne: if last { 256 } else { 0 },
+                },
+            );
+            last = false;
+        }
+
+        o
+    }
+
+    fn to_extended_apdu(&self) -> ISO7816RequestAPDU {
+        ISO7816RequestAPDU {
+            cla: 0x80,
+            ins: 0x10,
+            p1: 0x00,
+            p2: 0x00,
+            data: self.cbor(),
+            ne: 0xFFFF,
+        }
+    }
+}
+
+// https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html#authenticatorGetInfo
+#[derive(Serialize, Debug, Clone)]
+pub struct AuthenticatorGetInfo {}
+
+impl ToISO7816RequestAPDU for AuthenticatorGetInfo {
+    const CMD: u8 = 0x04;
+    const HAS_PAYLOAD: bool = false;
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -296,7 +328,7 @@ pub struct AuthenticatorMakeCredential {
     pub(crate) enterprise_attest: Option<u32>,
 }
 
-impl ToNfcApdu for AuthenticatorMakeCredential {
+impl ToISO7816RequestAPDU for AuthenticatorMakeCredential {
     const CMD: u8 = 0x01;
 }
 
@@ -516,8 +548,20 @@ mod tests {
         let v2: Result<Value, _> = from_slice(b.as_slice());
         info!("got APDU Value encoded: {:?}", v2);
 
-        let pdu = mc.to_apdu();
+        let pdu = mc.to_short_apdus();
         info!("got APDU: {:?}", pdu);
         info!("got inner APDU: {:?}", b);
+    }
+ 
+    #[test]
+    fn get_authenticator_info() {
+        let req = AuthenticatorGetInfo {};
+        let ext = vec![0x80, 0x10, 0, 0, 0, 0, 1, 0x4, 0, 0xff, 0xff];
+
+        assert_eq!(
+            ext,
+            req.to_extended_apdu().to_bytes(ISO7816LengthForm::Extended).unwrap()
+        );
+
     }
 }

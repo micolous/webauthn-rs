@@ -16,20 +16,21 @@ pub enum Error {
 /// The form to use for `Lc` and `Le` in request APDUs, per ISO/IEC 7816-4:2005
 /// §5.1.
 pub enum ISO7816LengthForm {
-    /// Only use short form (1 byte). This limits ISO7816RequestAPDU.data.len()
-    /// to 255 bytes, and ISO7816RequestAPDU.ne to 256 bytes.
+    /// Only use short form (1 byte). This limits
+    /// `ISO7816RequestAPDU.data.len()` to 255 bytes, and
+    /// `ISO7816RequestAPDU.ne` to 256 bytes.
     ShortOnly,
     /// Automatically use extended form (3 bytes), if the request requires it.
     /// This may only be used if the card declares support for it in the ATR.
     Extended,
     /// Always use extended form, even if the request does not require it.
     /// This may only be used if the card declares support for it in the ATR.
-    /// This is probably only useful for testing.`
+    /// This is probably only useful for testing.
     ExtendedOnly,
 }
 
 #[derive(Debug, Clone)] // Serialize, ?
-pub struct ISO7816RequestAPDU<'a> {
+pub struct ISO7816RequestAPDU {
     /// Instruction class.
     pub cla: u8,
     /// Instruction code.
@@ -39,7 +40,7 @@ pub struct ISO7816RequestAPDU<'a> {
     /// Parameter 2.
     pub p2: u8,
     /// Optional command data.
-    pub data: &'a [u8],
+    pub data: Vec<u8>,
 
     /// The maximum allowed response length from the card, in bytes.
     ///
@@ -67,7 +68,8 @@ fn push_length_value(buf: &mut Vec<u8>, value: u16, extended_form: bool) -> Resu
     Ok(())
 }
 
-impl ISO7816RequestAPDU<'_> {
+impl ISO7816RequestAPDU {
+    /// Serializes a request APDU into bytes to send to the card.
     pub fn to_bytes(&self, form: ISO7816LengthForm) -> Result<Vec<u8>, Error> {
         let extended_form = match form {
             ISO7816LengthForm::Extended => self.ne > 256 || self.data.len() > 255,
@@ -119,7 +121,7 @@ impl ISO7816RequestAPDU<'_> {
             extended_form,
         )?;
         if self.data.len() > 0 {
-            buf.extend_from_slice(self.data);
+            buf.extend_from_slice(&self.data);
         }
         push_length_value(&mut buf, self.ne, extended_form)?;
 
@@ -137,6 +139,7 @@ pub struct ISO7816ResponseAPDU {
 impl<'a> TryFrom<&[u8]> for ISO7816ResponseAPDU {
     type Error = self::Error;
 
+    /// Attempts to deserialize a ISO/IEC 7816-4 response APDU.
     fn try_from(raw: &[u8]) -> Result<Self, Error> {
         if raw.len() < 2 {
             Err(Error::ResponseTooShort)
@@ -151,10 +154,12 @@ impl<'a> TryFrom<&[u8]> for ISO7816ResponseAPDU {
 }
 
 impl ISO7816ResponseAPDU {
+    /// True if the response from the card was a simple "OK".
     pub fn is_ok(&self) -> bool {
         self.sw1 == 0x90 && self.sw2 == 0x00
     }
 
+    /// Non-zero if the card responded that further data bytes are available.
     pub fn bytes_available(&self) -> u16 {
         if self.sw1 == 0x61 {
             if self.sw2 == 0x00 {
@@ -166,30 +171,49 @@ impl ISO7816ResponseAPDU {
             0
         }
     }
+
+    pub fn is_success(&self) -> bool {
+        self.is_ok() || self.bytes_available() > 0
+    }
 }
 
-pub fn select_by_df_name<'a>(df: &'a [u8]) -> ISO7816RequestAPDU<'a> {
+pub fn select_by_df_name(df: &[u8]) -> ISO7816RequestAPDU {
     ISO7816RequestAPDU {
         cla: 0x00,
         ins: 0xA4, // SELECT
         p1: 0x04,  // By DF name
         p2: 0x00,  // First or only occurrence
-        data: df,
+        data: df.to_vec(),
         ne: 256,
     }
 }
 
-const EMPTY: [u8; 0] = [];
+/// ISO/IEC 7816-4:2005 s7.6.1
+pub fn get_response(cla: u8, ne: u16) -> ISO7816RequestAPDU {
+    ISO7816RequestAPDU {
+        cla: cla,
+        ins: 0xC0, // GET RESPONSE
+        p1: 0x00,
+        p2: 0x00,
+        data: vec![],
+        ne: ne,
+    }
+}
 
-pub const GET_HISTORICAL_BYTES: ISO7816RequestAPDU<'static> = ISO7816RequestAPDU {
+pub const GET_HISTORICAL_BYTES: ISO7816RequestAPDU = ISO7816RequestAPDU {
     cla: 0x00,
     ins: 0xCA,
     p1: 0x5F,
     p2: 0x51,
-    data: &EMPTY,
+    data: vec![],
     ne: 32,
 };
 
+pub const EMPTY_RESPONSE: ISO7816ResponseAPDU = ISO7816ResponseAPDU {
+    data: vec![],
+    sw1: 0,
+    sw2: 0,
+};
 
 #[cfg(test)]
 mod tests {
@@ -208,7 +232,7 @@ mod tests {
         )*
         }
     }
-    
+
     macro_rules! length_errors {
         ($($name:ident: $value:expr,)*) => {
         $(
