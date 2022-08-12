@@ -123,7 +123,7 @@ fn transmit(
         error!("Failed to build APDU command: {:?}", e);
         WebauthnCError::ApduConstruction
     })?;
-    let mut resp = vec![0; (request.ne + 2).into()];
+    let mut resp = vec![0; MAX_BUFFER_SIZE_EXTENDED];
 
     trace!(">>> {:02x?}", req);
 
