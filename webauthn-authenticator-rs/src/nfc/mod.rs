@@ -26,7 +26,7 @@ pub struct NFCReader {
 pub struct NFCCard {
     // rdr: &'a NFCReader,
     card_ref: Card,
-    atr: Atr,
+    pub atr: Atr,
 }
 
 #[allow(non_camel_case_types)]
@@ -140,6 +140,15 @@ fn transmit(
     })
 }
 
+const DESELECT_APPLET: ISO7816RequestAPDU = ISO7816RequestAPDU {
+    cla: 0x80,
+    ins: 0x12,
+    p1: 0x01,
+    p2: 0x00,
+    data: vec![],
+    ne: 256,
+};
+
 impl NFCCard {
     pub fn new(card_ref: Card) -> NFCCard {
         let mut names_buf = vec![0; MAX_BUFFER_SIZE];
@@ -157,8 +166,8 @@ impl NFCCard {
         return card;
     }
 
-    fn transmit(
-        &mut self,
+    pub fn transmit(
+        &self,
         request: &ISO7816RequestAPDU,
         form: ISO7816LengthForm,
     ) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
@@ -167,8 +176,8 @@ impl NFCCard {
 
     /// Transmit multiple chunks of data to the card, and handle a chunked
     /// response.
-    fn transmit_chunks(
-        &mut self,
+    pub fn transmit_chunks(
+        &self,
         requests: &[ISO7816RequestAPDU],
     ) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
         let mut r = EMPTY_RESPONSE;
@@ -206,8 +215,7 @@ impl NFCCard {
         Ok(r)
     }
 
-
-    fn authenticator_get_info(&mut self) -> Result<GetInfoResponse, WebauthnCError> {
+    pub fn authenticator_get_info(&mut self) -> Result<GetInfoResponse, WebauthnCError> {
         let apdus = (GetInfoRequest {}).to_short_apdus().unwrap();
         let resp = self.transmit_chunks(&apdus)?;
 
@@ -290,6 +298,18 @@ impl Ctap2_1_pre {
         trace!("got encoded APDU: {:x?}", rapdu);
 
         Ok(())
+    }
+
+    pub fn deselect_applet(&self) -> Result<(), WebauthnCError> {
+        let resp = self.card
+            .transmit(&DESELECT_APPLET, ISO7816LengthForm::ShortOnly)
+            .expect("Failed to deselect CTAP2.1 applet");
+
+        if !resp.is_ok() {
+            Err(WebauthnCError::ApduTransmission)
+        } else {
+            Ok(())
+        }
     }
 }
 

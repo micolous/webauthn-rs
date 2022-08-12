@@ -1,7 +1,6 @@
 use pcsc::*;
 use std::ffi::CStr;
 
-use webauthn_authenticator_rs::nfc::apdu::*;
 use webauthn_authenticator_rs::nfc::*;
 
 fn access_card(card: NFCCard) {
@@ -12,6 +11,7 @@ fn access_card(card: NFCCard) {
             info!("Using token {:?}", token);
 
             token.hack_make_cred();
+            token.deselect_applet();
         }
         _ => {
             unimplemented!();
