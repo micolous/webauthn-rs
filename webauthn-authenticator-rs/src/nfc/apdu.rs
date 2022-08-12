@@ -9,15 +9,13 @@ pub const APPLET_DF: [u8; 8] = [
 ];
 
 pub const FRAG_MAX: usize = 0xF0;
-pub const MAX_SHORT_BUFFER_SIZE: usize = 256;
-pub const MAX_EXT_BUFFER_SIZE: usize = 65536;
 
 #[cfg(test)]
 mod tests {
     //use super::*;
-    use crate::cbor::get_info::*;
+    use crate::cbor::*;
     use crate::cbor::CBORCommand;
-    use crate::nfc::iso7816::*;
+    use crate::nfc::*;
 
     #[cfg(feature = "nfc")]
     #[test]

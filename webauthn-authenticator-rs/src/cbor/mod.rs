@@ -3,12 +3,10 @@ use serde_cbor::{from_slice, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[cfg(feature = "nfc")]
-use crate::nfc::apdu::FRAG_MAX;
-#[cfg(feature = "nfc")]
-use crate::nfc::iso7816::ISO7816RequestAPDU;
+use crate::nfc::{FRAG_MAX, ISO7816RequestAPDU};
 
-pub mod get_info;
-pub mod make_credential;
+mod get_info;
+mod make_credential;
 
 pub use self::get_info::*;
 pub use self::make_credential::*;
@@ -23,6 +21,7 @@ pub trait CBORCommand: Serialize + Sized {
     /// If false, then the command has no payload.
     const HAS_PAYLOAD: bool = true;
 
+    /// Converts a command into a binary form.
     fn cbor(self: &Self) -> Result<Vec<u8>, serde_cbor::Error> {
         // CTAP v2.1, s8.2.9.1.2 (USB CTAPHID_CBOR), s8.3.5 (NFC framing).
         // TODO: BLE is different, it includes a u16 length after the command?
@@ -37,6 +36,8 @@ pub trait CBORCommand: Serialize + Sized {
         Ok(x)
     }
 
+    /// Converts a command into a form suitable for transmission with short
+    /// ISO/IEC 7816-4 APDUs.
     #[cfg(feature = "nfc")]
     fn to_short_apdus(&self) -> Result<Vec<ISO7816RequestAPDU>, serde_cbor::Error> {
         let cbor = self.cbor()?;
@@ -62,6 +63,8 @@ pub trait CBORCommand: Serialize + Sized {
         Ok(o)
     }
 
+    /// Converts a command into a form suitable for transmission with extended
+    /// ISO/IEC 7816-4 APDUs.
     #[cfg(feature = "nfc")]
     fn to_extended_apdu(&self) -> Result<ISO7816RequestAPDU, serde_cbor::Error> {
         Ok(ISO7816RequestAPDU {

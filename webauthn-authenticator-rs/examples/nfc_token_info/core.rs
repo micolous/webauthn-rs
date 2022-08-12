@@ -1,6 +1,3 @@
-use pcsc::*;
-use std::ffi::CStr;
-
 use webauthn_authenticator_rs::nfc::*;
 
 fn access_card(card: NFCCard) {

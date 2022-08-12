@@ -14,16 +14,16 @@ struct MakeCredentialRequestRawDict {
 #[derive(Serialize, Debug, Clone)]
 #[serde(into = "MakeCredentialRequestRawDict")]
 pub struct MakeCredentialRequest {
-    pub(crate) client_data_hash: Vec<u8>,
-    pub(crate) rp: RelyingParty,
-    pub(crate) user: User,
-    pub(crate) pub_key_cred_params: Vec<PubKeyCredParams>,
+    pub client_data_hash: Vec<u8>,
+    pub rp: RelyingParty,
+    pub user: User,
+    pub pub_key_cred_params: Vec<PubKeyCredParams>,
     // exclude_list: Option<Vec<PublicKeyCredentialDescriptor>>,
     // extensions:
-    pub(crate) options: Option<BTreeMap<String, bool>>,
-    pub(crate) pin_uv_auth_param: Option<Vec<u8>>,
-    pub(crate) pin_uv_auth_proto: Option<u32>,
-    pub(crate) enterprise_attest: Option<u32>,
+    pub options: Option<BTreeMap<String, bool>>,
+    pub pin_uv_auth_param: Option<Vec<u8>>,
+    pub pin_uv_auth_proto: Option<u32>,
+    pub enterprise_attest: Option<u32>,
 }
 
 impl CBORCommand for MakeCredentialRequest {
@@ -40,7 +40,7 @@ impl From<MakeCredentialRequest> for MakeCredentialRequestRawDict {
             options,
             pin_uv_auth_param,
             pin_uv_auth_proto,
-            enterprise_attest,
+            enterprise_attest: _,
         } = value;
 
         let mut keys = BTreeMap::new();

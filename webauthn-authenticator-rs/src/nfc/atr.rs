@@ -6,8 +6,10 @@ use super::tlv::*;
 ///
 /// This supports a subset of the structure needed for working with FIDO tokens.
 ///
-/// In addition to the standards,
-/// * https://smartcard-atr.apdu.fr/:
+/// In addition to the standards:
+///
+/// * ATR decoder: <https://smartcard-atr.apdu.fr/>
+/// * Series about ATR bytes: <https://ludovicrousseau.blogspot.com/2016/01/atr-list-study.html>
 #[derive(Debug, Clone, PartialEq)]
 pub struct Atr {
     /// Supported protocols (T=), specified in ISO/IEC 7816-3:2006 §8.2.3.

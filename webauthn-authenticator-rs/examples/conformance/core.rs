@@ -1,6 +1,4 @@
 use webauthn_authenticator_rs::nfc::*;
-use webauthn_authenticator_rs::nfc::apdu::*;
-use webauthn_authenticator_rs::nfc::iso7816::*;
 
 #[derive(Debug)]
 enum TestResult {

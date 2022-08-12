@@ -7,14 +7,14 @@ use pcsc::*;
 use std::ffi::CString;
 use std::fmt;
 
-pub mod apdu;
-pub mod atr;
-pub mod iso7816;
+mod apdu;
+mod atr;
+mod iso7816;
 mod tlv;
 
-use self::apdu::*;
-use self::atr::*;
-use self::iso7816::*;
+pub use self::apdu::*;
+pub use self::atr::*;
+pub use self::iso7816::*;
 use super::cbor::*;
 
 pub struct NFCReader {
@@ -166,6 +166,7 @@ impl NFCCard {
         return card;
     }
 
+    /// Transmits a single ISO 7816-4 APDU to the card.
     pub fn transmit(
         &self,
         request: &ISO7816RequestAPDU,
@@ -175,7 +176,7 @@ impl NFCCard {
     }
 
     /// Transmit multiple chunks of data to the card, and handle a chunked
-    /// response.
+    /// response. All requests must be transmittable in short form.
     pub fn transmit_chunks(
         &self,
         requests: &[ISO7816RequestAPDU],
@@ -226,7 +227,7 @@ impl NFCCard {
         })
     }
 
-    // Need a way to select the type of card now.
+    /// Selects the U2Fv2 applet.
     pub fn select_u2f_v2_applet(mut self) -> Result<Selected, WebauthnCError> {
         let resp = self
             .transmit(&select_by_df_name(&APPLET_DF), ISO7816LengthForm::ShortOnly)
