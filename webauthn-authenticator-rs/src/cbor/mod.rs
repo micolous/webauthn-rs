@@ -23,23 +23,23 @@ pub trait CBORCommand: Serialize + Sized {
     /// If false, then the command has no payload.
     const HAS_PAYLOAD: bool = true;
 
-    fn cbor(self: &Self) -> Vec<u8> {
+    fn cbor(self: &Self) -> Result<Vec<u8>, serde_cbor::Error> {
         // CTAP v2.1, s8.2.9.1.2 (USB CTAPHID_CBOR), s8.3.5 (NFC framing).
         // TODO: BLE is different, it includes a u16 length after the command?
         if !Self::HAS_PAYLOAD {
-            return vec![Self::CMD];
+            return Ok(vec![Self::CMD]);
         }
 
-        let b = serde_cbor::to_vec(self).unwrap();
+        let b = serde_cbor::to_vec(self)?;
         let mut x = Vec::with_capacity(b.len() + 1);
         x.push(Self::CMD);
         x.extend_from_slice(&b);
-        x
+        Ok(x)
     }
 
     #[cfg(feature = "nfc")]
-    fn to_short_apdus(&self) -> Vec<ISO7816RequestAPDU> {
-        let cbor = self.cbor();
+    fn to_short_apdus(&self) -> Result<Vec<ISO7816RequestAPDU>, serde_cbor::Error> {
+        let cbor = self.cbor()?;
         let chunks = cbor.chunks(FRAG_MAX).rev();
         let mut o = Vec::with_capacity(chunks.len());
         let mut last = true;
@@ -59,19 +59,19 @@ pub trait CBORCommand: Serialize + Sized {
             last = false;
         }
 
-        o
+        Ok(o)
     }
 
     #[cfg(feature = "nfc")]
-    fn to_extended_apdu(&self) -> ISO7816RequestAPDU {
-        ISO7816RequestAPDU {
+    fn to_extended_apdu(&self) -> Result<ISO7816RequestAPDU, serde_cbor::Error> {
+        Ok(ISO7816RequestAPDU {
             cla: 0x80,
             ins: 0x10,
             p1: 0x00,
             p2: 0x00,
-            data: self.cbor(),
+            data: self.cbor()?,
             ne: 0xFFFF,
-        }
+        })
     }
 }
 

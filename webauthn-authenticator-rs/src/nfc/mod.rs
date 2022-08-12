@@ -208,7 +208,7 @@ impl NFCCard {
 
 
     fn authenticator_get_info(&mut self) -> Result<GetInfoResponse, WebauthnCError> {
-        let apdus = (GetInfoRequest {}).to_short_apdus();
+        let apdus = (GetInfoRequest {}).to_short_apdus().unwrap();
         let resp = self.transmit_chunks(&apdus)?;
 
         // CTAP has its own extra status code over NFC in the first byte.
@@ -285,7 +285,7 @@ impl Ctap2_1_pre {
             enterprise_attest: None,
         };
         // TODO: handle extended APDUs
-        let pdus = mc.to_short_apdus();
+        let pdus = mc.to_short_apdus().unwrap();
         let rapdu = self.card.transmit_chunks(&pdus)?;
         trace!("got encoded APDU: {:x?}", rapdu);
 
