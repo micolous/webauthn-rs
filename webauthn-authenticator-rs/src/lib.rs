@@ -35,6 +35,7 @@ pub mod prelude {
 pub mod error;
 pub mod softpasskey;
 pub mod softtoken;
+pub mod cbor;
 
 #[cfg(feature = "nfc")]
 pub mod nfc;

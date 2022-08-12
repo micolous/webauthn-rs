@@ -15,6 +15,7 @@ mod tlv;
 use self::apdu::*;
 use self::atr::*;
 use self::iso7816::*;
+use super::cbor::*;
 
 pub struct NFCReader {
     ctx: Context,
@@ -28,7 +29,6 @@ pub struct NFCCard {
     atr: Atr,
 }
 
-#[warn(non_camel_case_types)]
 pub enum Selected {
     // FIDO_2_1(),
     FIDO_2_1_PRE(Ctap2_1_pre),
@@ -36,9 +36,8 @@ pub enum Selected {
     // U2F(),
 }
 
-#[warn(non_camel_case_types)]
 pub struct Ctap2_1_pre {
-    tokinfo: AuthenticatorGetInfoResponse,
+    tokinfo: GetInfoResponse,
     card: NFCCard,
 }
 
@@ -282,10 +281,10 @@ impl NFCCard {
     }
     */
 
-    fn authenticator_get_info(&mut self) -> Result<AuthenticatorGetInfoResponse, WebauthnCError> {
-        let apdus = (AuthenticatorGetInfo {}).to_short_apdus();
+    fn authenticator_get_info(&mut self) -> Result<GetInfoResponse, WebauthnCError> {
+        let apdus = (GetInfoRequest {}).to_short_apdus();
         let resp = self.transmit_chunks(&apdus)?;
-        AuthenticatorGetInfoResponse::try_from(resp.data.as_slice()).map_err(|e| {
+        GetInfoResponse::try_from(resp.data.as_slice()).map_err(|e| {
             error!(?e);
             WebauthnCError::Cbor
         })
@@ -334,7 +333,7 @@ impl fmt::Debug for Ctap2_1_pre {
 
 impl Ctap2_1_pre {
     pub fn hack_make_cred(&mut self) -> Result<(), WebauthnCError> {
-        let mc = AuthenticatorMakeCredential {
+        let mc = MakeCredentialRequest {
             client_data_hash: vec![
                 104, 113, 52, 150, 130, 34, 236, 23, 32, 46, 66, 80, 95, 142, 210, 177, 106, 226,
                 47, 22, 187, 5, 184, 140, 37, 219, 158, 96, 38, 69, 241, 65,
