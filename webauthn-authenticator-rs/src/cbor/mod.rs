@@ -1,9 +1,9 @@
-use serde::{Serialize};
+use serde::Serialize;
 use serde_cbor::{from_slice, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[cfg(feature = "nfc")]
-use crate::nfc::{FRAG_MAX, ISO7816RequestAPDU};
+use crate::nfc::{ISO7816RequestAPDU, FRAG_MAX};
 
 mod get_info;
 mod make_credential;

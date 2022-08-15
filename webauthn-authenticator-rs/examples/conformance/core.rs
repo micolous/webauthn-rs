@@ -18,7 +18,10 @@ fn test_extended_lc(card: &NFCCard) -> TestResult {
 
     // Test with Le = 256 in extended mode
     let resp = card
-        .transmit(&select_by_df_name(&APPLET_DF), ISO7816LengthForm::ExtendedOnly)
+        .transmit(
+            &select_by_df_name(&APPLET_DF),
+            ISO7816LengthForm::ExtendedOnly,
+        )
         .expect("Failed to select applet");
 
     // Check error codes
@@ -32,7 +35,7 @@ fn test_extended_lc(card: &NFCCard) -> TestResult {
 /// Checks whether the card is checking the provided AID length when testing
 /// against its own applet, by selecting applets with extra bytes after the real
 /// AID.
-/// 
+///
 /// Yubikey 5 NFC fails this test.
 fn test_incorrect_aid(card: &NFCCard) -> TestResult {
     // Prepare a buffer with extra junk
@@ -48,7 +51,7 @@ fn test_incorrect_aid(card: &NFCCard) -> TestResult {
             .expect("Failed to select applet");
 
         if resp.is_ok() {
-            return TestResult::Fail
+            return TestResult::Fail;
         }
     }
 
@@ -59,9 +62,9 @@ fn test_select_zero_ne(card: &NFCCard) -> TestResult {
     let mut req = select_by_df_name(&APPLET_DF);
     req.ne = 0;
     let resp = card
-            .transmit(&req, ISO7816LengthForm::ShortOnly)
-            .expect("Failed to select applet");
-        
+        .transmit(&req, ISO7816LengthForm::ShortOnly)
+        .expect("Failed to select applet");
+
     if !resp.is_success() {
         // We should always get an "OK" response...
         return TestResult::Fail;
@@ -76,8 +79,8 @@ fn test_select_zero_ne(card: &NFCCard) -> TestResult {
     // Repeat with correct length
     req.ne = resp.bytes_available();
     let resp = card
-            .transmit(&req, ISO7816LengthForm::ShortOnly)
-            .expect("Failed to select applet");
+        .transmit(&req, ISO7816LengthForm::ShortOnly)
+        .expect("Failed to select applet");
 
     if !resp.is_ok() {
         // Correct Ne should have worked?
@@ -101,7 +104,7 @@ fn test_select_truncation(card: &NFCCard) -> TestResult {
         let resp = card
             .transmit(&req, ISO7816LengthForm::ShortOnly)
             .expect("Failed to select applet");
-        
+
         if !resp.is_success() {
             // We should always get an "OK" response...
             return TestResult::Fail;
@@ -123,12 +126,10 @@ fn test_select_truncation(card: &NFCCard) -> TestResult {
             // We reached the end
             break;
         }
-        
     }
-    
+
     TestResult::Pass
 }
-
 
 fn test_card(card: NFCCard) {
     info!("Card detected ...");
@@ -143,14 +144,13 @@ fn test_card(card: NFCCard) {
         ("Select with zero Ne", test_select_zero_ne),
         ("Select with truncated Ne", test_select_truncation),
     ];
-    
+
     for (name, testfn) in &TESTS {
         println!("Test: {}", name);
         let res = testfn(&card);
         println!("  Result: {:?}", res);
     }
 }
-
 
 pub(crate) fn main() {
     let mut reader = NFCReader::default();

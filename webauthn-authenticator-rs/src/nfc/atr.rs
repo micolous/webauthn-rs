@@ -2,14 +2,27 @@ use pcsc::*;
 
 use super::tlv::*;
 
-/// ISO/IEC 7816-3 and -4 answer-to-reset structure for smart cards.
+/// ISO/IEC 7816-3 _Answer-to-Reset_ and 7816-4 _Historical Bytes_ parser.
 ///
-/// This supports a subset of the structure needed for working with FIDO tokens.
+/// This supports a subset of the standards needed for compatibility with FIDO
+/// tokens, and is intentionally incomplete.
 ///
-/// In addition to the standards:
+/// References:
 ///
-/// * ATR decoder: <https://smartcard-atr.apdu.fr/>
-/// * Series about ATR bytes: <https://ludovicrousseau.blogspot.com/2016/01/atr-list-study.html>
+/// * "Answer-to-Reset", ISO/IEC 7816-3:2005 §8.2
+/// * "Historical bytes", ISO/IEC 7816-4:2006 §8.1.1
+/// * "ATR, Contactless Smart Cards", [PC/SC Specification][pcsc] Part 3,
+///   §3.1.3.2.3.1
+/// * "ATR, Contactless Storage Cards", [PC/SC Specification][pcsc] Part 3,
+///   §3.1.3.2.3.2
+///
+/// Other resources:
+///
+/// * [pyscard ATR decoder](https://smartcard-atr.apdu.fr/)
+/// * [Ludovic Rousseau's series about ATR bytes](https://ludovicrousseau.blogspot.com/2016/01/atr-list-study.html)
+/// * [Wikipedia: Answer to reset](https://en.wikipedia.org/wiki/Answer_to_reset)
+///
+/// [pcsc]: https://pcscworkgroup.com/specifications/download/
 #[derive(Debug, Clone, PartialEq)]
 pub struct Atr {
     /// Supported protocols (T=), specified in ISO/IEC 7816-3:2006 §8.2.3.
@@ -18,9 +31,12 @@ pub struct Atr {
     /// Historical Bytes, specified in ISO/IEC 7816-4:2005 §8.1.1.
     pub t1: Vec<u8>,
 
-    /// If true, the device is a contactless storage card per PC/SC
-    /// Specification Book 3, §3.1.3.2.3.2. Further clarification is available,
-    /// but is beyond the scope of this module.
+    /// If true, the device is a contactless storage card per
+    /// [PC/SC Specification][pcsc] Part 3, §3.1.3.2.3.2, and Part 3
+    /// Supplemental Document.
+    ///
+    /// Further clarification is available, but is beyond the scope of this
+    /// module – FIDO tokens are not storage cards!
     pub storage_card: bool,
 
     /// Card issuer's data (ISO/IEC 7816-4:2005 §8.1.1.2.5). The structure of
@@ -39,7 +55,7 @@ pub struct Atr {
     /// (ISO/IEC 7816-4:2005 §5.1) – which allows `Nc` (command data length) and
     /// `Ne` (maximum expected response length) values from 257 to 65536 bytes.
     ///
-    /// If this value is set to None, the card did not provide a "card
+    /// If this value is set to `None`, the card did not provide a "card
     /// capabilities" value (§8.1.1.2.7), and therefore does not support
     /// extended fields (§5.1).
     ///

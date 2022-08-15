@@ -1,7 +1,5 @@
 // https://en.wikipedia.org/wiki/Smart_card_application_protocol_data_unit
 
-pub const ISO7816_STATUS_OK: [u8; 2] = [0x90, 0x00];
-
 pub const APPLET_U2F_V2: [u8; 6] = [0x55, 0x32, 0x46, 0x5f, 0x56, 0x32];
 pub const APPLET_FIDO_2_0: [u8; 8] = [0x46, 0x49, 0x44, 0x4f, 0x5f, 0x32, 0x5f, 0x30];
 pub const APPLET_DF: [u8; 8] = [
@@ -13,8 +11,8 @@ pub const FRAG_MAX: usize = 0xF0;
 #[cfg(test)]
 mod tests {
     //use super::*;
-    use crate::cbor::*;
     use crate::cbor::CBORCommand;
+    use crate::cbor::*;
     use crate::nfc::*;
 
     #[cfg(feature = "nfc")]

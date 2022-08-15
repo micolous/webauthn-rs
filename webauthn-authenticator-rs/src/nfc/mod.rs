@@ -113,7 +113,6 @@ impl NFCReader {
     }
 }
 
-
 fn transmit(
     card: &Card,
     request: &ISO7816RequestAPDU,
@@ -302,7 +301,8 @@ impl Ctap2_1_pre {
     }
 
     pub fn deselect_applet(&self) -> Result<(), WebauthnCError> {
-        let resp = self.card
+        let resp = self
+            .card
             .transmit(&DESELECT_APPLET, ISO7816LengthForm::ShortOnly)
             .expect("Failed to deselect CTAP2.1 applet");
 
