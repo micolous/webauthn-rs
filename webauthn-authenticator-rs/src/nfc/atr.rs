@@ -1,6 +1,7 @@
 use pcsc::*;
 
 use super::tlv::*;
+use super::iso7816::ISO7816LengthForm;
 
 /// ISO/IEC 7816-3 _Answer-to-Reset_ and 7816-4 _Historical Bytes_ parser.
 ///
@@ -25,51 +26,64 @@ use super::tlv::*;
 /// [pcsc]: https://pcscworkgroup.com/specifications/download/
 #[derive(Debug, Clone, PartialEq)]
 pub struct Atr {
-    /// Supported protocols (T=), specified in ISO/IEC 7816-3:2006 §8.2.3.
+    /// Supported protocols (`T=`), specified in ISO/IEC 7816-3:2006 §8.2.3.
     pub protocols: Vec<u8>,
 
-    /// Historical Bytes, specified in ISO/IEC 7816-4:2005 §8.1.1.
+    /// Historical bytes (T<sub>1</sub> .. T<sub>k</sub>), as specified in
+    /// ISO/IEC 7816-4:2005 §8.1.1.
     pub t1: Vec<u8>,
 
-    /// If true, the device is a contactless storage card per
+    /// If `true`, this is a contactless storage card per
     /// [PC/SC Specification][pcsc] Part 3, §3.1.3.2.3.2, and Part 3
     /// Supplemental Document.
     ///
-    /// Further clarification is available, but is beyond the scope of this
-    /// module – FIDO tokens are not storage cards!
+    /// Further clarification is available in the historical bytes
+    /// ([`Self::t1`]), but is beyond the scope of this module.
+    ///
+    /// FIDO tokens should always return `false`.
     pub storage_card: bool,
 
     /// Card issuer's data (ISO/IEC 7816-4:2005 §8.1.1.2.5). The structure of
     /// this value is defined by the card issuer. This sometimes contains a
-    /// printable string identifying the card issuer.
+    /// printable string identifying the card issuer (see
+    /// [`Self::card_issuers_data_str()`]).
     pub card_issuers_data: Option<Vec<u8>>,
 
     /// Whether the card supports command chaining (ISO/IEC 7816-4:2005
-    /// §5.1.1.1). This allows the card to pass responses of
+    /// §5.1.1.1). This allows sending commands longer than 255 bytes using only
+    /// short form L<sub>c</sub>.
     ///
     /// If this value is set to None, the card did not provide a "card
     /// capabilities" value (ISO/IEC 7816-4:2005 §8.1.1.2.7).
     pub command_chaining: Option<bool>,
 
-    /// Whether the card supports extended (3 byte) `Lc` and `Le` fields
-    /// (ISO/IEC 7816-4:2005 §5.1) – which allows `Nc` (command data length) and
-    /// `Ne` (maximum expected response length) values from 257 to 65536 bytes.
+    /// Whether the card supports extended (3 byte) L<sub>c</sub> and
+    /// L<sub>e</sub> fields (ISO/IEC 7816-4:2005 §5.1) – which allows
+    /// N<sub>c</sub> (command data length) and N<sub>e</sub> (maximum expected
+    /// response length) values from 257 to 65536 bytes.
     ///
     /// If this value is set to `None`, the card did not provide a "card
     /// capabilities" value (§8.1.1.2.7), and therefore does not support
     /// extended fields (§5.1).
     ///
     /// **Note:** Some devices falsely report that they support extended
-    /// `Lc`/`Le`, eg: [Yubikey](https://smartcard-atr.apdu.fr/parse?ATR=3b+8d+80+01+80+73+c0+21+c0+57+59+75+62+69+4b+65+79+f9)
+    /// L<sub>c</sub>/L<sub>e</sub>, eg:
+    /// [Yubikey](https://smartcard-atr.apdu.fr/parse?ATR=3b+8d+80+01+80+73+c0+21+c0+57+59+75+62+69+4b+65+79+f9)
+    /// 
+    /// See: [`ISO7816LengthForm`]
     pub extended_lc: Option<bool>,
 }
 
 const PROTOCOL_T0: [u8; 1] = [0];
+
+/// PC/SC AID, per [PC/SC Specification][pcsc] Part 3 Supplemental Document.
 const PCSC_AID: [u8; 5] = [0xa0, 0x00, 0x00, 0x03, 0x06];
+
+/// Minimum response length for PC/SC storage card data in the ATR.
 const PCSC_RESPONSE_LEN: usize = 6 + PCSC_AID.len();
 
 /// Validates check byte TCK according to ISO/IEC 7816-3:2006 §8.2.5: XOR'ing
-/// all bytes from T0 to TCK inclusive should return zero.
+/// all bytes from T<sub>0</sub> to TCK inclusive should return zero.
 fn checksum(i: &[u8]) -> bool {
     let o = i[1..].iter().fold(0, |a, i| a ^ i);
 
@@ -188,7 +202,7 @@ impl<'a> TryFrom<&[u8]> for Atr {
 
 impl Atr {
     /// Converts [`Self::card_issuers_data`] to a UTF-8 encoded string.
-    /// 
+    ///
     /// Returns `None` if [`Self::card_issuers_data`] is missing, or if it
     /// contains invalid UTF-8.
     pub fn card_issuers_data_str(&self) -> Option<&str> {
@@ -247,7 +261,7 @@ mod tests {
 
         let actual = Atr::try_from(&input[..]).expect("yubico_security_key_c_nfc ATR");
         assert_eq!(expected, actual);
-        assert_eq!("YubiKey", actual.card_issuers_data_str());
+        assert_eq!("YubiKey", actual.card_issuers_data_str().unwrap());
     }
 
     #[test]
@@ -264,6 +278,7 @@ mod tests {
 
         let actual = Atr::try_from(&input[..]).expect("desfire_storage_card ATR");
         assert_eq!(expected, actual);
+        assert_eq!(None, actual.card_issuers_data_str());
     }
 
     #[test]
@@ -287,6 +302,7 @@ mod tests {
 
         let actual = Atr::try_from(&input[..]).expect("felica_storage_card ATR");
         assert_eq!(expected, actual);
+        assert_eq!(None, actual.card_issuers_data_str());
     }
 
     #[test]

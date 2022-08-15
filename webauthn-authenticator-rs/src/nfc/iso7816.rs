@@ -1,12 +1,12 @@
-// use serde::{Deserialize, Serialize};
+use super::atr::Atr;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
     /// [`ISO7816RequestAPDU.to_bytes()`]: `data` was too long for the given
     /// length form.
     DataTooLong,
-    /// [`ISO7816RequestAPDU.to_bytes()`]: `ne` was too long for the given length
-    /// form.
+    /// [`ISO7816RequestAPDU.to_bytes()`]: `ne` was too long for the given
+    /// length form.
     NeTooLong,
     /// [`push_length_value()`]: The given value cannot be represented in short
     /// form.
@@ -15,8 +15,8 @@ pub enum Error {
     ResponseTooShort,
 }
 
-/// The form to use for `Lc` and `Le` in [`ISO7816RequestAPDU`], per ISO/IEC
-/// 7816-4:2005 §5.1.
+/// The L<sub>c</sub> and L<sub>e</sub> form to use for [`ISO7816RequestAPDU`],
+/// per ISO/IEC 7816-4:2005 §5.1.
 pub enum ISO7816LengthForm {
     /// Only use short form (1 byte). This limits
     /// [`ISO7816RequestAPDU::data`] to 255 bytes, and
@@ -57,8 +57,8 @@ pub struct ISO7816RequestAPDU {
     /// the ATR ([`Atr::extended_lc`]).
     pub data: Vec<u8>,
 
-    /// The maximum expected response length from the card (`Ne`), in bytes, up
-    /// to 256 bytes in short form, or 65535 bytes in extended form.
+    /// The maximum expected response length from the card (N<sub>e</sub>), in
+    /// bytes, up to 256 bytes in short form, or 65535 bytes in extended form.
     ///
     /// Extended form can only be used on cards that declare support for it in
     /// the ATR ([`Atr::extended_lc`]).
