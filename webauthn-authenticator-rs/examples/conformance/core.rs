@@ -39,7 +39,7 @@ fn test_extended_lc(card: &NFCCard) -> TestResult {
 /// Yubikey 5 NFC fails this test.
 fn test_incorrect_aid(card: &NFCCard) -> TestResult {
     // Prepare a buffer with extra junk
-    let mut aid = [255; 0xFF];
+    let mut aid = [0xFF; 16];
     aid[..APPLET_DF.len()].copy_from_slice(&APPLET_DF);
 
     for l in APPLET_DF.len() + 1..aid.len() {
@@ -103,7 +103,7 @@ fn test_select_zero_ne(card: &NFCCard) -> TestResult {
 
 fn test_select_truncation(card: &NFCCard) -> TestResult {
     let mut req = select_by_df_name(&APPLET_DF);
-    let mut true_len: u16 = 0;
+    let mut true_len: usize = 0;
 
     for ne in 1..256 {
         req.ne = ne;
@@ -164,9 +164,9 @@ fn test_card(card: NFCCard) {
     let mut failures: Vec<(&str, &str)> = Vec::with_capacity(TESTS.len());
 
     for (name, testfn) in &TESTS {
-        println!("Test: {}", name);
+        println!("Started test: {}", name);
         let res = testfn(&card);
-        println!("  Result: {:?}", res);
+        println!("Finished test: {}, Result: {:?}", name, res);
 
         match res {
             TestResult::Pass => passes.push(name),
@@ -176,6 +176,15 @@ fn test_card(card: NFCCard) {
     }
 
     println!("# Conformance tests finished!");
+    println!("");
+    println!("{:?}", card.atr);
+    match card.atr.card_issuers_data_str() {
+        Some(s) => println!("Card issuer's data: {}", s),
+        None => match card.atr.card_issuers_data {
+            Some(d) => println!("Card issuer's data: {:02x?}", d),
+            None => (),
+        },
+    }
     println!("");
     println!("## {}/{} tests passed:", passes.len(), TESTS.len());
     println!("");
@@ -200,6 +209,8 @@ fn test_card(card: NFCCard) {
             println!("* {} ({})", n, m);
         }
     }
+    println!("");
+    println!("Tip: run with `RUST_LOG=trace` to see raw APDUs");
 }
 
 pub(crate) fn main() {

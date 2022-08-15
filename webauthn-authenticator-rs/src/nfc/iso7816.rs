@@ -15,19 +15,26 @@ pub enum Error {
     ResponseTooShort,
 }
 
-/// The form to use for `Lc` and `Le` in request APDUs, per ISO/IEC 7816-4:2005
-/// §5.1.
+/// The form to use for `Lc` and `Le` in [`ISO7816RequestAPDU`], per ISO/IEC
+/// 7816-4:2005 §5.1.
 pub enum ISO7816LengthForm {
     /// Only use short form (1 byte). This limits
-    /// `ISO7816RequestAPDU.data.len()` to 255 bytes, and
-    /// `ISO7816RequestAPDU.ne` to 256 bytes.
+    /// [`ISO7816RequestAPDU::data`] to 255 bytes, and
+    /// [`ISO7816RequestAPDU::ne`] to 256 bytes.
+    ///
+    /// This mode is always supported.
     ShortOnly,
     /// Automatically use extended form (3 bytes), if the request requires it.
-    /// This may only be used if the card declares support for it in the ATR.
+    ///
+    /// This may only be used if the card declares support for it in the ATR
+    /// ([`Atr::extended_lc`]).
     Extended,
     /// Always use extended form, even if the request does not require it.
-    /// This may only be used if the card declares support for it in the ATR.
-    /// This is probably only useful for testing.
+    ///
+    /// This may only be used if the card declares support for it in the ATR
+    /// ([`Atr::extended_lc`]).
+    ///
+    /// _This is probably only useful for testing._
     ExtendedOnly,
 }
 
@@ -42,33 +49,39 @@ pub struct ISO7816RequestAPDU {
     pub p1: u8,
     /// Parameter byte 2 (`P2`).
     pub p2: u8,
+
     /// Optional command data, up to 255 bytes in short form, or up to 65535
     /// bytes in extended form.
+    ///
+    /// Extended form can only be used on cards that declare support for it in
+    /// the ATR ([`Atr::extended_lc`]).
     pub data: Vec<u8>,
 
     /// The maximum expected response length from the card (`Ne`), in bytes, up
     /// to 256 bytes in short form, or 65535 bytes in extended form.
     ///
-    /// This library doesn't support responses of 65336 bytes, even though it
-    /// would be allowed by ISO/IEC 7816-4.
-    pub ne: u16,
+    /// Extended form can only be used on cards that declare support for it in
+    /// the ATR ([`Atr::extended_lc`]).
+    pub ne: usize,
 }
 
 /// Pushes a length value to a mutable buffer, optionally using ISO/IEC 7816-4
 /// extended form.
-fn push_length_value(buf: &mut Vec<u8>, value: u16, extended_form: bool) -> Result<(), Error> {
+fn push_length_value(buf: &mut Vec<u8>, value: usize, extended_form: bool) -> Result<(), Error> {
     if value == 0 {
         // do nothing
+    } else if value > 65536 {
+        return Err(Error::IntegerOverflow);
     } else if extended_form {
         // uint16be prefixed with 0
         buf.push(0);
-        buf.push((value >> 8).try_into().unwrap());
-        buf.push((value & 0xff).try_into().unwrap());
+        buf.push(((value >> 8) & 0xff) as u8);
+        buf.push((value & 0xff) as u8);
     } else if value > 256 {
         return Err(Error::IntegerOverflow);
     } else {
         // 256 = 0x00, 1 = 0x01, 255 = 0xFF
-        buf.push((value & 0xff).try_into().unwrap());
+        buf.push((value & 0xff) as u8);
     }
     Ok(())
 }
@@ -137,8 +150,11 @@ impl ISO7816RequestAPDU {
 /// ISO/IEC 7816-4 response APDU.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ISO7816ResponseAPDU {
+    /// Response data field.
     pub data: Vec<u8>,
+    /// Status byte 1 (`SW1`, ISO/IEC 7816-4:2005 §5.1.3).
     pub sw1: u8,
+    /// Status byte 2 (`SW2`, ISO/IEC 7816-4:2005 §5.1.3).
     pub sw2: u8,
 }
 
@@ -160,13 +176,14 @@ impl<'a> TryFrom<&[u8]> for ISO7816ResponseAPDU {
 }
 
 impl ISO7816ResponseAPDU {
-    /// True if the response from the card was a simple "OK".
+    /// True if the response from the card was a simple "OK" (`90 00`).
     pub fn is_ok(&self) -> bool {
         self.sw1 == 0x90 && self.sw2 == 0x00
     }
 
-    /// Non-zero if the card responded that further data bytes are available.
-    pub fn bytes_available(&self) -> u16 {
+    /// Non-zero if the card responded that further data bytes are available
+    /// (`61 XX`), which can be retrieved with [`get_response()`].
+    pub fn bytes_available(&self) -> usize {
         if self.sw1 == 0x61 {
             if self.sw2 == 0x00 {
                 256
@@ -179,19 +196,22 @@ impl ISO7816ResponseAPDU {
     }
 
     /// **CTAP proprietary**: `true` if the card expects a `NFCCTAP_GETRESPONSE`
-    /// command to get the actual response.
+    /// command to get the actual response (`91 00`).
     pub fn ctap_needs_get_response(&self) -> bool {
         self.sw1 == 0x91 && self.sw2 == 0x00
     }
 
+    /// `true` if the card returned a success-like response ([`Self::is_ok()`],
+    /// [`Self::bytes_available()`] > 0, or
+    /// [`Self::ctap_needs_get_response()`]).
     pub fn is_success(&self) -> bool {
         self.is_ok() || self.bytes_available() > 0 || self.ctap_needs_get_response()
     }
 }
 
-/// Selects an application by DF (directory file) name.
+/// Selects an application by DF (directory file) name, of up to 16 bytes.
 ///
-/// Reference: ISO/IEC 7816-4:2005 §7.1.1.
+/// Reference: ISO/IEC 7816-4:2005 §5.3.1, §7.1.1.
 pub fn select_by_df_name(df: &[u8]) -> ISO7816RequestAPDU {
     ISO7816RequestAPDU {
         cla: 0x00,
@@ -207,7 +227,7 @@ pub fn select_by_df_name(df: &[u8]) -> ISO7816RequestAPDU {
 /// the previous [`ISO7816RequestAPDU.ne`].
 ///
 /// Reference: ISO/IEC 7816-4:2005 §7.6.1
-pub fn get_response(cla: u8, ne: u16) -> ISO7816RequestAPDU {
+pub fn get_response(cla: u8, ne: usize) -> ISO7816RequestAPDU {
     ISO7816RequestAPDU {
         cla: cla,
         ins: 0xC0, // GET RESPONSE
@@ -234,7 +254,7 @@ mod tests {
         $(
             #[test]
             fn $name() {
-                let (input, extended_form, expected): (u16, bool, &[u8]) = $value;
+                let (input, extended_form, expected): (usize, bool, &[u8]) = $value;
                 let mut b = Vec::with_capacity(expected.len());
                 assert!(push_length_value(&mut b, input, extended_form).is_ok());
                 assert_eq!(expected, b);
@@ -248,7 +268,7 @@ mod tests {
         $(
             #[test]
             fn $name() {
-                let (input, extended_form): (u16, bool) = $value;
+                let (input, extended_form): (usize, bool) = $value;
                 let mut b = Vec::with_capacity(0);
                 let r = push_length_value(&mut b, input, extended_form);
                 assert_eq!(Error::IntegerOverflow, r.unwrap_err());
@@ -320,11 +340,15 @@ mod tests {
         length_256_short: (256, false, &[0x00]),
         length_256_long: (256, true, &[0x00, 0x01, 0x00]),
         length_65535_long: (65535, true, &[0x00, 0xff, 0xff]),
+        length_65536_long: (65536, true, &[0x00, 0x00, 0x00]),
     }
 
     length_errors! {
         length_257_short: (257, false),
         length_65535_short: (65535, false),
+        length_65536_short: (65536, false),
+        length_65537_short: (65537, false),
+        length_65537_long: (65537, true),
     }
 
     command_tests! {

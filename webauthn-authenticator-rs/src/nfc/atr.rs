@@ -186,6 +186,18 @@ impl<'a> TryFrom<&[u8]> for Atr {
     }
 }
 
+impl Atr {
+    /// Converts [`Self::card_issuers_data`] to a UTF-8 encoded string.
+    /// 
+    /// Returns `None` if [`Self::card_issuers_data`] is missing, or if it
+    /// contains invalid UTF-8.
+    pub fn card_issuers_data_str(&self) -> Option<&str> {
+        std::str::from_utf8(&self.card_issuers_data.as_ref()?)
+            .map(|v| Some(v))
+            .unwrap_or(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,6 +223,7 @@ mod tests {
 
         let actual = Atr::try_from(&input[..]).expect("yubikey_5_nfc ATR");
         assert_eq!(expected, actual);
+        assert_eq!(None, actual.card_issuers_data_str());
     }
 
     #[test]
@@ -234,6 +247,7 @@ mod tests {
 
         let actual = Atr::try_from(&input[..]).expect("yubico_security_key_c_nfc ATR");
         assert_eq!(expected, actual);
+        assert_eq!("YubiKey", actual.card_issuers_data_str());
     }
 
     #[test]
