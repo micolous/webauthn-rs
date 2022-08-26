@@ -19,6 +19,7 @@ all-features = true
 
 [dependencies]
 base64urlsafedata = { path = "../base64urlsafedata" }
+cbor_derive = { path = "../cbor_derive" }
 webauthn-rs-proto = { version = "0.4.2-beta.6", path = "../webauthn-rs-proto" }
 
 tracing = "0.1"
@@ -40,4 +41,3 @@ serde = { version = "1.0", features = ["derive"] }
 webauthn-rs-core = { path = "../webauthn-rs-core" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "std", "fmt"] }
 base64 = "0.13"
-

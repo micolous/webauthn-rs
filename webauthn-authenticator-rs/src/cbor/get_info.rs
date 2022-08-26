@@ -1,3 +1,4 @@
+use cbor_derive::CborMessage;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value;
 
@@ -13,91 +14,29 @@ impl CBORCommand for GetInfoRequest {
     const HAS_PAYLOAD: bool = false;
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct GetInfoResponseDict {
-    #[serde(flatten)]
-    pub keys: BTreeMap<u32, Value>,
-}
-
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, CborMessage)]
 #[serde(try_from = "GetInfoResponseDict")]
 pub struct GetInfoResponse {
-    pub versions: BTreeSet<String>,
+    #[cbor_field(0x01)]
+    pub versions: Option<BTreeSet<String>>,
+    #[cbor_field(0x02)]
     pub extensions: Option<Vec<String>>,
-    pub aaguid: Vec<u8>,
+    #[cbor_field(0x03)]
+    pub aaguid: Option<Vec<u8>>,
+    #[cbor_field(0x04)]
     pub options: Option<BTreeMap<String, bool>>,
+    #[cbor_field(0x05)]
     pub max_msg_size: Option<u32>,
+    #[cbor_field(0x06)]
     pub pin_protocols: Option<Vec<u32>>,
+    #[cbor_field(0x07)]
     pub max_cred_count_in_list: Option<u32>,
+    #[cbor_field(0x08)]
     pub max_cred_id_len: Option<u32>,
+    #[cbor_field(0x09)]
     pub transports: Option<Vec<String>>,
+    #[cbor_field(0x0a)]
     pub algorithms: Option<Value>,
-}
-
-impl TryFrom<GetInfoResponseDict> for GetInfoResponse {
-    type Error = &'static str;
-
-    fn try_from(mut raw: GetInfoResponseDict) -> Result<Self, Self::Error> {
-        // trace!("raw = {:?}", raw);
-        let versions = raw
-            .keys
-            .remove(&0x01)
-            .and_then(|v| value_to_set_string(v, "0x01"))
-            .ok_or("0x01")?;
-
-        let extensions = raw
-            .keys
-            .remove(&0x02)
-            .and_then(|v| value_to_vec_string(v, "0x02"));
-
-        let aaguid = raw
-            .keys
-            .remove(&0x03)
-            .and_then(|v| match v {
-                Value::Bytes(x) => Some(x),
-                _ => {
-                    error!("Invalid type for 0x03: {:?}", v);
-                    None
-                }
-            })
-            .ok_or("0x03")?;
-
-        let options = raw.keys.remove(&0x04).and_then(|v| {
-            if let Value::Map(v) = v {
-                let mut x = BTreeMap::new();
-                for (ka, va) in v.into_iter() {
-                    match (ka, va) {
-                        (Value::Text(s), Value::Bool(b)) => {
-                            x.insert(s, b);
-                        }
-                        _ => error!("Invalid value inside 0x04"),
-                    }
-                }
-                Some(x)
-            } else {
-                error!("Invalid type for 0x04: {:?}", v);
-                None
-            }
-        });
-
-        let max_msg_size = raw.keys.remove(&0x05).and_then(|v| value_to_u32(v, "0x05"));
-
-        let pin_protocols = raw
-            .keys
-            .remove(&0x06)
-            .and_then(|v| value_to_vec_u32(v, "0x06"));
-
-        let max_cred_count_in_list = raw.keys.remove(&0x07).and_then(|v| value_to_u32(v, "0x07"));
-
-        let max_cred_id_len = raw.keys.remove(&0x08).and_then(|v| value_to_u32(v, "0x08"));
-
-        let transports = raw
-            .keys
-            .remove(&0x09)
-            .and_then(|v| value_to_vec_string(v, "0x09"));
-
-        let algorithms = raw.keys.remove(&0x0A);
-        // .map(|v| );
 
         /*
         let max_ser_large_blob = raw.keys.remove(&0x0B)
@@ -133,36 +72,7 @@ impl TryFrom<GetInfoResponseDict> for GetInfoResponse {
         let vendor_prototype_config_cmds = raw.keys.remove(&0x15)
             .map(|v| );
         */
-
-        Ok(GetInfoResponse {
-            versions,
-            extensions,
-            aaguid,
-            options,
-            max_msg_size,
-            pin_protocols,
-            max_cred_count_in_list,
-            max_cred_id_len,
-            transports,
-            algorithms,
-            /*
-            max_ser_large_blob,
-            force_pin_change,
-            min_pin_len,
-            firmware_version,
-            max_cred_blob_len,
-            max_rpid_for_set_min_pin_len,
-            preferred_plat_uv_attempts,
-            uv_modality,
-            certifications,
-            remaining_discoverable_credentials,
-            vendor_prototype_config_cmds,
-            */
-        })
-    }
 }
-
-crate::deserialize_cbor!(GetInfoResponse);
 
 #[cfg(test)]
 mod tests {

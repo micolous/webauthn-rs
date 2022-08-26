@@ -1,6 +1,7 @@
 use serde::Serialize;
-use serde_cbor::{from_slice, Value};
+use serde_cbor::{from_slice, Value, value::to_value};
 use std::collections::{BTreeMap, BTreeSet};
+use webauthn_rs_proto::{PubKeyCredParams, RelyingParty, User};
 
 #[cfg(feature = "nfc")]
 use crate::nfc::{ISO7816RequestAPDU, FRAG_MAX};
@@ -78,73 +79,180 @@ pub trait CBORCommand: Serialize + Sized {
     }
 }
 
-fn value_to_vec_string(v: Value, loc: &str) -> Option<Vec<String>> {
-    if let Value::Array(v) = v {
-        let mut x = Vec::with_capacity(v.len());
-        for s in v.into_iter() {
-            if let Value::Text(s) = s {
-                x.push(s);
-            } else {
-                error!("Invalid value inside {}: {:?}", loc, s);
-            }
-        }
-        Some(x)
-    } else {
-        error!("Invalid type for {}: {:?}", loc, v);
-        None
-    }
+trait ConversionFunc where Self: Sized {
+    fn conv(v: Value, k: u32) -> Option<Self>;
+    fn rev(v: Self) -> Value;
 }
 
-fn value_to_set_string(v: Value, loc: &str) -> Option<BTreeSet<String>> {
-    if let Value::Array(v) = v {
-        let mut x = BTreeSet::new();
-        for s in v.into_iter() {
-            if let Value::Text(s) = s {
-                x.insert(s);
-            } else {
-                error!("Invalid value inside {}: {:?}", loc, s);
-            }
-        }
-        Some(x)
-    } else {
-        error!("Invalid type for {}: {:?}", loc, v);
-        None
-    }
-}
-
-fn value_to_vec_u32(v: Value, loc: &str) -> Option<Vec<u32>> {
-    if let Value::Array(v) = v {
-        let x = v
-            .into_iter()
-            .filter_map(|i| {
-                if let Value::Integer(i) = i {
-                    u32::try_from(i)
-                        .map_err(|_| error!("Invalid value inside {}: {:?}", loc, i))
-                        .ok()
-                } else {
-                    error!("Invalid type for {}: {:?}", loc, i);
-                    None
+impl ConversionFunc for BTreeMap<String, bool> {
+    fn conv(v: Value, k: u32) -> Option<BTreeMap<String, bool>> {
+        if let Value::Map(v) = v {
+            let mut x = BTreeMap::new();
+            for (ka, va) in v.into_iter() {
+                match (ka, va) {
+                    (Value::Text(s), Value::Bool(b)) => {
+                        x.insert(s, b);
+                    }
+                    _ => error!("Invalid value inside {}", k),
                 }
-            })
-            .collect();
-        Some(x)
-    } else {
-        error!("Invalid type for {}: {:?}", loc, v);
-        None
+            }
+            Some(x)
+        } else {
+            error!("Invalid type for {}: {:?}", k, v);
+            None
+        }
+    }
+    fn rev(v: BTreeMap<String, bool>) -> Value {
+        unimplemented!();
     }
 }
 
-fn value_to_u32(v: Value, loc: &str) -> Option<u32> {
-    if let Value::Integer(i) = v {
-        u32::try_from(i)
-            .map_err(|_| error!("Invalid value inside {}: {:?}", loc, i))
-            .ok()
-    } else {
-        error!("Invalid type for {}: {:?}", loc, v);
-        None
+impl ConversionFunc for BTreeSet<String> {
+    fn conv(v: Value, k: u32) -> Option<BTreeSet<String>> {
+        if let Value::Array(v) = v {
+            let mut x = BTreeSet::new();
+            for s in v.into_iter() {
+                if let Value::Text(s) = s {
+                    x.insert(s);
+                } else {
+                    error!("Invalid value inside {}: {:?}", k, s);
+                }
+            }
+            Some(x)
+        } else {
+            error!("Invalid type for {}: {:?}", k, v);
+            None
+        }
+    }
+    fn rev(v: BTreeSet<String>) -> Value {
+        unimplemented!();
     }
 }
 
+impl ConversionFunc for Vec<String> {
+    fn conv(v: Value, k: u32) -> Option<Vec<String>> {
+        if let Value::Array(v) = v {
+            let mut x = Vec::with_capacity(v.len());
+            for s in v.into_iter() {
+                if let Value::Text(s) = s {
+                    x.push(s);
+                } else {
+                    error!("Invalid value inside {}: {:?}", k, s);
+                }
+            }
+            Some(x)
+        } else {
+            error!("Invalid type for {}: {:?}", k, v);
+            None
+        }
+    }
+    fn rev(v: Vec<String>) -> Value {
+        unimplemented!();
+    }
+}
+
+impl ConversionFunc for u32 {
+    fn conv(v: Value, k: u32) -> Option<u32> {
+        if let Value::Integer(i) = v {
+            u32::try_from(i)
+                .map_err(|_| error!("Invalid value inside {}: {:?}", k, i))
+                .ok()
+        } else {
+            error!("Invalid type for {}: {:?}", k, v);
+            None
+        }
+    }
+    fn rev(v: u32) -> Value {
+        unimplemented!();
+    }
+}
+
+impl ConversionFunc for Vec<u32> {
+    fn conv(v: Value, k: u32) -> Option<Vec<u32>> {
+        if let Value::Array(v) = v {
+            let x = v
+                .into_iter()
+                .filter_map(|i| {
+                    if let Value::Integer(i) = i {
+                        u32::try_from(i)
+                            .map_err(|_| error!("Invalid value inside {}: {:?}", k, i))
+                            .ok()
+                    } else {
+                        error!("Invalid type for {}: {:?}", k, i);
+                        None
+                    }
+                })
+                .collect();
+            Some(x)
+        } else {
+            error!("Invalid type for {}: {:?}", k, v);
+            None
+        }
+    }
+    fn rev(v: Vec<u32>) -> Value {
+        unimplemented!();
+    }
+}
+
+impl ConversionFunc for Vec<u8> {
+    fn conv(v: Value, k: u32) -> Option<Vec<u8>> {
+        match v {
+            Value::Bytes(x) => Some(x),
+            _ => {
+                error!("Invalid type for {}: {:?}", k, v);
+                None
+            }
+        }
+    }
+    fn rev(v: Vec<u8>) -> Value {
+        Value::Bytes(v)
+    }
+}
+
+impl ConversionFunc for RelyingParty {
+    fn conv(v: Value, k: u32) -> Option<RelyingParty> {
+        unimplemented!();
+    }
+    fn rev(v: RelyingParty) -> Value {
+        to_value(v).expect("oops RelyingParty")
+    }
+}
+
+impl ConversionFunc for User {
+    fn conv(v: Value, k: u32) -> Option<User> {
+        unimplemented!();
+    }
+    fn rev(v: User) -> Value {
+        let mut user_map = BTreeMap::new();
+        info!("{:?}", v.id);
+        user_map.insert(Value::Text("id".to_string()), Value::Bytes(v.id.0));
+        user_map.insert(Value::Text("name".to_string()), Value::Text(v.name));
+        user_map.insert(
+            Value::Text("displayName".to_string()),
+            Value::Text(v.display_name),
+        );
+        Value::Map(user_map)
+    }
+}
+impl ConversionFunc for Vec<PubKeyCredParams> {
+    fn conv(v: Value, k: u32) -> Option<Vec<PubKeyCredParams>> {
+        unimplemented!();
+    }
+    fn rev(v: Vec<PubKeyCredParams>) -> Value {
+        to_value(v).expect("oops PubKeyCredParams")
+    }
+}
+
+impl ConversionFunc for Value {
+    fn conv(v: Value, _k: u32) -> Option<Value> {
+        Some(v)
+    }
+    fn rev(v: Value) -> Value {
+        v
+    }
+}
+
+/*
 // TODO: switch to #derive
 #[macro_export]
 macro_rules! deserialize_cbor {
@@ -161,3 +269,4 @@ macro_rules! deserialize_cbor {
         }
     };
 }
+*/

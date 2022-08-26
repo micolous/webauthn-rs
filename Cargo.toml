@@ -4,6 +4,7 @@
 members = [
     # Support Libraries
     "base64urlsafedata",
+    "cbor_derive",
     "webauthn-rs-proto",
     "webauthn-rs-core",
     # The actually library.

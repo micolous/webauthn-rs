@@ -1,28 +1,41 @@
+use cbor_derive::CborMessage;
 use serde::{Deserialize, Serialize};
 use serde_cbor::{value::to_value, Value};
 use std::collections::BTreeMap;
 use webauthn_rs_proto::{PubKeyCredParams, RelyingParty, User};
 
-use super::CBORCommand;
+use super::{CBORCommand, ConversionFunc};
 
+/*
 #[derive(Serialize, Deserialize, Debug)]
 struct MakeCredentialRequestRawDict {
     #[serde(flatten)]
     pub keys: BTreeMap<u32, Value>,
 }
+*/
 
-#[derive(Serialize, Debug, Clone)]
-#[serde(into = "MakeCredentialRequestRawDict")]
+#[derive(Serialize, Deserialize, Debug, Clone, CborMessage)]
+#[serde(into = "MakeCredentialRequestDict")]
 pub struct MakeCredentialRequest {
-    pub client_data_hash: Vec<u8>,
-    pub rp: RelyingParty,
-    pub user: User,
-    pub pub_key_cred_params: Vec<PubKeyCredParams>,
+    #[cbor_field(0x1)]
+    pub client_data_hash: Option<Vec<u8>>,
+    #[cbor_field(0x2)]
+    pub rp: Option<RelyingParty>,
+    #[cbor_field(0x3)]
+    pub user: Option<User>,
+    #[cbor_field(0x4)]
+    pub pub_key_cred_params: Option<Vec<PubKeyCredParams>>,
     // exclude_list: Option<Vec<PublicKeyCredentialDescriptor>>,
     // extensions:
+    #[cbor_field(0x7)]
     pub options: Option<BTreeMap<String, bool>>,
+    #[cbor_field(0x8)]
     pub pin_uv_auth_param: Option<Vec<u8>>,
+    #[cbor_field(0x9)]
     pub pin_uv_auth_proto: Option<u32>,
+
+    // TODO: fix this
+    #[cbor_field(0xa)]
     pub enterprise_attest: Option<u32>,
 }
 
@@ -30,6 +43,7 @@ impl CBORCommand for MakeCredentialRequest {
     const CMD: u8 = 0x01;
 }
 
+/*
 impl From<MakeCredentialRequest> for MakeCredentialRequestRawDict {
     fn from(value: MakeCredentialRequest) -> Self {
         let MakeCredentialRequest {
@@ -95,6 +109,7 @@ impl From<MakeCredentialRequest> for MakeCredentialRequestRawDict {
         MakeCredentialRequestRawDict { keys }
     }
 }
+*/
 
 #[cfg(test)]
 mod test {
@@ -183,20 +198,20 @@ mod test {
         info!("got APDU Value response: {:?}", v);
 
         let mc = MakeCredentialRequest {
-            client_data_hash: vec![0; 32],
-            rp: RelyingParty {
+            client_data_hash: Some(vec![0; 32]),
+            rp: Some(RelyingParty {
                 name: "test".to_string(),
                 id: "test".to_string(),
-            },
-            user: User {
+            }),
+            user: Some(User {
                 id: Base64UrlSafeData("test".as_bytes().into()),
                 name: "test".to_string(),
                 display_name: "test".to_string(),
-            },
-            pub_key_cred_params: vec![PubKeyCredParams {
+            }),
+            pub_key_cred_params: Some(vec![PubKeyCredParams {
                 type_: "public-key".to_string(),
                 alg: -7,
-            }],
+            }]),
             options: None,
             pin_uv_auth_param: None,
             pin_uv_auth_proto: None,
