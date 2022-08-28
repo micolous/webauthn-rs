@@ -51,6 +51,7 @@ pub fn cbor_map(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             pub keys: BTreeMap<serde_cbor::Value, serde_cbor::Value>,
         }
 
+        // Convert from $name to `map`
         impl From<#name> for #d {
             fn from(value: #name) -> Self {
                 let mut keys = BTreeMap::new();
@@ -58,16 +59,6 @@ pub fn cbor_map(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 #d { keys }
             }
         }
-
-                // // Convert $name to `map`
-                // impl TryFrom<#name> for #d {
-                //     type Error = &'static str;
-                //     fn try_from(value: #name) -> Result<Self, Self::Error> {
-                //         let mut keys = BTreeMap::new();
-                //         #struct_to_dict
-                //         Ok(#d { keys })
-                //     }
-                // }
         
         // Convert `map` to $name
         impl TryFrom<#d> for #name {
@@ -171,6 +162,7 @@ fn to_dict(data: &Data, cls_name: &Ident) -> TokenStream {
                         let name = &f.ident;
                         // println!("field = {:?}", name);
 
+                        // Get the field type attribute
                         let a = f
                             .attrs
                             .iter()
@@ -186,15 +178,9 @@ fn to_dict(data: &Data, cls_name: &Ident) -> TokenStream {
                                 // println!("  attrs = {:?}", k);
 
                                 // Inside here is each of the attributes of the struct
-                                // The error code handling is still broken
-                                // It would be nice to be able to point at some generic translator function
-                                // Like we want something with TryFrom, except that only allows defining within that crate
-                                // Also we essentially have some codegen here, and also need to provide a cbor library to go with it
                                 quote_spanned! { f.span() =>
                                     value.#name.map(|v| {
-                                        ConversionFunc::ser(v).map(|b| {
-                                            keys.insert(#k, b);
-                                        })
+                                        keys.insert(#k, ConversionFunc::ser(v));
                                     });
                                 }
                             }

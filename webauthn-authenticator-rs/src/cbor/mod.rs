@@ -1,5 +1,5 @@
-use serde::Serialize;
-use serde_cbor::{from_slice, value::to_value, Value};
+use serde::{Serialize, de::DeserializeOwned};
+use serde_cbor::{from_slice, value::{from_value, to_value}, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use webauthn_rs_proto::{PubKeyCredParams, RelyingParty, User};
@@ -89,7 +89,7 @@ where
     /// Deserializes a CBOR [Value] into a [Self].
     fn de(v: Value) -> Result<Self, Self::Error>;
     /// Serializes [Self] into a CBOR [Value].
-    fn ser(v: Self) -> Result<Value, Self::Error>;
+    fn ser(v: Self) -> Value;
 }
 
 impl ConversionFunc for BTreeMap<String, bool> {
@@ -110,7 +110,7 @@ impl ConversionFunc for BTreeMap<String, bool> {
             Err("Invalid type for BTreeMap<String, bool>")
         }
     }
-    fn ser(v: BTreeMap<String, bool>) -> Result<Value, Self::Error> {
+    fn ser(v: BTreeMap<String, bool>) -> Value {
         unimplemented!();
     }
 }
@@ -132,7 +132,7 @@ impl ConversionFunc for BTreeSet<String> {
             Err("Invalid type for BTreeSet<String>")
         }
     }
-    fn ser(v: BTreeSet<String>) -> Result<Value, Self::Error> {
+    fn ser(v: BTreeSet<String>) -> Value {
         unimplemented!();
     }
 }
@@ -154,7 +154,7 @@ impl ConversionFunc for Vec<String> {
             return Err("Invalid type for Vec<String>");
         }
     }
-    fn ser(v: Vec<String>) -> Result<Value, Self::Error> {
+    fn ser(v: Vec<String>) -> Value {
         unimplemented!();
     }
 }
@@ -169,7 +169,7 @@ impl ConversionFunc for u32 {
             Err("Invalid type for u32")
         }
     }
-    fn ser(v: u32) -> Result<Value, Self::Error> {
+    fn ser(v: u32) -> Value {
         unimplemented!();
     }
 }
@@ -197,7 +197,7 @@ impl ConversionFunc for Vec<u32> {
             Err("Invalid type for Vec<u32>")
         }
     }
-    fn ser(v: Vec<u32>) -> Result<Value, Self::Error> {
+    fn ser(v: Vec<u32>) -> Value {
         unimplemented!();
     }
 }
@@ -211,10 +211,49 @@ impl ConversionFunc for Vec<u8> {
             _ => Err("Invalid type for Vec<u8>"),
         }
     }
-    fn ser(v: Vec<u8>) -> Result<Value, Self::Error> {
-        Ok(Value::Bytes(v))
+    fn ser(v: Vec<u8>) -> Value {
+        Value::Bytes(v)
     }
 }
+
+/*
+impl<T> ConversionFunc for Vec<T>
+where T: Serialize + DeserializeOwned
+{
+    type Error = &'static str;
+
+    fn de(v: Value) -> Result<Vec<T>, Self::Error> {
+        match v {
+            Value::Array(a) => {
+                let res: Result<Vec<T>, _> = a.into_iter().map(|i| from_value::<T>(i)).collect();
+                res.map_err(|e| "Invalid type for element in Vec<T>")
+            },
+            _ => Err("Invalid type for Vec<T>")
+        }        
+        // if let Value::Array(v) = v {
+        //     let x = v.into_iter()
+        //             .map(|i| {
+        //                 from_value::<T>(i)
+        //             })
+        //             .collect();
+        //     Ok(x)
+        // } else {
+        //     Err("Invalid type for Vec<T>")
+        // }
+
+        // unimplemented!();
+        // match v {
+        //     Value::Bytes(x) => Ok(x),
+        //     _ => Err("Invalid type for Vec<u8>"),
+        // }
+    }
+    fn ser(v: Vec<T>) -> Value {
+        Value::Array(
+            v.into_iter().map(|i| to_value::<T>(i).unwrap()).collect()
+        )
+    }
+}
+*/
 
 impl ConversionFunc for RelyingParty {
     type Error = &'static str;
@@ -222,8 +261,8 @@ impl ConversionFunc for RelyingParty {
     fn de(v: Value) -> Result<RelyingParty, Self::Error> {
         unimplemented!();
     }
-    fn ser(v: RelyingParty) -> Result<Value, Self::Error> {
-        Ok(to_value(v).expect("oops RelyingParty"))
+    fn ser(v: RelyingParty) -> Value {
+        to_value(v).expect("oops RelyingParty")
     }
 }
 
@@ -233,7 +272,7 @@ impl ConversionFunc for User {
     fn de(v: Value) -> Result<User, Self::Error> {
         unimplemented!();
     }
-    fn ser(v: User) -> Result<Value, Self::Error> {
+    fn ser(v: User) -> Value {
         let mut user_map = BTreeMap::new();
         info!("{:?}", v.id);
         user_map.insert(Value::Text("id".to_string()), Value::Bytes(v.id.0));
@@ -242,17 +281,18 @@ impl ConversionFunc for User {
             Value::Text("displayName".to_string()),
             Value::Text(v.display_name),
         );
-        Ok(Value::Map(user_map))
+        Value::Map(user_map)
     }
 }
+
 
 impl ConversionFunc for Vec<PubKeyCredParams> {
     type Error = &'static str;
     fn de(v: Value) -> Result<Vec<PubKeyCredParams>, Self::Error> {
         unimplemented!();
     }
-    fn ser(v: Vec<PubKeyCredParams>) -> Result<Value, Self::Error> {
-        Ok(to_value(v).expect("oops PubKeyCredParams"))
+    fn ser(v: Vec<PubKeyCredParams>) -> Value {
+        to_value(v).expect("oops PubKeyCredParams")
     }
 }
 
@@ -261,26 +301,7 @@ impl ConversionFunc for Value {
     fn de(v: Value) -> Result<Value, Self::Error> {
         Ok(v)
     }
-    fn ser(v: Value) -> Result<Value, Self::Error> {
-        Ok(v)
+    fn ser(v: Value) -> Value {
+        v
     }
 }
-
-/*
-// TODO: switch to #derive
-#[macro_export]
-macro_rules! deserialize_cbor {
-    ($name:ident) => {
-        impl TryFrom<&[u8]> for $name {
-            type Error = ();
-
-            fn try_from(i: &[u8]) -> Result<Self, Self::Error> {
-                from_slice(&i).map_err(|e| {
-                    error!("deserialise: {:?}", e);
-                    ()
-                })
-            }
-        }
-    };
-}
-*/
