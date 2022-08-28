@@ -1,6 +1,7 @@
 use serde::Serialize;
-use serde_cbor::{from_slice, Value, value::to_value};
+use serde_cbor::{from_slice, value::to_value, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Display;
 use webauthn_rs_proto::{PubKeyCredParams, RelyingParty, User};
 
 #[cfg(feature = "nfc")]
@@ -12,7 +13,7 @@ mod make_credential;
 pub use self::get_info::*;
 pub use self::make_credential::*;
 
-pub trait CBORCommand: Serialize + Sized {
+pub trait CBORCommand: Sized + Serialize {
     /// CTAP comand byte
     const CMD: u8;
 
@@ -79,13 +80,21 @@ pub trait CBORCommand: Serialize + Sized {
     }
 }
 
-trait ConversionFunc where Self: Sized {
-    fn conv(v: Value, k: u32) -> Option<Self>;
-    fn rev(v: Self) -> Value;
+trait ConversionFunc
+where
+    Self: Sized,
+{
+    type Error: Display;
+
+    /// Deserializes a CBOR [Value] into a [Self].
+    fn de(v: Value) -> Result<Self, Self::Error>;
+    /// Serializes [Self] into a CBOR [Value].
+    fn ser(v: Self) -> Result<Value, Self::Error>;
 }
 
 impl ConversionFunc for BTreeMap<String, bool> {
-    fn conv(v: Value, k: u32) -> Option<BTreeMap<String, bool>> {
+    type Error = &'static str;
+    fn de(v: Value) -> Result<BTreeMap<String, bool>, Self::Error> {
         if let Value::Map(v) = v {
             let mut x = BTreeMap::new();
             for (ka, va) in v.into_iter() {
@@ -93,136 +102,138 @@ impl ConversionFunc for BTreeMap<String, bool> {
                     (Value::Text(s), Value::Bool(b)) => {
                         x.insert(s, b);
                     }
-                    _ => error!("Invalid value inside {}", k),
+                    _ => return Err("Invalid value inside BTreeMap<String, bool>"),
                 }
             }
-            Some(x)
+            Ok(x)
         } else {
-            error!("Invalid type for {}: {:?}", k, v);
-            None
+            Err("Invalid type for BTreeMap<String, bool>")
         }
     }
-    fn rev(v: BTreeMap<String, bool>) -> Value {
+    fn ser(v: BTreeMap<String, bool>) -> Result<Value, Self::Error> {
         unimplemented!();
     }
 }
 
 impl ConversionFunc for BTreeSet<String> {
-    fn conv(v: Value, k: u32) -> Option<BTreeSet<String>> {
+    type Error = &'static str;
+    fn de(v: Value) -> Result<BTreeSet<String>, Self::Error> {
         if let Value::Array(v) = v {
             let mut x = BTreeSet::new();
             for s in v.into_iter() {
                 if let Value::Text(s) = s {
                     x.insert(s);
                 } else {
-                    error!("Invalid value inside {}: {:?}", k, s);
+                    return Err("Invalid value inside");
                 }
             }
-            Some(x)
+            Ok(x)
         } else {
-            error!("Invalid type for {}: {:?}", k, v);
-            None
+            Err("Invalid type for BTreeSet<String>")
         }
     }
-    fn rev(v: BTreeSet<String>) -> Value {
+    fn ser(v: BTreeSet<String>) -> Result<Value, Self::Error> {
         unimplemented!();
     }
 }
 
 impl ConversionFunc for Vec<String> {
-    fn conv(v: Value, k: u32) -> Option<Vec<String>> {
+    type Error = &'static str;
+    fn de(v: Value) -> Result<Vec<String>, Self::Error> {
         if let Value::Array(v) = v {
             let mut x = Vec::with_capacity(v.len());
             for s in v.into_iter() {
                 if let Value::Text(s) = s {
                     x.push(s);
                 } else {
-                    error!("Invalid value inside {}: {:?}", k, s);
+                    return Err("Invalid value in Vec<String>");
                 }
             }
-            Some(x)
+            Ok(x)
         } else {
-            error!("Invalid type for {}: {:?}", k, v);
-            None
+            return Err("Invalid type for Vec<String>");
         }
     }
-    fn rev(v: Vec<String>) -> Value {
+    fn ser(v: Vec<String>) -> Result<Value, Self::Error> {
         unimplemented!();
     }
 }
 
 impl ConversionFunc for u32 {
-    fn conv(v: Value, k: u32) -> Option<u32> {
+    type Error = &'static str;
+
+    fn de(v: Value) -> Result<u32, Self::Error> {
         if let Value::Integer(i) = v {
-            u32::try_from(i)
-                .map_err(|_| error!("Invalid value inside {}: {:?}", k, i))
-                .ok()
+            u32::try_from(i).map_err(|_| "Invalid value in u32")
         } else {
-            error!("Invalid type for {}: {:?}", k, v);
-            None
+            Err("Invalid type for u32")
         }
     }
-    fn rev(v: u32) -> Value {
+    fn ser(v: u32) -> Result<Value, Self::Error> {
         unimplemented!();
     }
 }
 
 impl ConversionFunc for Vec<u32> {
-    fn conv(v: Value, k: u32) -> Option<Vec<u32>> {
+    type Error = &'static str;
+
+    fn de(v: Value) -> Result<Vec<u32>, Self::Error> {
         if let Value::Array(v) = v {
             let x = v
                 .into_iter()
                 .filter_map(|i| {
                     if let Value::Integer(i) = i {
                         u32::try_from(i)
-                            .map_err(|_| error!("Invalid value inside {}: {:?}", k, i))
+                            .map_err(|_| "Invalid value in Vec<u32>")
                             .ok()
                     } else {
-                        error!("Invalid type for {}: {:?}", k, i);
+                        error!("Invalid type: {:?}", i);
                         None
                     }
                 })
                 .collect();
-            Some(x)
+            Ok(x)
         } else {
-            error!("Invalid type for {}: {:?}", k, v);
-            None
+            Err("Invalid type for Vec<u32>")
         }
     }
-    fn rev(v: Vec<u32>) -> Value {
+    fn ser(v: Vec<u32>) -> Result<Value, Self::Error> {
         unimplemented!();
     }
 }
 
 impl ConversionFunc for Vec<u8> {
-    fn conv(v: Value, k: u32) -> Option<Vec<u8>> {
+    type Error = &'static str;
+
+    fn de(v: Value) -> Result<Vec<u8>, Self::Error> {
         match v {
-            Value::Bytes(x) => Some(x),
-            _ => {
-                error!("Invalid type for {}: {:?}", k, v);
-                None
-            }
+            Value::Bytes(x) => Ok(x),
+            _ => Err("Invalid type for Vec<u8>"),
         }
     }
-    fn rev(v: Vec<u8>) -> Value {
-        Value::Bytes(v)
+    fn ser(v: Vec<u8>) -> Result<Value, Self::Error> {
+        Ok(Value::Bytes(v))
     }
 }
 
 impl ConversionFunc for RelyingParty {
-    fn conv(v: Value, k: u32) -> Option<RelyingParty> {
+    type Error = &'static str;
+
+    fn de(v: Value) -> Result<RelyingParty, Self::Error> {
         unimplemented!();
     }
-    fn rev(v: RelyingParty) -> Value {
-        to_value(v).expect("oops RelyingParty")
+    fn ser(v: RelyingParty) -> Result<Value, Self::Error> {
+        Ok(to_value(v).expect("oops RelyingParty"))
     }
 }
 
 impl ConversionFunc for User {
-    fn conv(v: Value, k: u32) -> Option<User> {
+    type Error = &'static str;
+
+    fn de(v: Value) -> Result<User, Self::Error> {
         unimplemented!();
     }
-    fn rev(v: User) -> Value {
+    fn ser(v: User) -> Result<Value, Self::Error> {
         let mut user_map = BTreeMap::new();
         info!("{:?}", v.id);
         user_map.insert(Value::Text("id".to_string()), Value::Bytes(v.id.0));
@@ -231,24 +242,27 @@ impl ConversionFunc for User {
             Value::Text("displayName".to_string()),
             Value::Text(v.display_name),
         );
-        Value::Map(user_map)
+        Ok(Value::Map(user_map))
     }
 }
+
 impl ConversionFunc for Vec<PubKeyCredParams> {
-    fn conv(v: Value, k: u32) -> Option<Vec<PubKeyCredParams>> {
+    type Error = &'static str;
+    fn de(v: Value) -> Result<Vec<PubKeyCredParams>, Self::Error> {
         unimplemented!();
     }
-    fn rev(v: Vec<PubKeyCredParams>) -> Value {
-        to_value(v).expect("oops PubKeyCredParams")
+    fn ser(v: Vec<PubKeyCredParams>) -> Result<Value, Self::Error> {
+        Ok(to_value(v).expect("oops PubKeyCredParams"))
     }
 }
 
 impl ConversionFunc for Value {
-    fn conv(v: Value, _k: u32) -> Option<Value> {
-        Some(v)
+    type Error = &'static str;
+    fn de(v: Value) -> Result<Value, Self::Error> {
+        Ok(v)
     }
-    fn rev(v: Value) -> Value {
-        v
+    fn ser(v: Value) -> Result<Value, Self::Error> {
+        Ok(v)
     }
 }
 

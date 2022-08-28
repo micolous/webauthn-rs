@@ -17,25 +17,25 @@ struct MakeCredentialRequestRawDict {
 #[derive(Serialize, Deserialize, Debug, Clone, CborMessage)]
 #[serde(into = "MakeCredentialRequestDict")]
 pub struct MakeCredentialRequest {
-    #[cbor_field(0x1)]
+    #[f(Value::Integer(0x1))]
     pub client_data_hash: Option<Vec<u8>>,
-    #[cbor_field(0x2)]
+    #[f(Value::Integer(0x2))]
     pub rp: Option<RelyingParty>,
-    #[cbor_field(0x3)]
+    #[f(Value::Integer(0x3))]
     pub user: Option<User>,
-    #[cbor_field(0x4)]
+    #[f(Value::Integer(0x4))]
     pub pub_key_cred_params: Option<Vec<PubKeyCredParams>>,
     // exclude_list: Option<Vec<PublicKeyCredentialDescriptor>>,
     // extensions:
-    #[cbor_field(0x7)]
+    #[f(Value::Integer(0x7))]
     pub options: Option<BTreeMap<String, bool>>,
-    #[cbor_field(0x8)]
+    #[f(Value::Integer(0x8))]
     pub pin_uv_auth_param: Option<Vec<u8>>,
-    #[cbor_field(0x9)]
+    #[f(Value::Integer(0x9))]
     pub pin_uv_auth_proto: Option<u32>,
 
     // TODO: fix this
-    #[cbor_field(0xa)]
+    #[f(Value::Integer(0xa))]
     pub enterprise_attest: Option<u32>,
 }
 
