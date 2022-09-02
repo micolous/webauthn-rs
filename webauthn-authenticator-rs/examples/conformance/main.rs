@@ -1,17 +1,15 @@
+#[cfg(not(all(feature = "nfc", feature = "nfc_debug")))]
+compile_error!("This example requires the feature \"nfc\" and \"nfc_debug\" features.");
+
+#[cfg(all(feature = "nfc", feature = "nfc_debug"))]
 #[macro_use]
 extern crate tracing;
 
-#[cfg(feature = "nfc")]
+#[cfg(all(feature = "nfc", feature = "nfc_debug"))]
 mod core;
 
-#[cfg(feature = "nfc")]
 fn main() {
     tracing_subscriber::fmt::init();
+    #[cfg(all(feature = "nfc", feature = "nfc_debug"))]
     core::main();
-}
-
-#[cfg(not(feature = "nfc"))]
-fn main() {
-    tracing_subscriber::fmt::init();
-    error!("This example requires the feature \"nfc\" to be enabled.");
 }

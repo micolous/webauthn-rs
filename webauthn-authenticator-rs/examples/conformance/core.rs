@@ -109,6 +109,39 @@ fn test_extended_lc_info(card: &NFCCard) -> TestResult {
     }
 }
 
+/// Improper encoding of N<sub>c</sub> = 0, N<sub>e</sub> = 65536, replicating
+/// https://github.com/mozilla/authenticator-rs/issues/190
+fn test_wrong_nc_0(card: &NFCCard) -> TestResult {
+    if card.atr.extended_lc != Some(true) {
+        // https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#nfc-framing
+        return TestResult::Fail("FIDO 2.1 authenticators MUST support extended Lc/Le, but this authenticator does not declare support for extended APDUs in the historical bytes");
+    }
+
+    // Select the applet, but only use short form
+    let mut resp = card
+        .transmit(&select_by_df_name(&APPLET_DF), ISO7816LengthForm::ShortOnly)
+        .expect("Failed to select applet");
+
+    if !resp.is_ok() {
+        return TestResult::Fail("Could not select CTAP applet");
+    }
+
+    // Check return value
+    if resp.data != &APPLET_U2F_V2 {
+        return TestResult::Fail("Unsupported CTAP applet");
+    }
+
+    let rresp = card
+        .transmit_raw(&[0, 3, 0, 0, 0, 0, 0, 0, 0])
+        .expect("failed to get version");
+
+    if rresp.starts_with(&APPLET_U2F_V2)  {
+        return TestResult::Fail("Authenticator returned successful GET_VERSION response for malformed request")
+    }
+
+    TestResult::Pass
+}
+
 /// Checks whether the card is checking the provided AID length when testing
 /// against its own applet, by selecting applets with extra bytes after the real
 /// AID.
@@ -257,11 +290,12 @@ fn test_card(card: NFCCard) {
     let resp = card
         .transmit(&select_by_df_name(&APPLET_DF), ISO7816LengthForm::ShortOnly)
         .expect("Failed to select applet");
+
     if !resp.is_ok() {
         panic!("Could not select FIDO2 applet, is this a FIDO2 token?");
     }
 
-    const TESTS: [(&str, Test); 5] = [
+    const TESTS: [(&str, Test); 6] = [
         ("Select applet with extended Lc/Le", test_extended_lc_select),
         ("Select incorrect applet AID", test_incorrect_aid),
         ("Select with zero Ne", test_select_zero_ne),
@@ -270,6 +304,7 @@ fn test_card(card: NFCCard) {
             "Get authenticator info with extended Le",
             test_extended_lc_info,
         ),
+        ("U2F GET_VERSION with improper Nc=0 (Mozilla bug)", test_wrong_nc_0),
     ];
 
     let mut passes: Vec<&str> = Vec::with_capacity(TESTS.len());

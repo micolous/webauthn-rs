@@ -79,7 +79,7 @@ pub struct ISO7816RequestAPDU {
 /// Returns [`Error::IntegerOverflow`] when `form` is inappropriate for the
 /// `value`, or unknown `form`.
 fn push_length_value(buf: &mut Vec<u8>, value: usize, form: u8) -> Result<(), Error> {
-    if form >= 4 {
+    if form > 3 {
         return Err(Error::IntegerOverflow);
     } else if form == 0 {
         if value > 0 {
@@ -126,7 +126,7 @@ impl ISO7816RequestAPDU {
 
         // §5.1: "short and extended length fields shall not be combined: either
         // both of them are short, or both of them are extended".
-        let lc_len: u8 = if self.data.len() == 0 {
+        let lc_len: u8 = if self.data.is_empty() {
             0
         } else if extended_form {
             3
@@ -153,15 +153,8 @@ impl ISO7816RequestAPDU {
         buf.push(self.p1);
         buf.push(self.p2);
 
-        push_length_value(
-            &mut buf,
-            self.data
-                .len()
-                .try_into()
-                .map_err(|_| Error::IntegerOverflow)?,
-            lc_len,
-        )?;
-        if self.data.len() > 0 {
+        if lc_len > 0 {
+            push_length_value(&mut buf, self.data.len(), lc_len)?;
             buf.extend_from_slice(&self.data);
         }
         push_length_value(&mut buf, self.ne, le_len)?;
@@ -240,14 +233,14 @@ pub fn select_by_df_name(df: &[u8]) -> ISO7816RequestAPDU {
         cla: 0x00,
         ins: 0xA4, // SELECT
         p1: 0x04,  // By DF name
-        p2: 0x00,  // First or only occurrence
+        p2: 0x00,  // First or only occurrence, FCI template
         data: df.to_vec(),
         ne: 256,
     }
 }
 
 /// Requests a chunked response from the previous command that was too long for
-/// the previous [`ISO7816RequestAPDU.ne`].
+/// the previous [`ISO7816RequestAPDU::ne`].
 ///
 /// Reference: ISO/IEC 7816-4:2005 §7.6.1
 pub fn get_response(cla: u8, ne: usize) -> ISO7816RequestAPDU {

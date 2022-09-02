@@ -11,6 +11,7 @@ repository = "https://github.com/kanidm/webauthn-rs"
 [features]
 u2fhid = ["authenticator"]
 nfc = ["pcsc"]
+nfc_debug = []
 
 default = []
 

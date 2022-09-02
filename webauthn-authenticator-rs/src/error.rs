@@ -2,6 +2,7 @@
 pub enum WebauthnCError {
     Json,
     Cbor,
+    Ctap,
     Unknown,
     Security,
     NotSupported,

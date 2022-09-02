@@ -113,17 +113,8 @@ impl NFCReader {
     }
 }
 
-fn transmit(
-    card: &Card,
-    request: &ISO7816RequestAPDU,
-    form: ISO7816LengthForm,
-) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
-    let req = request.to_bytes(form).map_err(|e| {
-        error!("Failed to build APDU command: {:?}", e);
-        WebauthnCError::ApduConstruction
-    })?;
+fn transmit_raw<'a>(card: &Card, req: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
     let mut resp = vec![0; MAX_BUFFER_SIZE_EXTENDED];
-
     trace!(">>> {:02x?}", req);
 
     let rapdu = card.transmit(&req, &mut resp).map_err(|e| {
@@ -133,7 +124,22 @@ fn transmit(
 
     trace!("<<< {:02x?}", rapdu);
 
-    ISO7816ResponseAPDU::try_from(rapdu).map_err(|e| {
+    Ok(rapdu.to_vec())
+}
+
+fn transmit(
+    card: &Card,
+    request: &ISO7816RequestAPDU,
+    form: ISO7816LengthForm,
+) -> Result<ISO7816ResponseAPDU, WebauthnCError> {
+    let req = request.to_bytes(form).map_err(|e| {
+        error!("Failed to build APDU command: {:?}", e);
+        WebauthnCError::ApduConstruction
+    })?;
+
+    let resp = transmit_raw(&card, &req)?;
+
+    ISO7816ResponseAPDU::try_from(resp.as_slice()).map_err(|e| {
         error!("Failed to parse card response: {:?}", e);
         WebauthnCError::ApduTransmission
     })
@@ -163,6 +169,15 @@ impl NFCCard {
 
         let card = NFCCard { card_ref, atr: atr };
         return card;
+    }
+
+    /// Transmits raw bytes to the card.
+    ///
+    /// This method is intended for debugging issues with the card – use
+    /// [`NFCCard.transmit()`] instead.
+    #[cfg(feature = "nfc_debug")]
+    pub fn transmit_raw(&self, req: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
+        transmit_raw(&self.card_ref, &req)
     }
 
     /// Transmits a single ISO 7816-4 APDU to the card.
