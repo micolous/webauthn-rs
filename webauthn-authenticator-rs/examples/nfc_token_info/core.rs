@@ -1,9 +1,11 @@
 use webauthn_authenticator_rs::nfc::*;
+use webauthn_authenticator_rs::transport::*;
+
 
 fn access_card(card: NFCCard) {
     info!("Card detected ...");
 
-    match card.select_u2f_v2_applet() {
+    match card.select_any() {
         Ok(Selected::FIDO_2_1_PRE(mut token)) => {
             info!("Using token {:?}", token);
 
@@ -20,7 +22,10 @@ pub(crate) fn event_loop() {
     let mut reader = NFCReader::default();
     info!("Using reader: {:?}", reader);
 
-    while let Ok(card) = reader.wait_for_card() {
-        access_card(card);
+    while let Ok(mut tokens) = reader.tokens() {
+        while let Some(card) = tokens.pop() {
+            access_card(card);
+        }
+
     }
 }

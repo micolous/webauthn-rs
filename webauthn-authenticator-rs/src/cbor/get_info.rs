@@ -11,6 +11,7 @@ pub struct GetInfoRequest {}
 impl CBORCommand for GetInfoRequest {
     const CMD: u8 = 0x04;
     const HAS_PAYLOAD: bool = false;
+    type Response = GetInfoResponse;
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -195,7 +196,7 @@ mod tests {
             107, 101, 121,
         ];
 
-        let a = GetInfoResponse::try_from(raw_apdu.as_slice()).expect("Falied to decode apdu");
+        let a = <GetInfoResponse as CBORResponse>::try_from(raw_apdu.as_slice()).expect("Falied to decode apdu");
 
         // Assert the content
         // info!(?a);

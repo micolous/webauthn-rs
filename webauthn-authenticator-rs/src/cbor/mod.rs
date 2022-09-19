@@ -10,6 +10,11 @@ mod make_credential;
 
 pub use self::get_info::*;
 pub use self::make_credential::*;
+use crate::error::WebauthnCError;
+
+pub trait CBORResponse: Sized {
+    fn try_from(i: &[u8]) -> Result<Self, WebauthnCError>;
+}
 
 pub trait CBORCommand: Serialize + Sized {
     /// CTAP comand byte
@@ -21,6 +26,8 @@ pub trait CBORCommand: Serialize + Sized {
     /// If false, then the command has no payload.
     const HAS_PAYLOAD: bool = true;
 
+    type Response: CBORResponse;
+    
     /// Converts a command into a binary form.
     fn cbor(&self) -> Result<Vec<u8>, serde_cbor::Error> {
         // CTAP v2.1, s8.2.9.1.2 (USB CTAPHID_CBOR), s8.3.5 (NFC framing).
@@ -145,16 +152,22 @@ fn value_to_u32(v: &Value, loc: &str) -> Option<u32> {
     }
 }
 
+pub struct NoResponse {}
+impl CBORResponse for NoResponse {
+    fn try_from(_raw: &[u8]) -> Result<Self, WebauthnCError> {
+        Ok(Self {})
+    }
+}
+
 // TODO: switch to #derive
 #[macro_export]
 macro_rules! deserialize_cbor {
     ($name:ident) => {
-        impl TryFrom<&[u8]> for $name {
-            type Error = ();
-
-            fn try_from(i: &[u8]) -> Result<Self, Self::Error> {
+        impl CBORResponse for $name {
+            fn try_from(i: &[u8]) -> Result<Self, WebauthnCError> {
                 from_slice(&i).map_err(|e| {
                     error!("deserialise: {:?}", e);
+                    WebauthnCError::Cbor
                 })
             }
         }
