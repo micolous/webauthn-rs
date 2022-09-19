@@ -1,13 +1,13 @@
 //! Helpers for framing U2FHID messages.
-//! 
+//!
 //! USB HID has a MTU (maximum transmission unit) of 64 bytes. U2FHID headers
 //! are 7 bytes for the first frame of a message, and 5 bytes for every message
 //! thereafter.
-//! 
+//!
 //! So, we need to be able to fragment our messages before sending them to a
 //! token, and then defragment them on the other side.
 use crate::error::WebauthnCError;
-use crate::usb::{HID_RPT_SIZE, CAPABILITY_CBOR, CAPABILITY_NMSG};
+use crate::usb::{CAPABILITY_CBOR, CAPABILITY_NMSG, HID_RPT_SIZE};
 use std::cmp::min;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign};
@@ -50,15 +50,22 @@ pub(crate) struct U2FHIDFrameIterator<'a> {
     /// The frame to fragment.
     f: &'a U2FHIDFrame,
     /// The current position within the frame we're up to.
-    p: usize,
+    p: &'a [u8],
     /// The fragment number we're up to.
     i: u8,
+    /// If we've done the first iteration.
+    s: bool,
 }
 
 impl<'a> U2FHIDFrameIterator<'a> {
     /// Creates a new iterator for fragmenting [U2FHIDFrame]
     pub fn new(f: &'a U2FHIDFrame) -> Self {
-        U2FHIDFrameIterator { f: &f, p: 0, i: 0 }
+        U2FHIDFrameIterator {
+            f: &f,
+            p: &f.data,
+            i: 0,
+            s: false,
+        }
     }
 }
 
@@ -66,32 +73,37 @@ impl Iterator for U2FHIDFrameIterator<'_> {
     type Item = U2FHIDFrame;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let l = self.f.data.len();
+        let l = self.p.len();
+        let (data, p) = self.p.split_at(min(
+            l,
+            if self.s {
+                FRAGMENT_SIZE
+            } else {
+                INITIAL_FRAGMENT_SIZE
+            },
+        ));
+        self.p = p;
 
-        if self.p == 0 {
+        if !self.s {
             // First round
-            self.p = min(l, INITIAL_FRAGMENT_SIZE);
+            self.s = true;
             Some(U2FHIDFrame {
                 cid: self.f.cid,
                 cmd: self.f.cmd,
                 len: l as u16,
-                data: self.f.data[..self.p].to_vec(),
+                data: data.to_vec(),
             })
-        } else if self.p >= l {
+        } else if l == 0 {
             // Already consumed iterator.
             None
         } else {
-            // Fragment start position
-            let p = self.p;
-            // Fragment end position
-            self.p = min(l, p + FRAGMENT_SIZE);
             let i = self.i & 0x7f;
             self.i = i + 1;
             Some(U2FHIDFrame {
                 cid: self.f.cid,
                 cmd: i,
                 len: 0,
-                data: self.f.data[p..self.p].to_vec(),
+                data: data.to_vec(),
             })
         }
     }
@@ -102,8 +114,7 @@ impl Iterator for U2FHIDFrameIterator<'_> {
 impl Add for U2FHIDFrame {
     type Output = Self;
 
-    fn add(self, rhs: Self) -> Self
-    {
+    fn add(self, rhs: Self) -> Self {
         // Assume LHS is initial
         assert_eq!(self.cid, rhs.cid);
         let mut o: Vec<u8> = vec![0; usize::from(self.len)];
@@ -157,7 +168,7 @@ impl<'a> Sum<&'a U2FHIDFrame> for U2FHIDFrame {
                     let p = min(f.data.len(), usize::from(f.len));
                     o[..p].copy_from_slice(&f.data[..p]);
                     s = Some(&f);
-                },
+                }
 
                 Some(first) => {
                     assert_eq!(f.cid, first.cid);
@@ -167,15 +178,12 @@ impl<'a> Sum<&'a U2FHIDFrame> for U2FHIDFrame {
                 }
             }
         }
-        
         match s {
-            Some(first) => {
-                U2FHIDFrame {
-                    cid: first.cid,
-                    cmd: first.cmd,
-                    len: first.len,
-                    data: o,
-                }
+            Some(first) => U2FHIDFrame {
+                cid: first.cid,
+                cmd: first.cmd,
+                len: first.len,
+                data: o,
             },
             None => EMPTY_FRAME,
         }
@@ -183,7 +191,7 @@ impl<'a> Sum<&'a U2FHIDFrame> for U2FHIDFrame {
 }
 
 /// Serialises a [U2FHIDFrame] to bytes to be sent via a USB HID report.
-/// 
+///
 /// This does not fragment packets: see [U2FHIDFrameIterator].
 impl Into<Vec<u8>> for &U2FHIDFrame {
     fn into(self) -> Vec<u8> {
@@ -264,7 +272,7 @@ mod tests {
         assert_eq!(assembled, full);
     }
 
-    #[test] 
+    #[test]
     fn fragment_long() {
         let full = U2FHIDFrame {
             cid: 1,
