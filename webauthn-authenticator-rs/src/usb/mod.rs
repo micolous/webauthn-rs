@@ -1,10 +1,13 @@
 mod framing;
+mod responses;
 
-use hidapi::{DeviceInfo, HidApi, HidDevice};
 use crate::cbor::*;
-use crate::transport::*;
 use crate::error::WebauthnCError;
+use crate::transport::*;
 use crate::usb::framing::*;
+use crate::usb::responses::*;
+use hidapi::{DeviceInfo, HidApi, HidDevice};
+use std::fmt;
 
 // u2f_hid.h
 const FIDO_USAGE_PAGE: u16 = 0xf1d0;
@@ -15,6 +18,7 @@ const U2FHID_TRANS_TIMEOUT: i32 = 3000;
 const TYPE_INIT: u8 = 0x80;
 const U2FHID_MSG: u8 = TYPE_INIT | 0x03;
 const U2FHID_INIT: u8 = TYPE_INIT | 0x06;
+const U2FHID_CBOR: u8 = TYPE_INIT | 0x10;
 const U2FHID_ERROR: u8 = TYPE_INIT | 0x3f;
 const CAPABILITY_NMSG: u8 = 0x08;
 
@@ -29,9 +33,23 @@ pub struct USBToken {
     cid: u32,
 }
 
+impl fmt::Debug for USBTransport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("USBTransport").finish()
+    }
+}
+
+impl fmt::Debug for USBToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("USBToken").field("cid", &self.cid).finish()
+    }
+}
+
 impl Default for USBTransport {
     fn default() -> Self {
-        Self { api: HidApi::new().unwrap() }
+        Self {
+            api: HidApi::new().unwrap(),
+        }
     }
 }
 
@@ -39,33 +57,53 @@ impl Transport for USBTransport {
     type Token = USBToken;
 
     fn tokens(&mut self) -> Result<Vec<Self::Token>, WebauthnCError> {
-        Ok(self.api
+        Ok(self
+            .api
             .device_list()
             .filter(|d| d.usage_page() == FIDO_USAGE_PAGE && d.usage() == FIDO_USAGE_U2FHID)
+            .map(|d| { trace!(?d); d })
             .map(|d| d.open_device(&self.api).expect("Could not open device"))
             .map(|device| USBToken { device, cid: 0 })
             .collect())
     }
-    
 }
 
 impl USBToken {
     fn send(&self, frame: &U2FHIDFrame) -> Result<(), WebauthnCError> {
         let d: Vec<u8> = frame.into();
         println!(">>> {:02x?}", d);
-        self.device.write(&d).map_err(|e| WebauthnCError::Internal).map(|_| ())
+        self.device
+            .write(&d)
+            .map_err(|e| WebauthnCError::Internal)
+            .map(|_| ())
     }
 
-    fn recv(&self) -> Result<U2FHIDFrame, WebauthnCError> {
+    fn recv_one(&self) -> Result<U2FHIDFrame, WebauthnCError> {
         let mut ret: Vec<u8> = vec![0; HID_RPT_SIZE];
 
-        let len = self.device
+        let len = self
+            .device
             .read_timeout(&mut ret, U2FHID_TRANS_TIMEOUT)
             .map_err(|_| WebauthnCError::Internal)?;
 
         println!("<<< {:02x?}", &ret[..len]);
 
         U2FHIDFrame::try_from(&ret[..len])
+    }
+
+    fn recv(&self) -> Result<Response, WebauthnCError> {
+        // Recieve first chunk
+        let mut f = self.recv_one()?;
+        let mut s: usize = f.data.len();
+        let t = usize::from(f.len);
+
+        // Get more chunks, if needed
+        while s < t {
+            let n = self.recv_one()?;
+            s += n.data.len();
+            f += n;
+        }
+        Response::try_from(&f)
     }
 }
 
@@ -75,29 +113,52 @@ impl Token for USBToken {
         C: CBORCommand<Response = R>,
         R: CBORResponse,
     {
-        todo!();
-        // let apdus = cmd.to_short_apdus().unwrap();
-        // let resp = self.transmit_chunks(&apdus)?;
+        let cbor = cmd.cbor().map_err(|_| WebauthnCError::Cbor)?;
+        let cmd = U2FHIDFrame {
+            cid: self.cid,
+            cmd: U2FHID_CBOR,
+            len: cbor.len() as u16,
+            data: cbor,
+        };
 
-        // // CTAP has its own extra status code over NFC in the first byte.
-        // R::try_from(&resp.data[1..]).map_err(|e| {
-        //     //error!("error: {:?}", e);
-        //     WebauthnCError::Cbor
-        // })
+        // Send as fragments
+        for f in U2FHIDFrameIterator::new(&cmd) {
+            self.send(&f);
+        }
+
+        // Get a response
+        match self.recv()? {
+            Response::Cbor(c) => R::try_from(&c.data).map_err(|e| WebauthnCError::Cbor),
+            _ => {
+                error!("Unhandled response type");
+                Err(WebauthnCError::Cbor)
+            }
+        }
     }
 
     fn init(&mut self) -> Result<(), WebauthnCError> {
         let mut nonce: [u8; 8] = [0; 8];
-
         // TODO: rng.fill_bytes(&mut nonce);
-        
+
         self.send(&U2FHIDFrame {
             cid: CID_BROADCAST,
             cmd: U2FHID_INIT,
+            len: nonce.len() as u16,
             data: nonce.to_vec(),
         });
 
-        todo!();
+        match self.recv()? {
+            Response::Init(i) => {
+                trace!(?i);
+                assert_eq!(&nonce, &i.nonce[..]);
+                self.cid = i.cid;
+                Ok(())
+            }
+            _ => {
+                error!("Unhandled response type");
+                Err(WebauthnCError::Internal)
+            }
+        }
     }
 
     fn close(&self) -> Result<(), WebauthnCError> {

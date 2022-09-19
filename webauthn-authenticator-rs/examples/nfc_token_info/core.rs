@@ -1,8 +1,8 @@
 use webauthn_authenticator_rs::nfc::*;
 use webauthn_authenticator_rs::transport::*;
+use webauthn_authenticator_rs::usb::*;
 
-
-fn access_card(card: NFCCard) {
+fn access_card<T: Token>(card: T) {
     info!("Card detected ...");
 
     match card.select_any() {
@@ -19,11 +19,13 @@ fn access_card(card: NFCCard) {
 }
 
 pub(crate) fn event_loop() {
-    let mut reader = NFCReader::default();
+    let mut reader = USBTransport::default();
+    // let mut reader = NFCReader::default();
     info!("Using reader: {:?}", reader);
 
     while let Ok(mut tokens) = reader.tokens() {
-        while let Some(card) = tokens.pop() {
+        while let Some(mut card) = tokens.pop() {
+            card.init();
             access_card(card);
         }
 

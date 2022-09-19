@@ -286,6 +286,7 @@ impl Token for NFCCard {
         let resp = self.transmit_chunks(&apdus)?;
 
         // CTAP has its own extra status code over NFC in the first byte.
+        // TODO: handle status byte
         R::try_from(&resp.data[1..]).map_err(|e| {
             //error!("error: {:?}", e);
             WebauthnCError::Cbor

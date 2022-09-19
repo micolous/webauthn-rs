@@ -1,9 +1,12 @@
+use crate::error::WebauthnCError;
+use crate::usb::*;
+use crate::usb::framing::U2FHIDFrame;
 
 #[derive(Debug)]
-struct InitResponse {
-    nonce: Vec<u8>,
+pub(crate) struct InitResponse {
+    pub nonce: Vec<u8>,
     /// Allocated channel identifier
-    cid: u32,
+    pub cid: u32,
     /// U2F protocol version (2)
     protocol_version: u8,
     device_version_major: u8,
@@ -38,7 +41,7 @@ impl TryFrom<&[u8]> for InitResponse {
 
 /// CTAPv1 APDU (ISO 7816-like)
 #[derive(Debug, PartialEq)]
-struct MessageResponse {
+pub(crate) struct MessageResponse {
     /// Data payload
     data: Vec<u8>,
     /// Status byte 1
@@ -68,8 +71,30 @@ impl TryFrom<&[u8]> for MessageResponse {
     }
 }
 
+/// CTAPv2 CBOR message
+#[derive(Debug, PartialEq)]
+pub(crate) struct CBORResponse {
+    /// Status code
+    pub status: u8,
+    /// Data payload
+    pub data: Vec<u8>,
+}
+
+impl TryFrom<&[u8]> for CBORResponse {
+    type Error = ();
+    fn try_from(d: &[u8]) -> Result<Self, Self::Error> {
+        if d.len() < 1 {
+            return Err(());
+        }
+        Ok(Self {
+            status: d[0],
+            data: d[1..].to_vec(),
+        })
+    }
+}
+
 #[derive(Debug)]
-enum U2FError {
+pub(crate) enum U2FError {
     None,
     InvalidCommand,
     InvalidParameter,
@@ -112,9 +137,36 @@ impl From<&[u8]> for U2FError {
 }
 
 #[derive(Debug)]
-enum Response {
+pub(crate) enum Response {
     Init(InitResponse),
     Msg(MessageResponse),
+    Cbor(CBORResponse),
     Error(U2FError),
     Unknown,
+}
+
+impl TryFrom<&U2FHIDFrame> for Response {
+    type Error = WebauthnCError;
+
+    fn try_from(f: &U2FHIDFrame) -> Result<Response, WebauthnCError> {
+        if !f.complete() {
+            error!("cannot parse incomplete frame");
+            return Err(WebauthnCError::Internal);
+        }
+
+        let b = &f.data[..];
+        Ok(match f.cmd {
+            U2FHID_INIT => InitResponse::try_from(b)
+                .map(Response::Init)
+                .unwrap_or(Response::Unknown),
+            U2FHID_MSG => MessageResponse::try_from(b)
+                .map(Response::Msg)
+                .unwrap_or(Response::Unknown),
+            U2FHID_CBOR => CBORResponse::try_from(b)
+                .map(Response::Cbor)
+                .unwrap_or(Response::Unknown),
+            U2FHID_ERROR => Response::Error(U2FError::from(b)),
+            _ => Response::Unknown,
+        })
+    }
 }
