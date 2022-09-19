@@ -181,7 +181,7 @@ impl SoftToken {
             "{}",
             String::from_utf8_lossy(&ca.to_text().map_err(|e| {
                 error!("OpenSSL Error -> {:?}", e);
-                WebauthnCError::
+                WebauthnCError::OpenSSL
             })?)
         );
         */
