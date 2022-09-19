@@ -25,9 +25,12 @@ where
     token: T,
 }
 
-pub trait Transport: Sized {
+/// Represents a transport layer protocol for [Token].
+pub trait Transport: Sized + Default {
+    /// The type of [Token] returned by this [Transport].
     type Token: Token;
 
+    /// Gets a list of all connected tokens for this [Transport].
     fn tokens(&mut self) -> Result<Vec<Self::Token>, WebauthnCError>;
 }
 
@@ -40,11 +43,10 @@ pub trait Token: Sized {
         R: CBORResponse;
 
     /// Initializes the [Token]
-    fn init(&self) -> Result<(), WebauthnCError>;
+    fn init(&mut self) -> Result<(), WebauthnCError>;
 
     /// Selects any available CTAP applet on the [Token]
     fn select_any(self) -> Result<Selected<Self>, WebauthnCError> {
-        self.init()?;
         let tokinfo = self.transmit(GetInfoRequest {})?;
 
         debug!(?tokinfo);

@@ -41,6 +41,9 @@ pub mod transport;
 #[cfg(feature = "nfc")]
 pub mod nfc;
 
+#[cfg(feature = "usb")]
+pub mod usb;
+
 #[cfg(feature = "u2fhid")]
 pub mod u2fhid;
 

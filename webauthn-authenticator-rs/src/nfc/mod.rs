@@ -292,7 +292,7 @@ impl Token for NFCCard {
         })
     }
 
-    fn init(&self) -> Result<(), WebauthnCError> {
+    fn init(&mut self) -> Result<(), WebauthnCError> {
         let resp = self
             .transmit(&select_by_df_name(&APPLET_DF), ISO7816LengthForm::ShortOnly)
             .expect("Failed to select CTAP2.1 applet");
