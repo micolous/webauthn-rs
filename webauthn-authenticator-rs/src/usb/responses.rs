@@ -15,6 +15,18 @@ pub(crate) struct InitResponse {
     capabilities: u8,
 }
 
+impl InitResponse {
+    /// `true` if the device suports CTAPv1 / U2F protocol
+    pub fn supports_ctap1(&self) -> bool {
+        self.capabilities & CAPABILITY_NMSG == 0
+    }
+    
+    /// `true` if the device suports CTAPv2 / CBOR protocol
+    pub fn supports_ctap2(&self) -> bool {
+        self.capabilities & CAPABILITY_CBOR > 0
+    }
+}
+
 impl TryFrom<&[u8]> for InitResponse {
     type Error = ();
     fn try_from(d: &[u8]) -> Result<Self, Self::Error> {

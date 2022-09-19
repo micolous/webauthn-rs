@@ -1,13 +1,24 @@
+//! Helpers for framing U2FHID messages.
+//! 
+//! USB HID has a MTU (maximum transmission unit) of 64 bytes. U2FHID headers
+//! are 7 bytes for the first frame of a message, and 5 bytes for every message
+//! thereafter.
+//! 
+//! So, we need to be able to fragment our messages before sending them to a
+//! token, and then defragment them on the other side.
 use crate::error::WebauthnCError;
-use crate::usb::HID_RPT_SIZE;
+use crate::usb::{HID_RPT_SIZE, CAPABILITY_CBOR, CAPABILITY_NMSG};
 use std::cmp::min;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign};
 
+/// The maximum data payload for the initial fragment of a message, in bytes.
 const INITIAL_FRAGMENT_SIZE: usize = HID_RPT_SIZE - 7;
+/// The maximum data payload for the second and subsequent fragments of a
+/// message, in bytes.
 const FRAGMENT_SIZE: usize = HID_RPT_SIZE - 5;
 
-/// U2F HID request frame type
+/// U2F HID request frame type.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct U2FHIDFrame {
     /// Channel identifier
@@ -16,7 +27,7 @@ pub(crate) struct U2FHIDFrame {
     pub cmd: u8,
     /// Complete length, for fragmented packets
     pub len: u16,
-
+    /// Data payload
     pub data: Vec<u8>,
 }
 
@@ -33,10 +44,14 @@ const EMPTY_FRAME: U2FHIDFrame = U2FHIDFrame {
     data: vec![],
 };
 
-/// Iterator type for fragmenting a long [U2FHIDFrame]
+/// Iterator type for fragmenting a long [U2FHIDFrame] into smaller pieces that
+/// fit within the USB HID MTU.
 pub(crate) struct U2FHIDFrameIterator<'a> {
+    /// The frame to fragment.
     f: &'a U2FHIDFrame,
+    /// The current position within the frame we're up to.
     p: usize,
+    /// The fragment number we're up to.
     i: u8,
 }
 
@@ -70,8 +85,8 @@ impl Iterator for U2FHIDFrameIterator<'_> {
             let p = self.p;
             // Fragment end position
             self.p = min(l, p + FRAGMENT_SIZE);
-            let i = self.i;
-            self.i += 1;
+            let i = self.i & 0x7f;
+            self.i = i + 1;
             Some(U2FHIDFrame {
                 cid: self.f.cid,
                 cmd: i,
@@ -82,6 +97,8 @@ impl Iterator for U2FHIDFrameIterator<'_> {
     }
 }
 
+/// Merges a fragmented [U2FHIDFrame]s back together. Assumes the LHS of the
+/// operation is the initial fragment.
 impl Add for U2FHIDFrame {
     type Output = Self;
 
@@ -104,8 +121,9 @@ impl Add for U2FHIDFrame {
     }
 }
 
+/// Merges a fragmented [U2FHIDFrame]s back together. Assumes the LHS of the
+/// operation is the initial fragment.
 impl AddAssign for U2FHIDFrame {
-
     fn add_assign(&mut self, rhs: U2FHIDFrame) {
         // Assume LHS is initial
         assert_eq!(self.cid, rhs.cid);
@@ -121,7 +139,8 @@ impl AddAssign for U2FHIDFrame {
     }
 }
 
-
+/// Merges a fragmented [U2FHIDFrame]s back together. Assumes the first element
+/// is the initial fragment. Order of subsequent fragments doesn't matter.
 impl<'a> Sum<&'a U2FHIDFrame> for U2FHIDFrame {
     fn sum<I>(iter: I) -> Self
     where
@@ -163,10 +182,11 @@ impl<'a> Sum<&'a U2FHIDFrame> for U2FHIDFrame {
     }
 }
 
+/// Serialises a [U2FHIDFrame] to bytes to be sent via a USB HID report.
+/// 
+/// This does not fragment packets: see [U2FHIDFrameIterator].
 impl Into<Vec<u8>> for &U2FHIDFrame {
-    /// Serialises a U2FHIDFrame to bytes to be send via a USB HID report
     fn into(self) -> Vec<u8> {
-        // This does not implement fragmentation / continuation packets!
         let mut o: Vec<u8> = vec![0; HID_RPT_SIZE + 1];
 
         // o[0] = 0; (Report ID)
@@ -185,6 +205,7 @@ impl Into<Vec<u8>> for &U2FHIDFrame {
     }
 }
 
+/// Deserialises bytes from a USB HID report into a [U2FHIDFrame].
 impl TryFrom<&[u8]> for U2FHIDFrame {
     type Error = WebauthnCError;
 

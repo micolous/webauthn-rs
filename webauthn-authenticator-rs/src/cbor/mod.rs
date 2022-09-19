@@ -12,7 +12,7 @@ pub use self::get_info::*;
 pub use self::make_credential::*;
 use crate::error::WebauthnCError;
 
-pub trait CBORResponse: Sized {
+pub trait CBORResponse: Sized + std::fmt::Debug {
     fn try_from(i: &[u8]) -> Result<Self, WebauthnCError>;
 }
 
@@ -152,6 +152,7 @@ fn value_to_u32(v: &Value, loc: &str) -> Option<u32> {
     }
 }
 
+#[derive(Debug)]
 pub struct NoResponse {}
 impl CBORResponse for NoResponse {
     fn try_from(_raw: &[u8]) -> Result<Self, WebauthnCError> {
