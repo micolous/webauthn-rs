@@ -66,8 +66,8 @@ pub struct Atr {
     /// capabilities" value (§8.1.1.2.7), and therefore does not support
     /// extended fields (§5.1).
     ///
-    /// FIDO v2.0 [requires][nfc-ext] all devices support short _and_ extended
-    /// length encoding.
+    /// FIDO v2.0 [requires][nfc-ext] all NFC devices support short _and_
+    /// extended length encoding.
     ///
     /// See: [`ISO7816LengthForm`]
     ///

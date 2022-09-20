@@ -1,5 +1,5 @@
 //! ISO/IEC 7816-4 APDUs.
-//! 
+//!
 //! This is used by CTAP v2 NFC tokens, and all CTAP v1/U2F tokens.
 
 #[derive(Debug, PartialEq)]
@@ -17,31 +17,49 @@ pub enum Error {
     ResponseTooShort,
 }
 
-/// The L<sub>c</sub> and L<sub>e</sub> form to use for [`ISO7816RequestAPDU`],
+/// The L<sub>c</sub> and L<sub>e</sub> form to use for [ISO7816RequestAPDU],
 /// per ISO/IEC 7816-4:2005 §5.1.
+///
+/// All smartcards **must** support short form, and communication in extended
+/// form may only be used if
+/// [declared in the ATR][crate::nfc::Atr::extended_lc]. Smartcards which do not
+/// support extended form must use [ISO7816LengthForm::ShortOnly].
+///
+/// FIDO tokens on non-NFC transports are **not required** to support short
+/// form, and **must** support extended form on **all** transports – so must use
+/// [ISO7816LengthForm::ExtendedOnly] for CTAP v1 / U2F commands.
+///
+/// FIDO tokens on NFC transports are required to support **both** short and
+/// extended form.
+///
+/// Truth table:
+///
+/// Spec           | Short Form    | Extended Form
+/// -------------- | ------------- | ------------------
+/// ISO 7816       | required      | optional
+/// FIDO / NFC     | required      | required
+/// FIDO / USB-HID | not supported | required (CTAP v1)
 pub enum ISO7816LengthForm {
-    /// Only use short form (1 byte). This limits
+    /// Only use short form (1 byte length field). This limits
     /// [`ISO7816RequestAPDU::data`] to 255 bytes, and
     /// [`ISO7816RequestAPDU::ne`] to 256 bytes.
     ///
     /// This mode is always supported by smart cards, but may not be supported
     /// by non-NFC FIDO tokens (in CTAPv1 / U2F mode).
     ShortOnly,
-    /// Automatically use extended form (3 bytes), if the request requires it,
-    /// otherwise use short form.
+    /// Automatically use extended form (3 bytes length field), if the request
+    /// requires it, otherwise use short form (1 byte length field). This
+    /// reduces the size of short messages.
     ///
-    /// This may only be used for smartcards which declare support for it in the
-    /// ATR ([`crate::nfc::Atr::extended_lc`]).
+    /// This mode is recommended only for NFC FIDO tokens. This may not be
+    /// supported by non-NFC FIDO tokens (in CTAPv1 / U2F mode).
     Extended,
-    /// Always use extended form, even if the request does not require it.
+    /// Always use extended form (3 bytes length field), even if the request is
+    /// short enough to not require it. This increases the size of short
+    /// messages.
     ///
-    /// This may only be used for smartcards which declare support for it in the
-    /// ATR ([`crate::nfc::Atr::extended_lc`]).
-    /// 
-    /// This mode is required to be supported by FIDO tokens on all transports,
-    /// and is requried on non-NFC transports.
-    ///
-    /// _This is probably only useful for testing._
+    /// This is needed to communicate with non-NFC FIDO tokens in CTAPv1 mode.
+    /// This may not be supported by non-FIDO smartcards.
     ExtendedOnly,
 }
 
