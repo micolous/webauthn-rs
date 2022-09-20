@@ -1,4 +1,4 @@
-pub mod any;
+mod any;
 pub mod iso7816;
 
 pub use crate::transport::any::{AnyToken, AnyTransport};
@@ -31,7 +31,7 @@ where
 }
 
 /// Represents a transport layer protocol for [Token].
-/// 
+///
 /// If you don't care which transport your application uses, use [AnyTransport]
 /// to automatically use all available transports on the platform.
 pub trait Transport: Sized + Default + fmt::Debug {

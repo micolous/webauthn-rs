@@ -1,8 +1,8 @@
 //! All [Response] frame types, used by FIDO tokens over USB HID.
 use crate::error::WebauthnCError;
-use crate::usb::*;
-use crate::usb::framing::U2FHIDFrame;
 use crate::transport::iso7816::ISO7816ResponseAPDU;
+use crate::usb::framing::U2FHIDFrame;
+use crate::usb::*;
 
 /// Response type [U2FHID_INIT]
 #[derive(Debug)]
@@ -23,7 +23,7 @@ impl InitResponse {
     pub fn supports_ctap1(&self) -> bool {
         self.capabilities & CAPABILITY_NMSG == 0
     }
-    
+
     /// `true` if the device suports CTAPv2 / CBOR protocol
     pub fn supports_ctap2(&self) -> bool {
         self.capabilities & CAPABILITY_CBOR > 0
@@ -130,7 +130,7 @@ pub enum Response {
 }
 
 /// Parser for a response [U2FHIDFrame].
-/// 
+///
 /// The frame must be complete (ie: all fragments received) before parsing.
 impl TryFrom<&U2FHIDFrame> for Response {
     type Error = WebauthnCError;

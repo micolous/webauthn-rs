@@ -1,8 +1,8 @@
 //! [USBTransport] communicates with a FIDO token over USB HID, using [hidapi].
-//! 
+//!
 //! This module should work on most platforms with USB support, provided that
 //! the user has permissions.
-//! 
+//!
 //! **Note:** Windows' WebAuthn API (on Windows 10 build 1903 and later) blocks
 //! non-Administrator access to all USB HID FIDO tokens, making them invisible
 //! to normal USB HID APIs.

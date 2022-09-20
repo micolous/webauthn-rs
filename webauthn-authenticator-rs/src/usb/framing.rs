@@ -63,7 +63,7 @@ impl<'a> U2FHIDFrameIterator<'a> {
     /// Creates a new iterator for fragmenting [U2FHIDFrame]
     pub fn new(f: &'a U2FHIDFrame) -> Result<Self, WebauthnCError> {
         if f.data.len() > MAX_SIZE {
-            return Err(WebauthnCError::MessageTooLarge)
+            return Err(WebauthnCError::MessageTooLarge);
         }
         Ok(U2FHIDFrameIterator {
             f: &f,

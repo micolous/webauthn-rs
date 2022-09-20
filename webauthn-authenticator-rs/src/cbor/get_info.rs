@@ -196,7 +196,8 @@ mod tests {
             107, 101, 121,
         ];
 
-        let a = <GetInfoResponse as CBORResponse>::try_from(raw_apdu.as_slice()).expect("Falied to decode apdu");
+        let a = <GetInfoResponse as CBORResponse>::try_from(raw_apdu.as_slice())
+            .expect("Falied to decode apdu");
 
         // Assert the content
         // info!(?a);

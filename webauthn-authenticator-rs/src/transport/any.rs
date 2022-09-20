@@ -1,11 +1,12 @@
-use crate::transport::*;
+//! Abstraction to merge all available transports for the platform.
 #[cfg(feature = "nfc")]
 use crate::nfc::*;
+use crate::transport::*;
 #[cfg(feature = "usb")]
 use crate::usb::*;
 
 /// [AnyTransport] merges all available transports for the platform.
-/// 
+///
 /// If you don't care which transport is used for tokens, prefer to use
 /// [AnyTransport] for the best experience.
 #[derive(Debug)]

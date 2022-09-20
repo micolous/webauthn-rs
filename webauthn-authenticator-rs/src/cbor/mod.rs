@@ -27,7 +27,7 @@ pub trait CBORCommand: Serialize + Sized {
     const HAS_PAYLOAD: bool = true;
 
     type Response: CBORResponse;
-    
+
     /// Converts a CTAP v2 command into a binary form.
     fn cbor(&self) -> Result<Vec<u8>, serde_cbor::Error> {
         // CTAP v2.1, s8.2.9.1.2 (USB CTAPHID_CBOR), s8.3.5 (NFC framing).
@@ -42,7 +42,7 @@ pub trait CBORCommand: Serialize + Sized {
         x.extend_from_slice(&b);
         Ok(x)
     }
-    
+
     /// Converts a CTAP v2 command into a form suitable for transmission with
     /// short ISO/IEC 7816-4 APDUs (over NFC).
     fn to_short_apdus(&self) -> Result<Vec<ISO7816RequestAPDU>, serde_cbor::Error> {

@@ -13,9 +13,9 @@ mod tlv;
 
 pub use self::apdu::*;
 pub use self::atr::*;
-use crate::transport::iso7816::*;
 use super::cbor::*;
 use super::transport::*;
+use crate::transport::iso7816::*;
 
 pub struct NFCReader {
     ctx: Context,
@@ -39,9 +39,7 @@ impl fmt::Debug for NFCReader {
 
 impl fmt::Debug for NFCCard {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("NFCCard")
-            .field("atr", &self.atr)
-            .finish()
+        f.debug_struct("NFCCard").field("atr", &self.atr).finish()
     }
 }
 
@@ -120,8 +118,9 @@ impl Transport for NFCReader {
             return Err(WebauthnCError::Internal);
         }
         // Check every reader ...
-        
-        let r: Result<Vec<NFCCard>, WebauthnCError> = self.rdr_state
+
+        let r: Result<Vec<NFCCard>, WebauthnCError> = self
+            .rdr_state
             .iter()
             .filter(|s| s.event_state().contains(State::PRESENT))
             .map(|s| {
@@ -131,7 +130,7 @@ impl Transport for NFCReader {
                     .map_err(|e| WebauthnCError::Internal)
             })
             .collect();
-        
+
         r
     }
 }
