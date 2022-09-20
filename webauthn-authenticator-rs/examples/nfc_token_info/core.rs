@@ -22,12 +22,13 @@ pub(crate) fn event_loop() {
     // let mut reader = NFCReader::default();
     info!("Using reader: {:?}", reader);
 
-    while let Ok(mut tokens) = reader.tokens() {
-        while let Some(mut card) = tokens.pop() {
-            card.init().expect("couldn't init card");
-            access_card(card);
+    match reader.tokens() {
+        Ok(mut tokens) => {
+            while let Some(mut card) = tokens.pop() {
+                card.init().expect("couldn't init card");
+                access_card(card);
+            }
         }
-
-        break;
+        Err(e) => panic!("Error: {:?}", e),
     }
 }

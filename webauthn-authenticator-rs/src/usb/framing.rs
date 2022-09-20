@@ -93,10 +93,9 @@ impl Iterator for U2FHIDFrameIterator<'_> {
             // First round
             self.s = true;
             Some(U2FHIDFrame {
-                cid: self.f.cid,
-                cmd: self.f.cmd,
                 len: l as u16,
                 data: data.to_vec(),
+                ..self.f
             })
         } else if l == 0 {
             // Already consumed iterator.
@@ -128,12 +127,7 @@ impl Add for U2FHIDFrame {
         let p = INITIAL_FRAGMENT_SIZE + (usize::from(rhs.cmd) * FRAGMENT_SIZE);
         let q = min(p + rhs.data.len(), usize::from(self.len));
         o[p..q].copy_from_slice(&rhs.data[..q - p]);
-        U2FHIDFrame {
-            cid: self.cid,
-            cmd: self.cmd,
-            len: self.len,
-            data: o,
-        }
+        U2FHIDFrame { data: o, ..self }
     }
 }
 
@@ -184,12 +178,7 @@ impl<'a> Sum<&'a U2FHIDFrame> for U2FHIDFrame {
             }
         }
         match s {
-            Some(first) => U2FHIDFrame {
-                cid: first.cid,
-                cmd: first.cmd,
-                len: first.len,
-                data: o,
-            },
+            Some(first) => U2FHIDFrame { data: o, ..first },
             None => EMPTY_FRAME,
         }
     }
