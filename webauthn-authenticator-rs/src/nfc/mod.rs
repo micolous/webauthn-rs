@@ -9,12 +9,11 @@ use std::iter::FromIterator;
 
 mod apdu;
 mod atr;
-mod iso7816;
 mod tlv;
 
 pub use self::apdu::*;
 pub use self::atr::*;
-pub use self::iso7816::*;
+use crate::transport::iso7816::*;
 use super::cbor::*;
 use super::transport::*;
 

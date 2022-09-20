@@ -1,5 +1,6 @@
 use webauthn_authenticator_rs::cbor::*;
 use webauthn_authenticator_rs::nfc::*;
+use webauthn_authenticator_rs::transport::iso7816::*;
 
 #[allow(dead_code)]
 #[derive(Debug)]

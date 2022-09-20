@@ -2,15 +2,15 @@ use serde::Serialize;
 use serde_cbor::{from_slice, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[cfg(feature = "nfc")]
-use crate::nfc::{ISO7816RequestAPDU, FRAG_MAX};
-
 mod get_info;
 mod make_credential;
 
 pub use self::get_info::*;
 pub use self::make_credential::*;
 use crate::error::WebauthnCError;
+use crate::transport::iso7816::ISO7816RequestAPDU;
+
+const FRAG_MAX: usize = 0xF0;
 
 pub trait CBORResponse: Sized + std::fmt::Debug {
     fn try_from(i: &[u8]) -> Result<Self, WebauthnCError>;
@@ -28,7 +28,7 @@ pub trait CBORCommand: Serialize + Sized {
 
     type Response: CBORResponse;
     
-    /// Converts a command into a binary form.
+    /// Converts a CTAP v2 command into a binary form.
     fn cbor(&self) -> Result<Vec<u8>, serde_cbor::Error> {
         // CTAP v2.1, s8.2.9.1.2 (USB CTAPHID_CBOR), s8.3.5 (NFC framing).
         // TODO: BLE is different, it includes a u16 length after the command?
@@ -42,10 +42,9 @@ pub trait CBORCommand: Serialize + Sized {
         x.extend_from_slice(&b);
         Ok(x)
     }
-
-    /// Converts a command into a form suitable for transmission with short
-    /// ISO/IEC 7816-4 APDUs.
-    #[cfg(feature = "nfc")]
+    
+    /// Converts a CTAP v2 command into a form suitable for transmission with
+    /// short ISO/IEC 7816-4 APDUs (over NFC).
     fn to_short_apdus(&self) -> Result<Vec<ISO7816RequestAPDU>, serde_cbor::Error> {
         let cbor = self.cbor()?;
         let chunks = cbor.chunks(FRAG_MAX).rev();
@@ -70,9 +69,8 @@ pub trait CBORCommand: Serialize + Sized {
         Ok(o)
     }
 
-    /// Converts a command into a form suitable for transmission with extended
-    /// ISO/IEC 7816-4 APDUs.
-    #[cfg(feature = "nfc")]
+    /// Converts a CTAP v2 command into a form suitable for transmission with
+    /// extended ISO/IEC 7816-4 APDUs (over NFC).
     fn to_extended_apdu(&self) -> Result<ISO7816RequestAPDU, serde_cbor::Error> {
         Ok(ISO7816RequestAPDU {
             cla: 0x80,

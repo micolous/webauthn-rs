@@ -6,14 +6,13 @@ pub const APPLET_DF: [u8; 8] = [
     /* RID */ 0xA0, 0x00, 0x00, 0x06, 0x47, /* PIX */ 0x2F, 0x00, 0x01,
 ];
 
-pub const FRAG_MAX: usize = 0xF0;
-
 #[cfg(test)]
 mod tests {
     //use super::*;
     use crate::cbor::CBORCommand;
     use crate::cbor::*;
     use crate::nfc::*;
+    use crate::transport::iso7816::*;
 
     #[cfg(feature = "nfc")]
     #[test]

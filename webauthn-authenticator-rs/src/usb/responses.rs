@@ -1,9 +1,12 @@
+//! All [Response] frame types, used by FIDO tokens over USB HID.
 use crate::error::WebauthnCError;
 use crate::usb::*;
 use crate::usb::framing::U2FHIDFrame;
+use crate::transport::iso7816::ISO7816ResponseAPDU;
 
+/// Response type [U2FHID_INIT]
 #[derive(Debug)]
-pub(crate) struct InitResponse {
+pub struct InitResponse {
     pub nonce: Vec<u8>,
     /// Allocated channel identifier
     pub cid: u32,
@@ -51,41 +54,9 @@ impl TryFrom<&[u8]> for InitResponse {
     }
 }
 
-/// CTAPv1 APDU (ISO 7816-like)
-#[derive(Debug, PartialEq)]
-pub(crate) struct MessageResponse {
-    /// Data payload
-    data: Vec<u8>,
-    /// Status byte 1
-    sw1: u8,
-    /// Status byte 2
-    sw2: u8,
-}
-
-impl MessageResponse {
-    /// Did we get a simple "ok" response?
-    fn is_ok(&self) -> bool {
-        self.sw1 == 0x90 && self.sw2 == 0
-    }
-}
-
-impl TryFrom<&[u8]> for MessageResponse {
-    type Error = ();
-    fn try_from(d: &[u8]) -> Result<Self, Self::Error> {
-        if d.len() < 2 {
-            return Err(());
-        }
-        Ok(MessageResponse {
-            data: d[..d.len() - 2].to_vec(),
-            sw1: d[d.len() - 2],
-            sw2: d[d.len() - 1],
-        })
-    }
-}
-
 /// CTAPv2 CBOR message
 #[derive(Debug, PartialEq)]
-pub(crate) struct CBORResponse {
+pub struct CBORResponse {
     /// Status code
     pub status: u8,
     /// Data payload
@@ -106,7 +77,7 @@ impl TryFrom<&[u8]> for CBORResponse {
 }
 
 #[derive(Debug)]
-pub(crate) enum U2FError {
+pub enum U2FError {
     None,
     InvalidCommand,
     InvalidParameter,
@@ -148,15 +119,19 @@ impl From<&[u8]> for U2FError {
     }
 }
 
+/// Type for parsing all responses from a FIDO token.
 #[derive(Debug)]
-pub(crate) enum Response {
+pub enum Response {
     Init(InitResponse),
-    Msg(MessageResponse),
+    Msg(ISO7816ResponseAPDU),
     Cbor(CBORResponse),
     Error(U2FError),
     Unknown,
 }
 
+/// Parser for a response [U2FHIDFrame].
+/// 
+/// The frame must be complete (ie: all fragments received) before parsing.
 impl TryFrom<&U2FHIDFrame> for Response {
     type Error = WebauthnCError;
 
@@ -171,7 +146,7 @@ impl TryFrom<&U2FHIDFrame> for Response {
             U2FHID_INIT => InitResponse::try_from(b)
                 .map(Response::Init)
                 .unwrap_or(Response::Unknown),
-            U2FHID_MSG => MessageResponse::try_from(b)
+            U2FHID_MSG => ISO7816ResponseAPDU::try_from(b)
                 .map(Response::Msg)
                 .unwrap_or(Response::Unknown),
             U2FHID_CBOR => CBORResponse::try_from(b)

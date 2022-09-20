@@ -1,4 +1,6 @@
-use super::atr::Atr;
+//! ISO/IEC 7816-4 APDUs.
+//! 
+//! This is used by CTAP v2 NFC tokens, and all CTAP v1/U2F tokens.
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -22,17 +24,22 @@ pub enum ISO7816LengthForm {
     /// [`ISO7816RequestAPDU::data`] to 255 bytes, and
     /// [`ISO7816RequestAPDU::ne`] to 256 bytes.
     ///
-    /// This mode is always supported.
+    /// This mode is always supported by smart cards, but may not be supported
+    /// by non-NFC FIDO tokens (in CTAPv1 / U2F mode).
     ShortOnly,
-    /// Automatically use extended form (3 bytes), if the request requires it.
+    /// Automatically use extended form (3 bytes), if the request requires it,
+    /// otherwise use short form.
     ///
-    /// This may only be used if the card declares support for it in the ATR
-    /// ([`Atr::extended_lc`]).
+    /// This may only be used for smartcards which declare support for it in the
+    /// ATR ([`crate::nfc::Atr::extended_lc`]).
     Extended,
     /// Always use extended form, even if the request does not require it.
     ///
-    /// This may only be used if the card declares support for it in the ATR
-    /// ([`Atr::extended_lc`]).
+    /// This may only be used for smartcards which declare support for it in the
+    /// ATR ([`crate::nfc::Atr::extended_lc`]).
+    /// 
+    /// This mode is required to be supported by FIDO tokens on all transports,
+    /// and is requried on non-NFC transports.
     ///
     /// _This is probably only useful for testing._
     ExtendedOnly,
@@ -53,15 +60,15 @@ pub struct ISO7816RequestAPDU {
     /// Optional command data, up to 255 bytes in short form, or up to 65535
     /// bytes in extended form.
     ///
-    /// Extended form can only be used on cards that declare support for it in
-    /// the ATR ([`Atr::extended_lc`]).
+    /// Extended form can only be used with smartcards which declare support for
+    /// it in the ATR ([`crate::nfc::Atr::extended_lc`]).
     pub data: Vec<u8>,
 
     /// The maximum expected response length from the card (N<sub>e</sub>), in
     /// bytes, up to 256 bytes in short form, or 65535 bytes in extended form.
     ///
-    /// Extended form can only be used on cards that declare support for it in
-    /// the ATR ([`Atr::extended_lc`]).
+    /// Extended form can only be used with smartcards which declare support for
+    /// it in the ATR ([`Atr::extended_lc`]).
     pub ne: usize,
 }
 
