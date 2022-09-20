@@ -13,8 +13,8 @@ mod tlv;
 
 pub use self::atr::*;
 use super::cbor::*;
-use super::transport::*;
 use crate::transport::iso7816::*;
+use crate::transport::*;
 
 /// Version string for a token which supports CTAP v1 / U2F
 pub const APPLET_U2F_V2: [u8; 6] = [0x55, 0x32, 0x46, 0x5f, 0x56, 0x32];
