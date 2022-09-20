@@ -1,6 +1,5 @@
-//! ISO/IEC 7816-4 APDUs.
-//!
-//! This is used by CTAP v2 NFC tokens, and all CTAP v1/U2F tokens.
+//! ISO/IEC 7816-4 APDUs, used by CTAP v2 NFC tokens, and all CTAP v1/U2F
+//! tokens.
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -37,6 +36,7 @@ pub enum Error {
 /// Spec           | Short Form    | Extended Form
 /// -------------- | ------------- | ------------------
 /// ISO 7816       | required      | optional
+/// FIDO / BTLE    | not supported | required (CTAP v1)
 /// FIDO / NFC     | required      | required
 /// FIDO / USB-HID | not supported | required (CTAP v1)
 pub enum ISO7816LengthForm {
@@ -118,8 +118,7 @@ fn push_length_value(buf: &mut Vec<u8>, value: usize, form: u8) -> Result<(), Er
             // uint16be prefixed with 0
             buf.push(0);
         }
-        buf.push(((value >> 8) & 0xff) as u8);
-        buf.push((value & 0xff) as u8);
+        buf.extend_from_slice(&(value as u16).to_be_bytes());
     } else if value > 256 {
         return Err(Error::IntegerOverflow);
     } else {
@@ -272,7 +271,7 @@ pub fn select_by_df_name(df: &[u8]) -> ISO7816RequestAPDU {
 }
 
 /// Requests a chunked response from the previous command that was too long for
-/// the previous [`ISO7816RequestAPDU.ne`].
+/// the previous [`ISO7816RequestAPDU::ne`].
 ///
 /// Reference: ISO/IEC 7816-4:2005 §7.6.1
 pub fn get_response(cla: u8, ne: usize) -> ISO7816RequestAPDU {
@@ -295,7 +294,9 @@ pub const EMPTY_RESPONSE: ISO7816ResponseAPDU = ISO7816ResponseAPDU {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nfc::APPLET_DF;
+
+    // Copy of crate::nfc::APPLET_DF, so that the tests don't require NFC.
+    const APPLET_DF: [u8; 8] = [0xA0, 0x00, 0x00, 0x06, 0x47, 0x2F, 0x00, 0x01];
 
     macro_rules! length_tests {
         ($($name:ident: $value:expr,)*) => {

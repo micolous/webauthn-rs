@@ -1,3 +1,4 @@
+//! Transport abstraction layer for communication with FIDO tokens.
 mod any;
 pub mod iso7816;
 

@@ -1,3 +1,4 @@
+//! [NFCReader] communicates with a FIDO token over NFC, using the [pcsc] API.
 use crate::error::WebauthnCError;
 
 use webauthn_rs_proto::{PubKeyCredParams, RelyingParty, User};
@@ -7,15 +8,22 @@ use std::ffi::CString;
 use std::fmt;
 use std::iter::FromIterator;
 
-mod apdu;
 mod atr;
 mod tlv;
 
-pub use self::apdu::*;
 pub use self::atr::*;
 use super::cbor::*;
 use super::transport::*;
 use crate::transport::iso7816::*;
+
+/// Version string for a token which supports CTAP v1 / U2F
+pub const APPLET_U2F_V2: [u8; 6] = [0x55, 0x32, 0x46, 0x5f, 0x56, 0x32];
+/// Version string for a token which only supports CTAP v2
+pub const APPLET_FIDO_2_0: [u8; 8] = [0x46, 0x49, 0x44, 0x4f, 0x5f, 0x32, 0x5f, 0x30];
+/// ISO 7816 FIDO applet name
+pub const APPLET_DF: [u8; 8] = [
+    /* RID */ 0xA0, 0x00, 0x00, 0x06, 0x47, /* PIX */ 0x2F, 0x00, 0x01,
+];
 
 pub struct NFCReader {
     ctx: Context,
