@@ -95,7 +95,7 @@ impl Iterator for U2FHIDFrameIterator<'_> {
             Some(U2FHIDFrame {
                 len: l as u16,
                 data: data.to_vec(),
-                ..self.f
+                ..*self.f
             })
         } else if l == 0 {
             // Already consumed iterator.
@@ -131,7 +131,7 @@ impl Add for U2FHIDFrame {
     }
 }
 
-/// Merges a fragmented [U2FHIDFrame]s back together. Assumes the LHS of the
+/// Merges fragmented [U2FHIDFrame]s back together. Assumes the LHS of the
 /// operation is the initial fragment.
 impl AddAssign for U2FHIDFrame {
     fn add_assign(&mut self, rhs: U2FHIDFrame) {
@@ -178,7 +178,7 @@ impl<'a> Sum<&'a U2FHIDFrame> for U2FHIDFrame {
             }
         }
         match s {
-            Some(first) => U2FHIDFrame { data: o, ..first },
+            Some(first) => U2FHIDFrame { data: o, ..*first },
             None => EMPTY_FRAME,
         }
     }

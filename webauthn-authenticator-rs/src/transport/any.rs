@@ -51,20 +51,10 @@ impl Transport for AnyTransport {
 
         let mut o: Vec<Self::Token> = Vec::new();
         #[cfg(feature = "nfc")]
-        {
-            let mut tokens = self.nfc.tokens()?;
-            while let Some(t) = tokens.pop() {
-                o.push(AnyToken::Nfc(t));
-            }
-        }
+        o.extend(self.nfc.tokens()?.into_iter().map(AnyToken::Nfc));
 
         #[cfg(feature = "usb")]
-        {
-            let mut tokens = self.usb.tokens()?;
-            while let Some(t) = tokens.pop() {
-                o.push(AnyToken::Usb(t));
-            }
-        }
+        o.extend(self.usb.tokens()?.into_iter().map(AnyToken::Usb));
 
         Ok(o)
     }

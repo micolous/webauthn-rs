@@ -13,7 +13,7 @@ u2fhid = ["authenticator"]
 nfc = ["pcsc"]
 usb = ["hidapi"]
 
-default = []
+default = ["nfc", "usb"]
 
 [package.metadata.docs.rs]
 all-features = true
