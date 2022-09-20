@@ -1,6 +1,5 @@
-use webauthn_authenticator_rs::nfc::*;
+// use webauthn_authenticator_rs::nfc::*;
 use webauthn_authenticator_rs::transport::*;
-use webauthn_authenticator_rs::usb::*;
 
 fn access_card<T: Token>(card: T) {
     info!("Card detected ...");
@@ -9,8 +8,8 @@ fn access_card<T: Token>(card: T) {
         Ok(Selected::FIDO_2_1_PRE(mut token)) => {
             info!("Using token {:?}", token);
 
-            token.hack_make_cred();
-            token.deselect_applet();
+            token.hack_make_cred().unwrap();
+            token.deselect_applet().unwrap();
         }
         _ => {
             unimplemented!();
@@ -19,15 +18,16 @@ fn access_card<T: Token>(card: T) {
 }
 
 pub(crate) fn event_loop() {
-    let mut reader = USBTransport::default();
+    let mut reader = AnyTransport::default();
     // let mut reader = NFCReader::default();
     info!("Using reader: {:?}", reader);
 
     while let Ok(mut tokens) = reader.tokens() {
         while let Some(mut card) = tokens.pop() {
-            card.init();
+            card.init().expect("couldn't init card");
             access_card(card);
         }
 
+        break;
     }
 }

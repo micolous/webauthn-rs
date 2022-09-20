@@ -89,15 +89,26 @@ impl USBToken {
         }
     }
 
-    fn send(&self, frame: &U2FHIDFrame) -> Result<(), WebauthnCError> {
+    /// Sends a single [U2FHIDFrame] to the device, without fragmentation.
+    fn send_one(&self, frame: &U2FHIDFrame) -> Result<(), WebauthnCError> {
         let d: Vec<u8> = frame.into();
-        println!(">>> {:02x?}", d);
+        trace!(">>> {:02x?}", d);
         self.device
             .write(&d)
             .map_err(|e| WebauthnCError::Internal)
             .map(|_| ())
     }
 
+    /// Sends a [U2FHIDFrame] to the device, fragmenting the message to fit
+    /// within the USB HID MTU.
+    fn send(&self, frame: &U2FHIDFrame) -> Result<(), WebauthnCError> {
+        for f in U2FHIDFrameIterator::new(&frame)? {
+            self.send_one(&f)?;
+        }
+        Ok(())
+    }
+
+    /// Receives a single [U2FHIDFrame] from the device, without fragmentation.
     fn recv_one(&self) -> Result<U2FHIDFrame, WebauthnCError> {
         let mut ret: Vec<u8> = vec![0; HID_RPT_SIZE];
 
@@ -106,11 +117,12 @@ impl USBToken {
             .read_timeout(&mut ret, U2FHID_TRANS_TIMEOUT)
             .map_err(|_| WebauthnCError::Internal)?;
 
-        println!("<<< {:02x?}", &ret[..len]);
-
+        trace!("<<< {:02x?}", &ret[..len]);
         U2FHIDFrame::try_from(&ret[..len])
     }
 
+    /// Recives a [Response] from the device, handling fragmented [U2FHIDFrame]
+    /// responses if needed.
     fn recv(&self) -> Result<Response, WebauthnCError> {
         // Recieve first chunk
         let mut f = self.recv_one()?;
@@ -140,11 +152,7 @@ impl Token for USBToken {
             len: cbor.len() as u16,
             data: cbor,
         };
-
-        // Send as fragments
-        for f in U2FHIDFrameIterator::new(&cmd) {
-            self.send(&f);
-        }
+        self.send(&cmd);
 
         // Get a response
         match self.recv()? {
@@ -157,6 +165,7 @@ impl Token for USBToken {
     }
 
     fn init(&mut self) -> Result<(), WebauthnCError> {
+        // Setup a channel to communicate with the device (CTAPHID_INIT).
         let mut nonce: [u8; 8] = [0; 8];
         rand_bytes(&mut nonce).map_err(|_| WebauthnCError::OpenSSL)?;
 
@@ -184,6 +193,6 @@ impl Token for USBToken {
     }
 
     fn close(&self) -> Result<(), WebauthnCError> {
-        todo!();
+        Ok(())
     }
 }

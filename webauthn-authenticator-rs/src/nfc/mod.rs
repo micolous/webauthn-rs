@@ -38,6 +38,14 @@ impl fmt::Debug for NFCReader {
     }
 }
 
+impl fmt::Debug for NFCCard {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NFCCard")
+            .field("atr", &self.atr)
+            .finish()
+    }
+}
+
 impl Default for NFCReader {
     fn default() -> Self {
         let ctx = Context::establish(Scope::User).expect("Failed to establish pcsc context");
@@ -230,50 +238,6 @@ impl NFCCard {
         r.data = response_data;
         Ok(r)
     }
-    /*
-    pub fn authenticator_get_info(&mut self) -> Result<GetInfoResponse, WebauthnCError> {
-        let apdus = (GetInfoRequest {}).to_short_apdus().unwrap();
-        let resp = self.transmit_chunks(&apdus)?;
-
-        // CTAP has its own extra status code over NFC in the first byte.
-        <GetInfoResponse as CBORResponse>::try_from(&resp.data[1..]).map_err(|e| {
-            error!("error: {:?}", e);
-            WebauthnCError::Cbor
-        })
-    }
-
-    /// Selects the U2Fv2 applet.
-    pub fn select_u2f_v2_applet(mut self) -> Result<Selected<NFCCard>, WebauthnCError> {
-        let resp = self
-            .transmit(&select_by_df_name(&APPLET_DF), ISO7816LengthForm::ShortOnly)
-            .expect("Failed to select CTAP2.1 applet");
-
-        if !resp.is_ok() {
-            error!("Error selecting applet: {:02x} {:02x}", resp.sw1, resp.sw2);
-            return Err(WebauthnCError::NotSupported);
-        }
-
-        if resp.data != &APPLET_U2F_V2 {
-            error!("Unsupported applet: {:02x?}", &resp.data);
-            return Err(WebauthnCError::NotSupported);
-        }
-
-        // Read the card info.
-        let tokinfo = self.authenticator_get_info()?;
-
-        debug!(?tokinfo);
-
-        if tokinfo.versions.contains("FIDO_2_1_PRE") {
-            Ok(Selected::FIDO_2_1_PRE(Ctap2_1_pre {
-                tokinfo,
-                transport: self,
-            }))
-        } else {
-            error!(?tokinfo.versions);
-            return Err(WebauthnCError::NotSupported);
-        }
-    }
-    */
 }
 
 impl Token for NFCCard {

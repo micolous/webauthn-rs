@@ -17,6 +17,8 @@ const INITIAL_FRAGMENT_SIZE: usize = HID_RPT_SIZE - 7;
 /// The maximum data payload for the second and subsequent fragments of a
 /// message, in bytes.
 const FRAGMENT_SIZE: usize = HID_RPT_SIZE - 5;
+/// Maximum total size for a U2FHID message after chunking, in bytes.
+pub const MAX_SIZE: usize = INITIAL_FRAGMENT_SIZE + (0x80 * FRAGMENT_SIZE);
 
 /// U2F HID request frame type.
 #[derive(Clone, Debug, PartialEq)]
@@ -59,13 +61,16 @@ pub(crate) struct U2FHIDFrameIterator<'a> {
 
 impl<'a> U2FHIDFrameIterator<'a> {
     /// Creates a new iterator for fragmenting [U2FHIDFrame]
-    pub fn new(f: &'a U2FHIDFrame) -> Self {
-        U2FHIDFrameIterator {
+    pub fn new(f: &'a U2FHIDFrame) -> Result<Self, WebauthnCError> {
+        if f.data.len() > MAX_SIZE {
+            return Err(WebauthnCError::MessageTooLarge)
+        }
+        Ok(U2FHIDFrameIterator {
             f: &f,
             p: &f.data,
             i: 0,
             s: false,
-        }
+        })
     }
 }
 
@@ -150,7 +155,7 @@ impl AddAssign for U2FHIDFrame {
     }
 }
 
-/// Merges a fragmented [U2FHIDFrame]s back together. Assumes the first element
+/// Merges fragmented [U2FHIDFrame]s back together. Assumes the first element
 /// is the initial fragment. Order of subsequent fragments doesn't matter.
 impl<'a> Sum<&'a U2FHIDFrame> for U2FHIDFrame {
     fn sum<I>(iter: I) -> Self
@@ -254,6 +259,7 @@ impl TryFrom<&[u8]> for U2FHIDFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::WebauthnCError;
 
     #[test]
     fn fragment_short() {
@@ -264,7 +270,7 @@ mod tests {
             data: vec![1, 2],
         };
 
-        let fragments: Vec<U2FHIDFrame> = U2FHIDFrameIterator::new(&full).collect();
+        let fragments: Vec<U2FHIDFrame> = U2FHIDFrameIterator::new(&full).unwrap().collect();
         assert_eq!(fragments.len(), 1);
         assert_eq!(fragments[0], full);
 
@@ -282,7 +288,7 @@ mod tests {
         };
         assert_eq!(full.complete(), true);
 
-        let fragments: Vec<U2FHIDFrame> = U2FHIDFrameIterator::new(&full).collect();
+        let fragments: Vec<U2FHIDFrame> = U2FHIDFrameIterator::new(&full).unwrap().collect();
         // 57, 59, 59, 59, 21
         assert_eq!(fragments.len(), 5);
         for f in &fragments {
@@ -316,5 +322,44 @@ mod tests {
         p += fragments[4].clone();
         assert_eq!(p, full);
         assert_eq!(p.complete(), true);
+    }
+
+    #[test]
+    fn fragment_max_size() {
+        // Maximum message size over U2F HID is 7609 bytes, this should encode
+        // correctly.
+        let full = U2FHIDFrame {
+            cid: 1,
+            cmd: 0x90,
+            len: 7609,
+            data: vec![0xFF; 7609],
+        };
+
+        let fragments: Vec<U2FHIDFrame> = U2FHIDFrameIterator::new(&full).unwrap().collect();
+        assert_eq!(fragments.len(), 0x81);
+        assert_eq!(fragments[0].cid, 1);
+        assert_eq!(fragments[0].cmd, 0x90);
+        assert_eq!(fragments[0].len, 7609);
+        assert_eq!(fragments[0].data, vec![0xFF; 57]);
+        for f in &fragments[1..] {
+            assert_eq!(f.cid, 1);
+            assert_eq!(f.data, vec![0xFF; 59]);
+        }
+
+        // Reassembly
+        let assembled: U2FHIDFrame = fragments.iter().sum();
+        assert_eq!(assembled, full);
+        assert_eq!(assembled.complete(), true);
+
+        // One more byte should error, and it shouldn't matter what `len` says
+        let full = U2FHIDFrame {
+            cid: 1,
+            cmd: 0x90,
+            len: 1,
+            data: vec![0; 7609 + 1],
+        };
+
+        let err = U2FHIDFrameIterator::new(&full).err();
+        assert_eq!(Some(WebauthnCError::MessageTooLarge), err);
     }
 }

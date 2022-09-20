@@ -181,7 +181,7 @@ pub struct ISO7816ResponseAPDU {
     pub sw2: u8,
 }
 
-impl<'a> TryFrom<&[u8]> for ISO7816ResponseAPDU {
+impl TryFrom<&[u8]> for ISO7816ResponseAPDU {
     type Error = self::Error;
 
     /// Attempts to deserialize a ISO/IEC 7816-4 response APDU.

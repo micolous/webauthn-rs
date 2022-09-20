@@ -1,3 +1,7 @@
+pub mod any;
+
+pub use crate::transport::any::{AnyToken, AnyTransport};
+
 use base64urlsafedata::Base64UrlSafeData;
 use std::fmt;
 use webauthn_rs_proto::{PubKeyCredParams, RelyingParty, User};
@@ -26,7 +30,10 @@ where
 }
 
 /// Represents a transport layer protocol for [Token].
-pub trait Transport: Sized + Default {
+/// 
+/// If you don't care which transport your application uses, use [AnyTransport]
+/// to automatically use all available transports on the platform.
+pub trait Transport: Sized + Default + fmt::Debug {
     /// The type of [Token] returned by this [Transport].
     type Token: Token;
 
@@ -35,7 +42,7 @@ pub trait Transport: Sized + Default {
 }
 
 /// Represents a connection to a single CTAP token over a [Transport].
-pub trait Token: Sized {
+pub trait Token: Sized + fmt::Debug {
     /// Transmit a CBOR message to a token
     fn transmit<C, R>(&self, cmd: C) -> Result<R, WebauthnCError>
     where
