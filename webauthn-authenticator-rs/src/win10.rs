@@ -95,7 +95,7 @@ impl AuthenticatorBackend for Win10 {
             println!("response data:");
             println!("{:?}", a);
 
-            let c = convert_attestation(a);
+            let c = convert_attestation(a, clientdata.client_data_json);
             println!("converted:");
             println!("{:?}", c);
 
@@ -328,26 +328,44 @@ impl AsRef<WEBAUTHN_COSE_CREDENTIAL_PARAMETERS> for WinCoseCredentialParameters 
     }
 }
 
+fn copy_ptr<T>(cb: u32, pb: *const T) -> Result<Vec<T>, WebauthnCError> where T: Clone {
+    if pb.is_null() {
+        return Err(WebauthnCError::Internal)
+    }
+    let mut dst: Vec<T> = Vec::with_capacity(cb as usize);
+    unsafe {
+        std::ptr::copy(pb, dst.as_mut_ptr(), cb as usize);
+        dst.set_len(cb as usize)
+    }
+    Ok(dst)
+}
+
 fn convert_attestation(
     a: &WEBAUTHN_CREDENTIAL_ATTESTATION,
+    client_data_json: String,
 ) -> Result<RegisterPublicKeyCredential, WebauthnCError> {
-    let cred_id_len = a.cbCredentialId as usize;
-    let mut cred_id: Vec<u8> = Vec::with_capacity(cred_id_len);
-    unsafe {
-        std::ptr::copy(a.pbCredentialId, cred_id.as_mut_ptr(), cred_id_len);
-        cred_id.set_len(cred_id_len);
-    }
+    let cred_id = copy_ptr(a.cbCredentialId, a.pbCredentialId)?;
+    let attesation = copy_ptr(a.cbAttestation, a.pbAttestation)?;
+    let type_: String = unsafe { a.pwszFormatType.to_string().unwrap() };
+    // let cred_id_len = a.cbCredentialId as usize;
+    // let mut cred_id: Vec<u8> = Vec::with_capacity(cred_id_len);
+    // unsafe {
+    //     std::ptr::copy(a.pbCredentialId, cred_id.as_mut_ptr(), cred_id_len);
+    //     cred_id.set_len(cred_id_len);
+    // }
+
+    // let attestation_len 
 
     let id: String = Base64UrlSafeData(cred_id.clone()).to_string();
 
     Ok(RegisterPublicKeyCredential {
-        id: id,
+        id,
         raw_id: Base64UrlSafeData(cred_id),
-        type_: "TODO".into(),
+        type_,
         extensions: RegistrationExtensionsClientOutputs::default(),
         response: AuthenticatorAttestationResponseRaw {
-            attestation_object: Base64UrlSafeData("TODO".into()),
-            client_data_json: Base64UrlSafeData("TODO".into()),
+            attestation_object: Base64UrlSafeData(attesation),
+            client_data_json: Base64UrlSafeData(client_data_json.into_bytes()),
             transports: None,
         },
     })

@@ -7,6 +7,8 @@ use webauthn_authenticator_rs::AuthenticatorBackend;
 use webauthn_rs_core::WebauthnCore as Webauthn;
 
 fn main() {
+    tracing_subscriber::fmt::init();
+
     let wan = Webauthn::new_unsafe_experts_only(
         "https://localhost:8080/auth",
         "localhost",
@@ -63,7 +65,6 @@ fn main() {
 
     info!("auth_res -> {:x?}", auth_res);
 
-    // tracing_subscriber::fmt::init();
 
     // core::event_loop();
 }
