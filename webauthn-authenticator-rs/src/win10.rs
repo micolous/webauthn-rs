@@ -9,7 +9,6 @@ use webauthn_rs_proto::{
     PublicKeyCredentialRequestOptions, RegisterPublicKeyCredential, User,
 };
 
-use openssl::sha;
 use std::thread::sleep;
 use windows::core::{GUID, HSTRING, PCWSTR};
 use windows::w;
@@ -80,20 +79,8 @@ impl AuthenticatorBackend for Win10 {
         //     pCredentialParameters: pubkeycredparams.as_mut_ptr(),
         // };
 
-        let clientdata = creation_to_clientdata(origin, options.challenge.clone());
-        //  Let clientDataJSON be the JSON-serialized client data constructed from collectedClientData.
-        let mut client_data_json =
-            serde_json::to_string(&clientdata).map_err(|_| WebauthnCError::Json)?;
-
-        // Let clientDataHash be the hash of the serialized client data represented by clientDataJSON.
-        let client_data_json_hash = compute_sha256(client_data_json.as_bytes()).to_vec();
-
-        let clientdata = WEBAUTHN_CLIENT_DATA {
-            dwVersion: WEBAUTHN_CLIENT_DATA_CURRENT_VERSION,
-            cbClientDataJSON: client_data_json.len() as u32,
-            pbClientDataJSON: client_data_json.as_mut_ptr(),
-            pwszHashAlgId: SHA_256.into(),
-        };
+        let clientdata = WinClientData::try_from(
+            &creation_to_clientdata(origin, options.challenge.clone()))?;
 
         let makecredopts = WinAuthenticatorMakeCredentialOptions::new(&options, timeout_ms);
 
@@ -104,7 +91,7 @@ impl AuthenticatorBackend for Win10 {
                 &self.rp,
                 userinfo.as_ref(),
                 pubkeycredparams.as_ref(),
-                &clientdata,
+                clientdata.as_ref(),
                 Some(makecredopts.as_ref()),
             )
         };
@@ -204,22 +191,35 @@ impl AsRef<WEBAUTHN_USER_ENTITY_INFORMATION> for WinUserEntityInformation {
     }
 }
 
-// fn creation_to_userinformation(user: &User) -> WEBAUTHN_USER_ENTITY_INFORMATION {
-//     let mut id = user.id.to_string();
-//     let id_len = id.len();
-//     let id_ptr = id.as_mut_ptr();
-//     let name = str_to_pcwstr(&user.name);
-//     let display_name = str_to_pcwstr(&user.display_name);
+// Wrapper for [WEBAUTHN_CLIENT_DATA] to ensure pointer lifetime.
+struct WinClientData {
+    client_data_json: String,
+    native: WEBAUTHN_CLIENT_DATA,
+}
 
-//     WEBAUTHN_USER_ENTITY_INFORMATION {
-//         dwVersion: WEBAUTHN_USER_ENTITY_INFORMATION_CURRENT_VERSION,
-//         cbId: id_len as u32,
-//         pbId: id_ptr,
-//         pwszName: name,
-//         pwszIcon: PCWSTR::null(),
-//         pwszDisplayName: display_name,
-//     }
-// }
+impl TryFrom<&CollectedClientData> for WinClientData {
+    type Error = WebauthnCError;
+    fn try_from(clientdata: &CollectedClientData) -> Result<Self, Self::Error> {
+        //  Let clientDataJSON be the JSON-serialized client data constructed from collectedClientData.
+        let mut client_data_json =
+            serde_json::to_string(clientdata).map_err(|_| WebauthnCError::Json)?;
+
+        let native = WEBAUTHN_CLIENT_DATA {
+            dwVersion: WEBAUTHN_CLIENT_DATA_CURRENT_VERSION,
+            cbClientDataJSON: client_data_json.len() as u32,
+            pbClientDataJSON: client_data_json.as_mut_ptr(),
+            pwszHashAlgId: SHA_256.into(),
+        };
+
+        Ok(Self { client_data_json, native })
+    }
+}
+
+impl AsRef<WEBAUTHN_CLIENT_DATA> for WinClientData {
+    fn as_ref(&self) -> &WEBAUTHN_CLIENT_DATA {
+        &self.native
+    }
+}
 
 fn creation_to_clientdata(origin: Url, challenge: Base64UrlSafeData) -> CollectedClientData {
     CollectedClientData {
@@ -260,46 +260,18 @@ impl WinAuthenticatorMakeCredentialOptions {
             dwEnterpriseAttestation: 0,
             dwLargeBlobSupport: 0,
             bPreferResidentKey: false.into(),
-        }    ;
+        };
         Self { native }
     }
 }
 
-impl AsRef<WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS> for WinAuthenticatorMakeCredentialOptions {
+impl AsRef<WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS>
+    for WinAuthenticatorMakeCredentialOptions
+{
     fn as_ref(&self) -> &WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS {
         &self.native
     }
 }
-
-// fn creation_to_makecredopts(
-//     options: &PublicKeyCredentialCreationOptions,
-//     timeout_ms: u32,
-// ) -> WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS {
-//     // todo!();
-//     WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS {
-//         dwVersion: WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS_CURRENT_VERSION,
-//         dwTimeoutMilliseconds: timeout_ms,
-//         // TODO
-//         CredentialList: WEBAUTHN_CREDENTIALS {
-//             cCredentials: 0,
-//             pCredentials: [].as_mut_ptr(),
-//         },
-//         Extensions: WEBAUTHN_EXTENSIONS {
-//             cExtensions: 0,
-//             pExtensions: [].as_mut_ptr(),
-//         },
-//         dwAuthenticatorAttachment: 0,
-//         bRequireResidentKey: false.into(),
-//         dwUserVerificationRequirement: 0,
-//         dwAttestationConveyancePreference: 0,
-//         dwFlags: 0,
-//         pCancellationId: std::ptr::null_mut(),
-//         pExcludeCredentialList: std::ptr::null_mut(),
-//         dwEnterpriseAttestation: 0,
-//         dwLargeBlobSupport: 0,
-//         bPreferResidentKey: false.into(),
-//     }
-// }
 
 /// Wrapper for [WEBAUTHN_COSE_CREDENTIAL_PARAMETER] to ensure pointer lifetime.
 struct WinCoseCredentialParameter {
@@ -319,12 +291,6 @@ impl From<&PubKeyCredParams> for WinCoseCredentialParameter {
     }
 }
 
-// impl AsRef<WEBAUTHN_COSE_CREDENTIAL_PARAMETER> for WinCoseCredentialParameter {
-//     fn as_ref(&self) -> &WEBAUTHN_COSE_CREDENTIAL_PARAMETER {
-//         &self.native
-//     }
-// }
-
 struct WinCoseCredentialParameters {
     // params: Vec<WinCoseCredentialParameter>,
     l: Vec<WEBAUTHN_COSE_CREDENTIAL_PARAMETER>,
@@ -333,10 +299,8 @@ struct WinCoseCredentialParameters {
 
 impl From<Vec<WinCoseCredentialParameter>> for WinCoseCredentialParameters {
     fn from(params: Vec<WinCoseCredentialParameter>) -> Self {
-        let mut l: Vec<WEBAUTHN_COSE_CREDENTIAL_PARAMETER> = params
-            .iter()
-            .map(|p| p.native)
-            .collect();
+        let mut l: Vec<WEBAUTHN_COSE_CREDENTIAL_PARAMETER> =
+            params.iter().map(|p| p.native).collect();
 
         let native = WEBAUTHN_COSE_CREDENTIAL_PARAMETERS {
             cCredentialParameters: l.len() as u32,
@@ -348,7 +312,10 @@ impl From<Vec<WinCoseCredentialParameter>> for WinCoseCredentialParameters {
 
 impl From<&Vec<PubKeyCredParams>> for WinCoseCredentialParameters {
     fn from(params: &Vec<PubKeyCredParams>) -> Self {
-        let params: Vec<WinCoseCredentialParameter> = params.iter().map(WinCoseCredentialParameter::from).collect();
+        let params: Vec<WinCoseCredentialParameter> = params
+            .iter()
+            .map(WinCoseCredentialParameter::from)
+            .collect();
         WinCoseCredentialParameters::from(params)
     }
 }
@@ -357,10 +324,4 @@ impl AsRef<WEBAUTHN_COSE_CREDENTIAL_PARAMETERS> for WinCoseCredentialParameters 
     fn as_ref(&self) -> &WEBAUTHN_COSE_CREDENTIAL_PARAMETERS {
         &self.native
     }
-}
-
-fn compute_sha256(data: &[u8]) -> [u8; 32] {
-    let mut hasher = sha::Sha256::new();
-    hasher.update(data);
-    hasher.finish()
 }
