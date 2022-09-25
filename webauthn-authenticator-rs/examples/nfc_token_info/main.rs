@@ -3,9 +3,8 @@ extern crate tracing;
 
 // mod core;
 use webauthn_authenticator_rs::prelude::Url;
-use webauthn_authenticator_rs::{AuthenticatorBackend};
+use webauthn_authenticator_rs::AuthenticatorBackend;
 use webauthn_rs_core::WebauthnCore as Webauthn;
-
 
 fn main() {
     let wan = Webauthn::new_unsafe_experts_only(
@@ -16,18 +15,18 @@ fn main() {
         None,
         None,
     );
-    
+
     let unique_id = [
         158, 170, 228, 89, 68, 28, 73, 194, 134, 19, 227, 153, 107, 220, 150, 238,
-        ];
-        let name = "william";
+    ];
+    let name = "william";
 
-        let (chal, reg_state) = wan
+    let (chal, reg_state) = wan
         .generate_challenge_register(&unique_id, name, name, false)
         .unwrap();
-        
-        info!("🍿 challenge -> {:x?}", chal);
-        
+
+    info!("🍿 challenge -> {:x?}", chal);
+
     let mut u = webauthn_authenticator_rs::win10::Win10::default();
 
     let r = u
@@ -63,7 +62,6 @@ fn main() {
         .expect("webauth authentication denied");
 
     info!("auth_res -> {:x?}", auth_res);
-
 
     // tracing_subscriber::fmt::init();
 

@@ -5,8 +5,9 @@ use base64urlsafedata::Base64UrlSafeData;
 use std::collections::BTreeMap;
 use std::time::Duration;
 use webauthn_rs_proto::{
-    CollectedClientData, PubKeyCredParams, PublicKeyCredential, PublicKeyCredentialCreationOptions,
-    PublicKeyCredentialRequestOptions, RegisterPublicKeyCredential, User,
+    AuthenticatorAttestationResponseRaw, CollectedClientData, PubKeyCredParams,
+    PublicKeyCredential, PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
+    RegisterPublicKeyCredential, RegistrationExtensionsClientOutputs, User,
 };
 
 use std::thread::sleep;
@@ -14,7 +15,7 @@ use windows::core::{GUID, HSTRING, PCWSTR};
 use windows::w;
 use windows::Win32::Foundation::{GetLastError, HWND};
 use windows::Win32::Networking::WindowsWebServices::*;
-use windows::Win32::System::Console::{GetConsoleTitleW, SetConsoleTitleW};
+use windows::Win32::System::Console::{GetConsoleTitleW, GetConsoleWindow, SetConsoleTitleW};
 use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
 
 pub struct Win10 {
@@ -67,21 +68,8 @@ impl AuthenticatorBackend for Win10 {
         let hwnd = get_hwnd();
         let userinfo = WinUserEntityInformation::from(&options.user);
         let pubkeycredparams = WinCoseCredentialParameters::from(&options.pub_key_cred_params);
-
-        // let mut pubkeycredparams: Vec<WEBAUTHN_COSE_CREDENTIAL_PARAMETER> = options
-        //     .pub_key_cred_params
-        //     .iter()
-        //     .map(pubkeycredparams_to_credential_parameter)
-        //     .collect();
-
-        // let pubkeycredparams_n = WEBAUTHN_COSE_CREDENTIAL_PARAMETERS {
-        //     cCredentialParameters: pubkeycredparams.len() as u32,
-        //     pCredentialParameters: pubkeycredparams.as_mut_ptr(),
-        // };
-
-        let clientdata = WinClientData::try_from(
-            &creation_to_clientdata(origin, options.challenge.clone()))?;
-
+        let clientdata =
+            WinClientData::try_from(&creation_to_clientdata(origin, options.challenge.clone()))?;
         let makecredopts = WinAuthenticatorMakeCredentialOptions::new(&options, timeout_ms);
 
         println!("WebAuthNAuthenticatorMakeCredential()");
@@ -94,17 +82,25 @@ impl AuthenticatorBackend for Win10 {
                 clientdata.as_ref(),
                 Some(makecredopts.as_ref()),
             )
+            .map(|r| r.as_ref().ok_or(WebauthnCError::Internal))
         };
 
         println!("got result from WebAuthNAuthenticatorMakeCredential");
-        result
-            .map_err(|e| {
-                println!("Error: {:?}", e);
-                WebauthnCError::Internal
-            })
-            .map(|a| {
-                todo!();
-            })
+        let result = result.map_err(|e| {
+            println!("Error: {:?}", e);
+            WebauthnCError::Internal
+        })?;
+
+        result.map(|a| {
+            println!("response data:");
+            println!("{:?}", a);
+
+            let c = convert_attestation(a);
+            println!("converted:");
+            println!("{:?}", c);
+
+            c
+        })?
     }
 
     fn perform_auth(
@@ -118,37 +114,40 @@ impl AuthenticatorBackend for Win10 {
 }
 
 fn get_hwnd() -> HWND {
-    let mut old_title: [u16; 65536] = [0; 65536];
+    unsafe { GetConsoleWindow() }
+    /*
+        let mut old_title: [u16; 65536] = [0; 65536];
 
-    // Make a random title to find
-    let mut r: [u8; 8] = [0; 8];
-    openssl::rand::rand_bytes(&mut r).expect("openssl::rand_bytes");
-    let r: HSTRING = (&format!("{:?}", r)).into();
+        // Make a random title to find
+        let mut r: [u8; 8] = [0; 8];
+        openssl::rand::rand_bytes(&mut r).expect("openssl::rand_bytes");
+        let r: HSTRING = (&format!("{:?}", r)).into();
 
-    unsafe {
-        let len = GetConsoleTitleW(&mut old_title);
-        if len == 0 {
-            panic!("GetConsoleTitleW => {:?}", GetLastError());
+        unsafe {
+            let len = GetConsoleTitleW(&mut old_title);
+            if len == 0 {
+                panic!("GetConsoleTitleW => {:?}", GetLastError());
+            }
+            // println!("Console title: ({}) = {:?}", len, old_title);
+
+            let res = SetConsoleTitleW(&r);
+            if !res.as_bool() {
+                panic!("SetConsoleTitleW => {:?}", GetLastError());
+            }
+
+            sleep(Duration::from_millis(500));
+
+            let hwnd = FindWindowW(PCWSTR::null(), &r);
+
+            let res = SetConsoleTitleW(PCWSTR(old_title.as_ptr()));
+            if !res.as_bool() {
+                panic!("SetConsoleTitleW => {:?}", GetLastError());
+            }
+
+            println!("HWND = {:?}", hwnd);
+            hwnd
         }
-        // println!("Console title: ({}) = {:?}", len, old_title);
-
-        let res = SetConsoleTitleW(&r);
-        if !res.as_bool() {
-            panic!("SetConsoleTitleW => {:?}", GetLastError());
-        }
-
-        sleep(Duration::from_millis(500));
-
-        let hwnd = FindWindowW(PCWSTR::null(), &r);
-
-        let res = SetConsoleTitleW(PCWSTR(old_title.as_ptr()));
-        if !res.as_bool() {
-            panic!("SetConsoleTitleW => {:?}", GetLastError());
-        }
-
-        println!("HWND = {:?}", hwnd);
-        hwnd
-    }
+    */
 }
 
 /// Wrapper for [WEBAUTHN_USER_ENTITY_INFORMATION] to ensure pointer lifetime.
@@ -211,7 +210,10 @@ impl TryFrom<&CollectedClientData> for WinClientData {
             pwszHashAlgId: SHA_256.into(),
         };
 
-        Ok(Self { client_data_json, native })
+        Ok(Self {
+            client_data_json,
+            native,
+        })
     }
 }
 
@@ -324,4 +326,29 @@ impl AsRef<WEBAUTHN_COSE_CREDENTIAL_PARAMETERS> for WinCoseCredentialParameters 
     fn as_ref(&self) -> &WEBAUTHN_COSE_CREDENTIAL_PARAMETERS {
         &self.native
     }
+}
+
+fn convert_attestation(
+    a: &WEBAUTHN_CREDENTIAL_ATTESTATION,
+) -> Result<RegisterPublicKeyCredential, WebauthnCError> {
+    let cred_id_len = a.cbCredentialId as usize;
+    let mut cred_id: Vec<u8> = Vec::with_capacity(cred_id_len);
+    unsafe {
+        std::ptr::copy(a.pbCredentialId, cred_id.as_mut_ptr(), cred_id_len);
+        cred_id.set_len(cred_id_len);
+    }
+
+    let id: String = Base64UrlSafeData(cred_id.clone()).to_string();
+
+    Ok(RegisterPublicKeyCredential {
+        id: id,
+        raw_id: Base64UrlSafeData(cred_id),
+        type_: "TODO".into(),
+        extensions: RegistrationExtensionsClientOutputs::default(),
+        response: AuthenticatorAttestationResponseRaw {
+            attestation_object: Base64UrlSafeData("TODO".into()),
+            client_data_json: Base64UrlSafeData("TODO".into()),
+            transports: None,
+        },
+    })
 }
