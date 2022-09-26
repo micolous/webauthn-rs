@@ -82,7 +82,7 @@ impl AuthenticatorBackend for Win10 {
                 &self.rp,
                 userinfo.native_ptr(),
                 pubkeycredparams.as_ref(),
-                clientdata.as_ref(),
+                clientdata.native_ptr(),
                 Some(makecredopts.as_ref()),
             )
             .map(|r| r.as_ref().ok_or(WebauthnCError::Internal))
@@ -98,7 +98,7 @@ impl AuthenticatorBackend for Win10 {
             println!("response data:");
             println!("{:?}", a);
 
-            let c = convert_attestation(a, clientdata.client_data_json);
+            let c = convert_attestation(a, clientdata.client_data_json.clone());
             println!("converted:");
             println!("{:?}", c);
 
@@ -189,6 +189,7 @@ struct WinUserEntityInformation {
 
 impl WinUserEntityInformation {
     fn from(u: &User) -> Pin<Box<Self>> {
+        // Construct an incomplete type first, so that all the pointers are fixed.
         let res = Self {
             native: WEBAUTHN_USER_ENTITY_INFORMATION::default(),
             _id: u.id.clone().to_string(),
@@ -199,6 +200,7 @@ impl WinUserEntityInformation {
 
         let mut boxed = Box::pin(res);
 
+        // Create the real native type, which contains bare pointers.
         let native = WEBAUTHN_USER_ENTITY_INFORMATION {
             dwVersion: WEBAUTHN_USER_ENTITY_INFORMATION_CURRENT_VERSION,
             cbId: boxed._id.len() as u32,
@@ -208,6 +210,7 @@ impl WinUserEntityInformation {
             pwszDisplayName: (&boxed._display_name).into(),
         };
 
+        // Update the boxed type with the proper native object.
         unsafe {
             let mut_ref: Pin<&mut Self> = Pin::as_mut(&mut boxed);
             Pin::get_unchecked_mut(mut_ref).native = native;
@@ -217,7 +220,7 @@ impl WinUserEntityInformation {
     }
 
     fn native_ptr<'a>(&'a self) -> &'a WEBAUTHN_USER_ENTITY_INFORMATION {
-        unsafe { let r = &self.native; println!("native = {:?}", r); r }
+        &self.native
     }
 }
 
@@ -227,29 +230,35 @@ struct WinClientData {
     client_data_json: String,
 }
 
-impl TryFrom<&CollectedClientData> for WinClientData {
-    type Error = WebauthnCError;
-    fn try_from(clientdata: &CollectedClientData) -> Result<Self, Self::Error> {
-        //  Let clientDataJSON be the JSON-serialized client data constructed from collectedClientData.
-        let mut client_data_json =
-            serde_json::to_string(clientdata).map_err(|_| WebauthnCError::Json)?;
+impl WinClientData {
+    fn try_from(clientdata: &CollectedClientData) -> Result<Pin<Box<Self>>, WebauthnCError> {
+        // Construct an incomplete type first, so that all the pointers are fixed.
+        let res = Self {
+            native: WEBAUTHN_CLIENT_DATA::default(),
+            client_data_json:
+                serde_json::to_string(clientdata).map_err(|_| WebauthnCError::Json)?,
+        };
 
+        let mut boxed = Box::pin(res);
+
+        // Create the real native type, which contains bare pointers.
         let native = WEBAUTHN_CLIENT_DATA {
             dwVersion: WEBAUTHN_CLIENT_DATA_CURRENT_VERSION,
-            cbClientDataJSON: client_data_json.len() as u32,
-            pbClientDataJSON: client_data_json.as_mut_ptr(),
+            cbClientDataJSON: boxed.client_data_json.len() as u32,
+            pbClientDataJSON: boxed.client_data_json.as_ptr() as *mut _,
             pwszHashAlgId: SHA_256.into(),
         };
 
-        Ok(Self {
-            client_data_json,
-            native,
-        })
-    }
-}
+        // Update the boxed type with the proper native object.
+        unsafe {
+            let mut_ref: Pin<&mut Self> = Pin::as_mut(&mut boxed);
+            Pin::get_unchecked_mut(mut_ref).native = native;
+        }
 
-impl AsRef<WEBAUTHN_CLIENT_DATA> for WinClientData {
-    fn as_ref(&self) -> &WEBAUTHN_CLIENT_DATA {
+        Ok(boxed)
+    }
+
+    fn native_ptr<'a>(&'a self) -> &'a WEBAUTHN_CLIENT_DATA {
         &self.native
     }
 }
