@@ -152,10 +152,10 @@ fn get_hwnd() -> HWND {
 
 /// Wrapper for [WEBAUTHN_USER_ENTITY_INFORMATION] to ensure pointer lifetime.
 struct WinUserEntityInformation {
+    native: WEBAUTHN_USER_ENTITY_INFORMATION,
     id: String,
     name: HSTRING,
     display_name: HSTRING,
-    native: WEBAUTHN_USER_ENTITY_INFORMATION,
 }
 
 impl From<&User> for WinUserEntityInformation {
@@ -185,15 +185,15 @@ impl From<&User> for WinUserEntityInformation {
 }
 
 impl AsRef<WEBAUTHN_USER_ENTITY_INFORMATION> for WinUserEntityInformation {
-    fn as_ref(&self) -> &WEBAUTHN_USER_ENTITY_INFORMATION {
+    fn as_ref<'a>(&'a self) -> &'a WEBAUTHN_USER_ENTITY_INFORMATION {
         &self.native
     }
 }
 
 // Wrapper for [WEBAUTHN_CLIENT_DATA] to ensure pointer lifetime.
 struct WinClientData {
-    client_data_json: String,
     native: WEBAUTHN_CLIENT_DATA,
+    client_data_json: String,
 }
 
 impl TryFrom<&CollectedClientData> for WinClientData {
@@ -277,8 +277,8 @@ impl AsRef<WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS>
 
 /// Wrapper for [WEBAUTHN_COSE_CREDENTIAL_PARAMETER] to ensure pointer lifetime.
 struct WinCoseCredentialParameter {
-    typ: HSTRING,
     native: WEBAUTHN_COSE_CREDENTIAL_PARAMETER,
+    typ: HSTRING,
 }
 
 impl From<&PubKeyCredParams> for WinCoseCredentialParameter {
@@ -294,9 +294,9 @@ impl From<&PubKeyCredParams> for WinCoseCredentialParameter {
 }
 
 struct WinCoseCredentialParameters {
+    native: WEBAUTHN_COSE_CREDENTIAL_PARAMETERS,
     // params: Vec<WinCoseCredentialParameter>,
     l: Vec<WEBAUTHN_COSE_CREDENTIAL_PARAMETER>,
-    native: WEBAUTHN_COSE_CREDENTIAL_PARAMETERS,
 }
 
 impl From<Vec<WinCoseCredentialParameter>> for WinCoseCredentialParameters {
