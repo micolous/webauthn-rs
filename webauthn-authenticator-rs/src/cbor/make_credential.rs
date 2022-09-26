@@ -57,6 +57,7 @@ impl From<MakeCredentialRequest> for MakeCredentialRequestRawDict {
             id,
             name,
             display_name,
+            icon: _,
         } = user;
 
         let mut user_map = BTreeMap::new();

@@ -5,6 +5,7 @@ use base64urlsafedata::Base64UrlSafeData;
 use std::collections::BTreeMap;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
+use std::thread::sleep;
 use std::time::Duration;
 use webauthn_rs_proto::{
     AllowCredentials, AuthenticationExtensionsClientOutputs, AuthenticatorAssertionResponseRaw,
@@ -14,18 +15,21 @@ use webauthn_rs_proto::{
     RegistrationExtensionsClientOutputs, RelyingParty, User, UserVerificationPolicy,
 };
 
-use std::thread::sleep;
-use windows::core::{HSTRING, PCWSTR};
-use windows::w;
-use windows::Win32::Foundation::{GetLastError, HWND};
-use windows::Win32::Networking::WindowsWebServices::*;
-use windows::Win32::System::Console::{GetConsoleTitleW, GetConsoleWindow, SetConsoleTitleW};
-use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+use windows::{
+    core::{HSTRING, PCWSTR},
+    w,
+    Win32::{
+        Foundation::{GetLastError, HWND},
+        Networking::WindowsWebServices::*,
+        System::Console::{GetConsoleTitleW, GetConsoleWindow, SetConsoleTitleW},
+        UI::WindowsAndMessaging::FindWindowW,
+    },
+};
 
 pub struct Win10 {}
 
-const SHA_256: &'static HSTRING = w!("SHA-256");
-const CREDENTIAL_TYPE_PUBLIC_KEY: &'static HSTRING = w!("public-key");
+const SHA_256: &HSTRING = w!("SHA-256");
+const CREDENTIAL_TYPE_PUBLIC_KEY: &HSTRING = w!("public-key");
 
 impl Default for Win10 {
     fn default() -> Self {
@@ -85,7 +89,7 @@ impl AuthenticatorBackend for Win10 {
             println!("response data:");
             println!("{:?}", a);
 
-            let c = convert_attestation(a, clientdata.client_data_json.clone());
+            let c = convert_attestation(a, &clientdata.client_data_json);
             println!("converted:");
             println!("{:?}", c);
 
@@ -127,7 +131,7 @@ impl AuthenticatorBackend for Win10 {
             println!("response data:");
             println!("{:?}", a);
 
-            let c = convert_assertion(a, clientdata.client_data_json.clone());
+            let c = convert_assertion(a, &clientdata.client_data_json);
             println!("converted:");
             println!("{:?}", c);
 
@@ -205,6 +209,7 @@ struct WinRpEntityInformation {
     native: WEBAUTHN_RP_ENTITY_INFORMATION,
     _id: HSTRING,
     _name: HSTRING,
+    _icon: Option<HSTRING>,
 }
 
 impl WinRpEntityInformation {
@@ -214,6 +219,7 @@ impl WinRpEntityInformation {
             native: Default::default(),
             _id: rp.id.clone().into(),
             _name: rp.name.clone().into(),
+            _icon: rp.icon.as_ref().map(|i| i.clone().into()),
         };
 
         let mut boxed = Box::pin(res);
@@ -222,7 +228,7 @@ impl WinRpEntityInformation {
             dwVersion: WEBAUTHN_API_CURRENT_VERSION,
             pwszId: (&boxed._id).into(),
             pwszName: (&boxed._name).into(),
-            pwszIcon: PCWSTR::null(),
+            pwszIcon: boxed._icon.as_ref().map_or(PCWSTR::null(), |i| i.into()),
         };
 
         // Update the boxed type with the proper native object.
@@ -234,7 +240,7 @@ impl WinRpEntityInformation {
         boxed
     }
 
-    fn native_ptr<'a>(&'a self) -> &'a WEBAUTHN_RP_ENTITY_INFORMATION {
+    fn native_ptr(&self) -> &WEBAUTHN_RP_ENTITY_INFORMATION {
         &self.native
     }
 }
@@ -245,6 +251,7 @@ struct WinUserEntityInformation {
     _id: String,
     _name: HSTRING,
     _display_name: HSTRING,
+    _icon: Option<HSTRING>,
     _pin: PhantomPinned,
 }
 
@@ -256,6 +263,7 @@ impl WinUserEntityInformation {
             _id: u.id.clone().to_string(),
             _name: u.name.clone().into(),
             _display_name: u.display_name.clone().into(),
+            _icon: u.icon.as_ref().map(|i| i.clone().into()),
             _pin: PhantomPinned,
         };
 
@@ -267,7 +275,7 @@ impl WinUserEntityInformation {
             cbId: boxed._id.len() as u32,
             pbId: boxed._id.as_ptr() as *mut _,
             pwszName: (&boxed._name).into(),
-            pwszIcon: PCWSTR::null(),
+            pwszIcon: boxed._icon.as_ref().map_or(PCWSTR::null(), |i| i.into()),
             pwszDisplayName: (&boxed._display_name).into(),
         };
 
@@ -280,7 +288,7 @@ impl WinUserEntityInformation {
         boxed
     }
 
-    fn native_ptr<'a>(&'a self) -> &'a WEBAUTHN_USER_ENTITY_INFORMATION {
+    fn native_ptr(&self) -> &WEBAUTHN_USER_ENTITY_INFORMATION {
         &self.native
     }
 }
@@ -319,7 +327,7 @@ impl WinClientData {
         Ok(boxed)
     }
 
-    fn native_ptr<'a>(&'a self) -> &'a WEBAUTHN_CLIENT_DATA {
+    fn native_ptr(&self) -> &WEBAUTHN_CLIENT_DATA {
         &self.native
     }
 }
@@ -348,7 +356,7 @@ fn get_to_clientdata(origin: Url, challenge: Base64UrlSafeData) -> CollectedClie
 
 /// Converts an [AuthenticatiorAttachment] into a value for
 /// [WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS::dwAuthenticatorAttachment]
-fn attachment_to_native(attachment: &Option<AuthenticatorAttachment>) -> u32 {
+fn attachment_to_native(attachment: Option<AuthenticatorAttachment>) -> u32 {
     match attachment {
         None => WEBAUTHN_AUTHENTICATOR_ATTACHMENT_ANY,
         Some(AuthenticatorAttachment::CrossPlatform) => {
@@ -380,12 +388,13 @@ fn transport_to_native(transport: &AuthenticatorTransport) -> u32 {
         AuthenticatorTransport::Ble => WEBAUTHN_CTAP_TRANSPORT_BLE,
         AuthenticatorTransport::Internal => WEBAUTHN_CTAP_TRANSPORT_INTERNAL,
         AuthenticatorTransport::Nfc => WEBAUTHN_CTAP_TRANSPORT_NFC,
+        AuthenticatorTransport::Test => WEBAUTHN_CTAP_TRANSPORT_TEST,
         AuthenticatorTransport::Usb => WEBAUTHN_CTAP_TRANSPORT_USB,
     }
 }
 
 /// Converts a bitmask of native transports into [AuthenticatorTransport].
-fn native_to_transports(t: &u32) -> Vec<AuthenticatorTransport> {
+fn native_to_transports(t: u32) -> Vec<AuthenticatorTransport> {
     let mut o: Vec<AuthenticatorTransport> = Vec::new();
     if t & WEBAUTHN_CTAP_TRANSPORT_BLE == WEBAUTHN_CTAP_TRANSPORT_BLE {
         o.push(AuthenticatorTransport::Ble);
@@ -395,6 +404,9 @@ fn native_to_transports(t: &u32) -> Vec<AuthenticatorTransport> {
     }
     if t & WEBAUTHN_CTAP_TRANSPORT_NFC == WEBAUTHN_CTAP_TRANSPORT_NFC {
         o.push(AuthenticatorTransport::Nfc);
+    }
+    if t & WEBAUTHN_CTAP_TRANSPORT_TEST == WEBAUTHN_CTAP_TRANSPORT_TEST {
+        o.push(AuthenticatorTransport::Test);
     }
     if t & WEBAUTHN_CTAP_TRANSPORT_USB == WEBAUTHN_CTAP_TRANSPORT_USB {
         o.push(AuthenticatorTransport::Usb);
@@ -407,7 +419,7 @@ fn native_to_transports(t: &u32) -> Vec<AuthenticatorTransport> {
 fn transports_to_bitmask(transports: &Option<Vec<AuthenticatorTransport>>) -> u32 {
     match transports {
         None => 0,
-        Some(transports) => transports.into_iter().map(transport_to_native).sum(),
+        Some(transports) => transports.iter().map(transport_to_native).sum(),
     }
 }
 
@@ -467,7 +479,7 @@ impl WinCredentialList {
         // Check that all the credential types are supported.
         for c in credentials.iter() {
             let typ = c.type_();
-            if typ != "public-key".to_string() {
+            if typ != *"public-key" {
                 println!("Unsupported credential type: {:?}", c);
                 return Err(WebauthnCError::Internal);
             }
@@ -569,11 +581,11 @@ impl WinAuthenticatorMakeCredentialOptions {
                 pExtensions: [].as_mut_ptr(),
             },
             dwAuthenticatorAttachment: attachment_to_native(
-                &options
+                options
                     .authenticator_selection
                     .as_ref()
-                    .map(|s| &s.authenticator_attachment)
-                    .unwrap_or(&None),
+                    .map(|s| s.authenticator_attachment)
+                    .unwrap_or(None),
             ),
             bRequireResidentKey: options
                 .authenticator_selection
@@ -609,7 +621,7 @@ impl WinAuthenticatorMakeCredentialOptions {
         Ok(boxed)
     }
 
-    fn native_ptr<'a>(&'a self) -> &'a WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS {
+    fn native_ptr(&self) -> &WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS {
         &self.native
     }
 }
@@ -676,7 +688,7 @@ impl WinAuthenticatorGetAssertionOptions {
         Ok(boxed)
     }
 
-    fn native_ptr<'a>(&'a self) -> &'a WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS {
+    fn native_ptr(&self) -> &WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS {
         &self.native
     }
 }
@@ -718,7 +730,7 @@ struct WinCoseCredentialParameters {
 }
 
 impl WinCoseCredentialParameters {
-    fn from(params: &Vec<PubKeyCredParams>) -> Pin<Box<Self>> {
+    fn from(params: &[PubKeyCredParams]) -> Pin<Box<Self>> {
         let params: Vec<Pin<Box<WinCoseCredentialParameter>>> = params
             .iter()
             .map(WinCoseCredentialParameter::from)
@@ -767,7 +779,7 @@ impl WinCoseCredentialParameters {
         boxed
     }
 
-    fn native_ptr<'a>(&'a self) -> &'a WEBAUTHN_COSE_CREDENTIAL_PARAMETERS {
+    fn native_ptr(&self) -> &WEBAUTHN_COSE_CREDENTIAL_PARAMETERS {
         &self.native
     }
 }
@@ -791,12 +803,12 @@ where
 /// [RegisterPublicKeyCredential]
 fn convert_attestation(
     a: &WEBAUTHN_CREDENTIAL_ATTESTATION,
-    client_data_json: String,
+    client_data_json: &String,
 ) -> Result<RegisterPublicKeyCredential, WebauthnCError> {
     let cred_id = copy_ptr(a.cbCredentialId, a.pbCredentialId).ok_or(WebauthnCError::Internal)?;
     let attesation_object =
         copy_ptr(a.cbAttestationObject, a.pbAttestationObject).ok_or(WebauthnCError::Internal)?;
-    let type_: String = unsafe { a.pwszFormatType.to_string().unwrap() };
+    let type_: String = unsafe { a.pwszFormatType.to_string().map_err(|_| WebauthnCError::Internal)? };
 
     let id: String = Base64UrlSafeData(cred_id.clone()).to_string();
 
@@ -807,15 +819,15 @@ fn convert_attestation(
         extensions: RegistrationExtensionsClientOutputs::default(),
         response: AuthenticatorAttestationResponseRaw {
             attestation_object: Base64UrlSafeData(attesation_object),
-            client_data_json: Base64UrlSafeData(client_data_json.into_bytes()),
-            transports: Some(native_to_transports(&a.dwUsedTransport)),
+            client_data_json: Base64UrlSafeData(client_data_json.as_bytes().to_vec()),
+            transports: Some(native_to_transports(a.dwUsedTransport)),
         },
     })
 }
 
 fn convert_assertion(
     a: &WEBAUTHN_ASSERTION,
-    client_data_json: String,
+    client_data_json: &String,
 ) -> Result<PublicKeyCredential, WebauthnCError> {
     let user_id = copy_ptr(a.cbUserId, a.pbUserId);
     let authenticator_data =
@@ -825,7 +837,7 @@ fn convert_assertion(
     let credential_id = Base64UrlSafeData(
         copy_ptr(a.Credential.cbId, a.Credential.pbId).ok_or(WebauthnCError::Internal)?,
     );
-    let type_: String = unsafe { a.Credential.pwszCredentialType.to_string().unwrap() };
+    let type_: String = unsafe { a.Credential.pwszCredentialType.to_string().map_err(|_| WebauthnCError::Internal)? };
 
     Ok(PublicKeyCredential {
         id: credential_id.to_string(),

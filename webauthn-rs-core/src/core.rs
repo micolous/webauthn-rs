@@ -211,11 +211,13 @@ impl WebauthnCore {
                 rp: RelyingParty {
                     name: self.rp_name.clone(),
                     id: self.rp_id.clone(),
+                    icon: Some("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==".to_string()),
                 },
                 user: User {
                     id: Base64UrlSafeData(user_id),
                     name: user_name.to_string(),
                     display_name: user_display_name.to_string(),
+                    icon: Some("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==".to_string()),
                 },
                 challenge: challenge.clone().into(),
                 pub_key_cred_params: credential_algorithms
