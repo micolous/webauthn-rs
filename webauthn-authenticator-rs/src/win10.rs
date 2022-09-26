@@ -19,7 +19,7 @@ use windows::core::{HSTRING, PCWSTR};
 use windows::w;
 use windows::Win32::Foundation::{GetLastError, HWND};
 use windows::Win32::Networking::WindowsWebServices::*;
-use windows::Win32::System::Console::{GetConsoleTitleW, SetConsoleTitleW};
+use windows::Win32::System::Console::{GetConsoleTitleW, GetConsoleWindow, SetConsoleTitleW};
 use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
 
 pub struct Win10 {}
@@ -156,12 +156,8 @@ fn get_hwnd() -> HWND {
      * https://github.com/microsoft/terminal/issues/2988
      * https://github.com/microsoft/vscode/issues/42356
      */
-
-    // let hwnd = unsafe { GetConsoleWindow() };
-    // println!("HWND = {:?}", hwnd);
-    // if hwnd != HWND(0) {
-    //     return hwnd;
-    // }
+    let chwnd = unsafe { GetConsoleWindow() };
+    println!("GetConsoleWindow HWND = {:?}", chwnd);
 
     let mut old_title: [u16; 65536] = [0; 65536];
 
@@ -173,13 +169,15 @@ fn get_hwnd() -> HWND {
     unsafe {
         let len = GetConsoleTitleW(&mut old_title);
         if len == 0 {
-            panic!("GetConsoleTitleW => {:?}", GetLastError());
+            error!("GetConsoleTitleW => {:?}", GetLastError());
+            return chwnd;
         }
         // println!("Console title: ({}) = {:?}", len, old_title);
 
         let res = SetConsoleTitleW(&r);
         if !res.as_bool() {
-            panic!("SetConsoleTitleW => {:?}", GetLastError());
+            error!("SetConsoleTitleW => {:?}", GetLastError());
+            return chwnd;
         }
 
         sleep(Duration::from_millis(500));
@@ -188,11 +186,17 @@ fn get_hwnd() -> HWND {
 
         let res = SetConsoleTitleW(PCWSTR(old_title.as_ptr()));
         if !res.as_bool() {
-            panic!("SetConsoleTitleW => {:?}", GetLastError());
+            error!("SetConsoleTitleW => {:?}", GetLastError());
         }
 
-        println!("HWND = {:?}", hwnd);
-        hwnd
+        println!("FindWindowW HWND = {:?}", hwnd);
+        if hwnd != HWND(0) {
+            hwnd
+        } else if chwnd != HWND(0) {
+            chwnd
+        } else {
+            panic!("Cannot find hwnd");
+        }
     }
 }
 

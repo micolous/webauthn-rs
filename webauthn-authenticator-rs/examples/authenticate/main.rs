@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate tracing;
 
-use std::io::stdin;
+use std::io::{stdin, stdout, Write};
 
 use webauthn_authenticator_rs::prelude::Url;
 use webauthn_authenticator_rs::softtoken::SoftToken;
@@ -34,7 +34,8 @@ fn select_provider() -> Box<dyn AuthenticatorBackend> {
         }
 
         let mut buf = String::new();
-        println!("Enter number 1 - {}", providers.len());
+        print!("? ");
+        stdout().flush().ok();
         stdin().read_line(&mut buf).expect("Cannot read stdin");
         let selected: Result<u64, _> = buf.trim().parse();
         match selected {
@@ -49,6 +50,7 @@ fn select_provider() -> Box<dyn AuthenticatorBackend> {
             }
             Err(_) => println!("Input was not a number"),
         }
+        println!();
     }
 }
 
