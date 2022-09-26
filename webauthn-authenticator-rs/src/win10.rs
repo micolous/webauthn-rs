@@ -11,7 +11,7 @@ use webauthn_rs_proto::{
     AuthenticatorAttachment, AuthenticatorAttestationResponseRaw, AuthenticatorTransport,
     CollectedClientData, PubKeyCredParams, PublicKeyCredential, PublicKeyCredentialCreationOptions,
     PublicKeyCredentialDescriptor, PublicKeyCredentialRequestOptions, RegisterPublicKeyCredential,
-    RegistrationExtensionsClientOutputs, User, UserVerificationPolicy,
+    RegistrationExtensionsClientOutputs, User, UserVerificationPolicy, RelyingParty,
 };
 
 use std::thread::sleep;
@@ -23,7 +23,7 @@ use windows::Win32::System::Console::{GetConsoleTitleW, GetConsoleWindow, SetCon
 use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
 
 pub struct Win10 {
-    rp: WEBAUTHN_RP_ENTITY_INFORMATION,
+//    rp: WEBAUTHN_RP_ENTITY_INFORMATION,
 }
 
 const ID: &'static HSTRING = w!("Id:webauthn-authenticator-rs");
@@ -53,12 +53,6 @@ impl Default for Win10 {
         }
 
         Self {
-            rp: WEBAUTHN_RP_ENTITY_INFORMATION {
-                dwVersion: WEBAUTHN_API_CURRENT_VERSION,
-                pwszId: ID.into(),
-                pwszName: NAME.into(),
-                pwszIcon: PCWSTR::null(),
-            },
         }
     }
 }
@@ -71,6 +65,7 @@ impl AuthenticatorBackend for Win10 {
         timeout_ms: u32,
     ) -> Result<RegisterPublicKeyCredential, WebauthnCError> {
         let hwnd = get_hwnd();
+        let rp = WinRpEntityInformation::from(&options.rp);
         let userinfo = WinUserEntityInformation::from(&options.user);
         let pubkeycredparams = WinCoseCredentialParameters::from(&options.pub_key_cred_params);
         let clientdata =
@@ -81,7 +76,7 @@ impl AuthenticatorBackend for Win10 {
         let result = unsafe {
             WebAuthNAuthenticatorMakeCredential(
                 hwnd,
-                &self.rp,
+                rp.native_ptr(),
                 userinfo.native_ptr(),
                 pubkeycredparams.native_ptr(),
                 clientdata.native_ptr(),
@@ -178,6 +173,45 @@ fn get_hwnd() -> HWND {
     }
 }
 
+/// Wrapper for [WEBAUTHN_RP_ENTITY_INFORMATION] to ensure pointer lifetime.
+struct WinRpEntityInformation {
+    native: WEBAUTHN_RP_ENTITY_INFORMATION,
+    _id: HSTRING,
+    _name: HSTRING,
+}
+
+impl WinRpEntityInformation {
+    fn from(rp: &RelyingParty) -> Pin<Box<Self>> {
+        // Construct an incomplete type first, so that all the pointers are fixed.
+        let res = Self {
+            native: Default::default(),
+            _id: rp.id.clone().into(),
+            _name: rp.name.clone().into(),
+        };
+
+        let mut boxed = Box::pin(res);
+
+        let native = WEBAUTHN_RP_ENTITY_INFORMATION {
+            dwVersion: WEBAUTHN_API_CURRENT_VERSION,
+            pwszId: (&boxed._id).into(),
+            pwszName: (&boxed._name).into(),
+            pwszIcon: PCWSTR::null(),
+        };
+
+        // Update the boxed type with the proper native object.
+        unsafe {
+            let mut_ref: Pin<&mut Self> = Pin::as_mut(&mut boxed);
+            Pin::get_unchecked_mut(mut_ref).native = native;
+        }
+
+        boxed
+    }
+
+    fn native_ptr<'a>(&'a self) -> &'a WEBAUTHN_RP_ENTITY_INFORMATION {
+        &self.native
+    }
+}
+
 /// Wrapper for [WEBAUTHN_USER_ENTITY_INFORMATION] to ensure pointer lifetime.
 struct WinUserEntityInformation {
     native: WEBAUTHN_USER_ENTITY_INFORMATION,
@@ -266,7 +300,7 @@ impl WinClientData {
 fn creation_to_clientdata(origin: Url, challenge: Base64UrlSafeData) -> CollectedClientData {
     CollectedClientData {
         type_: "webauthn.create".to_string(),
-        challenge: challenge.clone(),
+        challenge,
         origin,
         token_binding: None,
         cross_origin: None,
@@ -274,6 +308,8 @@ fn creation_to_clientdata(origin: Url, challenge: Base64UrlSafeData) -> Collecte
     }
 }
 
+/// Converts an [AuthenticatiorAttachment] into a value for
+/// [WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS::dwAuthenticatorAttachment]
 fn attachment_to_native(attachment: &Option<AuthenticatorAttachment>) -> u32 {
     match attachment {
         None => WEBAUTHN_AUTHENTICATOR_ATTACHMENT_ANY,
@@ -284,6 +320,8 @@ fn attachment_to_native(attachment: &Option<AuthenticatorAttachment>) -> u32 {
     }
 }
 
+/// Converts a [UserVerificationPolicy] into a value for
+/// [WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS::dwUserVerificationRequirement]
 fn user_verification_to_native(policy: Option<&UserVerificationPolicy>) -> u32 {
     match policy {
         None => WEBAUTHN_USER_VERIFICATION_REQUIREMENT_ANY,
@@ -297,6 +335,8 @@ fn user_verification_to_native(policy: Option<&UserVerificationPolicy>) -> u32 {
     }
 }
 
+/// Converts an [AuthenticatorTransport] into a value for
+/// [WEBAUTHN_CREDENTIAL_EX::dwTransports]
 fn transport_to_native(transport: &AuthenticatorTransport) -> u32 {
     match transport {
         AuthenticatorTransport::Ble => WEBAUTHN_CTAP_TRANSPORT_BLE,
@@ -306,16 +346,41 @@ fn transport_to_native(transport: &AuthenticatorTransport) -> u32 {
     }
 }
 
+/// Converts a bitmask of native transports into [AuthenticatorTransport].
+fn native_to_transports(t: &u32) -> Vec<AuthenticatorTransport> {
+    let mut o: Vec<AuthenticatorTransport> = Vec::new();
+    if t & WEBAUTHN_CTAP_TRANSPORT_BLE == WEBAUTHN_CTAP_TRANSPORT_BLE {
+        o.push(AuthenticatorTransport::Ble);
+    }
+    if t & WEBAUTHN_CTAP_TRANSPORT_INTERNAL == WEBAUTHN_CTAP_TRANSPORT_INTERNAL {
+        o.push(AuthenticatorTransport::Internal);
+    }
+    if t & WEBAUTHN_CTAP_TRANSPORT_NFC == WEBAUTHN_CTAP_TRANSPORT_NFC {
+        o.push(AuthenticatorTransport::Nfc);
+    }
+    if t & WEBAUTHN_CTAP_TRANSPORT_USB == WEBAUTHN_CTAP_TRANSPORT_USB {
+        o.push(AuthenticatorTransport::Usb);
+    }
+    o
+}
+
+/// Converts a [Vec<AuthenticatorTransport>] into a value for
+/// [WEBAUTHN_CREDENTIAL_EX::dwTransports]
 fn transports_to_bitmask(transports: &Option<Vec<AuthenticatorTransport>>) -> u32 {
     match transports {
         None => 0,
         Some(transports) => transports.into_iter().map(transport_to_native).sum(),
     }
 }
+
 struct WinCredentialList {
+    /// Native structure, which points to everything else here.
     native: WEBAUTHN_CREDENTIAL_LIST,
+    /// Pointer to _l, because [WEBAUTHN_CREDENTIAL_LIST::ppCredentials] is a double-pointer.
     _p: *const WEBAUTHN_CREDENTIAL_EX,
+    /// List of credentials
     _l: Vec<WEBAUTHN_CREDENTIAL_EX>,
+    /// List of credential IDs, referenced by [WEBAUTHN_CREDENTIAL_EX::pbId]
     _ids: Vec<String>,
 }
 
@@ -581,12 +646,14 @@ where
     Ok(dst)
 }
 
+/// Convert return from [WebAuthNAuthenticatorMakeCredential] into
+/// [RegisterPublicKeyCredential]
 fn convert_attestation(
     a: &WEBAUTHN_CREDENTIAL_ATTESTATION,
     client_data_json: String,
 ) -> Result<RegisterPublicKeyCredential, WebauthnCError> {
     let cred_id = copy_ptr(a.cbCredentialId, a.pbCredentialId)?;
-    let attesation = copy_ptr(a.cbAttestation, a.pbAttestation)?;
+    let attesation_object = copy_ptr(a.cbAttestationObject, a.pbAttestationObject)?;
     let type_: String = unsafe { a.pwszFormatType.to_string().unwrap() };
 
     // let cred_id_len = a.cbCredentialId as usize;
@@ -606,9 +673,9 @@ fn convert_attestation(
         type_,
         extensions: RegistrationExtensionsClientOutputs::default(),
         response: AuthenticatorAttestationResponseRaw {
-            attestation_object: Base64UrlSafeData(attesation),
+            attestation_object: Base64UrlSafeData(attesation_object),
             client_data_json: Base64UrlSafeData(client_data_json.into_bytes()),
-            transports: None,
+            transports: Some(native_to_transports(&a.dwUsedTransport)),
         },
     })
 }
