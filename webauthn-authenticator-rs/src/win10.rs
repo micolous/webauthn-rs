@@ -3,6 +3,9 @@ use crate::{AuthenticatorBackend, Url};
 
 use base64urlsafedata::Base64UrlSafeData;
 use std::collections::BTreeMap;
+use std::marker::{PhantomData, PhantomPinned};
+use std::pin::Pin;
+use std::ptr::NonNull;
 use std::time::Duration;
 use webauthn_rs_proto::{
     AuthenticatorAttestationResponseRaw, CollectedClientData, PubKeyCredParams,
@@ -77,7 +80,7 @@ impl AuthenticatorBackend for Win10 {
             WebAuthNAuthenticatorMakeCredential(
                 hwnd,
                 &self.rp,
-                userinfo.as_ref(),
+                userinfo.native_ptr(),
                 pubkeycredparams.as_ref(),
                 clientdata.as_ref(),
                 Some(makecredopts.as_ref()),
@@ -178,40 +181,43 @@ fn get_hwnd() -> HWND {
 /// Wrapper for [WEBAUTHN_USER_ENTITY_INFORMATION] to ensure pointer lifetime.
 struct WinUserEntityInformation {
     native: WEBAUTHN_USER_ENTITY_INFORMATION,
-    id: String,
-    name: HSTRING,
-    display_name: HSTRING,
+    _id: String,
+    _name: HSTRING,
+    _display_name: HSTRING,
+    _pin: PhantomPinned,
 }
 
-impl From<&User> for WinUserEntityInformation {
-    fn from(u: &User) -> Self {
-        let mut id = u.id.to_string();
-        let cb_id = id.len() as u32;
-        let pb_id = id.as_mut_ptr();
-        let name: HSTRING = u.name.clone().into();
-        let display_name: HSTRING = u.display_name.clone().into();
+impl WinUserEntityInformation {
+    fn from(u: &User) -> Pin<Box<Self>> {
+        let res = Self {
+            native: WEBAUTHN_USER_ENTITY_INFORMATION::default(),
+            _id: u.id.clone().to_string(),
+            _name: u.name.clone().into(),
+            _display_name: u.display_name.clone().into(),
+            _pin: PhantomPinned,
+        };
+
+        let mut boxed = Box::pin(res);
 
         let native = WEBAUTHN_USER_ENTITY_INFORMATION {
             dwVersion: WEBAUTHN_USER_ENTITY_INFORMATION_CURRENT_VERSION,
-            cbId: cb_id,
-            pbId: pb_id,
-            pwszName: (&name).into(),
+            cbId: boxed._id.len() as u32,
+            pbId: boxed._id.as_ptr() as *mut _,
+            pwszName: (&boxed._name).into(),
             pwszIcon: PCWSTR::null(),
-            pwszDisplayName: (&display_name).into(),
+            pwszDisplayName: (&boxed._display_name).into(),
         };
 
-        Self {
-            id,
-            name: name,
-            display_name: display_name,
-            native,
+        unsafe {
+            let mut_ref: Pin<&mut Self> = Pin::as_mut(&mut boxed);
+            Pin::get_unchecked_mut(mut_ref).native = native;
         }
-    }
-}
 
-impl AsRef<WEBAUTHN_USER_ENTITY_INFORMATION> for WinUserEntityInformation {
-    fn as_ref<'a>(&'a self) -> &'a WEBAUTHN_USER_ENTITY_INFORMATION {
-        &self.native
+        boxed
+    }
+
+    fn native_ptr<'a>(&'a self) -> &'a WEBAUTHN_USER_ENTITY_INFORMATION {
+        unsafe { let r = &self.native; println!("native = {:?}", r); r }
     }
 }
 
