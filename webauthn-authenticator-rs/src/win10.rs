@@ -8,9 +8,10 @@ use std::pin::Pin;
 use std::ptr::NonNull;
 use std::time::Duration;
 use webauthn_rs_proto::{
-    AuthenticatorAttestationResponseRaw, CollectedClientData, PubKeyCredParams,
-    PublicKeyCredential, PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
-    RegisterPublicKeyCredential, RegistrationExtensionsClientOutputs, User,
+    AuthenticatorAttachment, AuthenticatorAttestationResponseRaw, AuthenticatorTransport,
+    CollectedClientData, PubKeyCredParams, PublicKeyCredential, PublicKeyCredentialCreationOptions,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialRequestOptions, RegisterPublicKeyCredential,
+    RegistrationExtensionsClientOutputs, User, UserVerificationPolicy,
 };
 
 use std::thread::sleep;
@@ -28,6 +29,7 @@ pub struct Win10 {
 const ID: &'static HSTRING = w!("Id:webauthn-authenticator-rs");
 const NAME: &'static HSTRING = w!("Name:webauthn-authenticator-rs");
 const SHA_256: &'static HSTRING = w!("SHA-256");
+const CREDENTIAL_TYPE_PUBLIC_KEY: &'static HSTRING = w!("public-key");
 
 fn str_to_pcwstr(s: &str) -> PCWSTR {
     let h: HSTRING = s.into();
@@ -73,7 +75,7 @@ impl AuthenticatorBackend for Win10 {
         let pubkeycredparams = WinCoseCredentialParameters::from(&options.pub_key_cred_params);
         let clientdata =
             WinClientData::try_from(&creation_to_clientdata(origin, options.challenge.clone()))?;
-        let makecredopts = WinAuthenticatorMakeCredentialOptions::new(&options, timeout_ms);
+        let makecredopts = WinAuthenticatorMakeCredentialOptions::new(&options, timeout_ms)?;
 
         println!("WebAuthNAuthenticatorMakeCredential()");
         let result = unsafe {
@@ -83,7 +85,7 @@ impl AuthenticatorBackend for Win10 {
                 userinfo.native_ptr(),
                 pubkeycredparams.native_ptr(),
                 clientdata.native_ptr(),
-                Some(makecredopts.as_ref()),
+                Some(makecredopts.native_ptr()),
             )
             .map(|r| r.as_ref().ok_or(WebauthnCError::Internal))
         };
@@ -121,25 +123,23 @@ fn get_hwnd() -> HWND {
      *
      * The Windows WebAuthn APIs expect a HWND to know where to put the FIDO
      * GUI (centred over the calling application window).
-     * 
+     *
      * GetConsoleWindow() only works with the "native" console, and not virtual
      * terminals: Windows Terminal and VS Code give a valid HWND that has the
      * dialog at the top-left of the screen but *behind* the active window.
-     * 
+     *
      * Windows' docs suggest an alternative: change the console title to
      * some random value (SetConsoleTitleW), wait a moment, then search for it
      * (FindWindowW):
      * https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/obtain-console-window-handle
-     * 
+     *
      * This works reliably with Windows Terminal, but not with VS Code. :(
-     * 
+     *
      * https://github.com/microsoft/terminal/issues/2988
      * https://github.com/microsoft/vscode/issues/42356
      */
 
-    let hwnd = unsafe {
-        GetConsoleWindow()
-    };
+    let hwnd = unsafe { GetConsoleWindow() };
     println!("HWND = {:?}", hwnd);
     if hwnd != HWND(0) {
         return hwnd;
@@ -235,8 +235,8 @@ impl WinClientData {
         // Construct an incomplete type first, so that all the pointers are fixed.
         let res = Self {
             native: WEBAUTHN_CLIENT_DATA::default(),
-            client_data_json:
-                serde_json::to_string(clientdata).map_err(|_| WebauthnCError::Json)?,
+            client_data_json: serde_json::to_string(clientdata)
+                .map_err(|_| WebauthnCError::Json)?,
         };
 
         let mut boxed = Box::pin(res);
@@ -274,16 +274,153 @@ fn creation_to_clientdata(origin: Url, challenge: Base64UrlSafeData) -> Collecte
     }
 }
 
+fn attachment_to_native(attachment: &Option<AuthenticatorAttachment>) -> u32 {
+    match attachment {
+        None => WEBAUTHN_AUTHENTICATOR_ATTACHMENT_ANY,
+        Some(AuthenticatorAttachment::CrossPlatform) => {
+            WEBAUTHN_AUTHENTICATOR_ATTACHMENT_CROSS_PLATFORM
+        }
+        Some(AuthenticatorAttachment::Platform) => WEBAUTHN_AUTHENTICATOR_ATTACHMENT_PLATFORM,
+    }
+}
+
+fn user_verification_to_native(policy: Option<&UserVerificationPolicy>) -> u32 {
+    match policy {
+        None => WEBAUTHN_USER_VERIFICATION_REQUIREMENT_ANY,
+        Some(p) => match p {
+            UserVerificationPolicy::Required => WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED,
+            UserVerificationPolicy::Preferred => WEBAUTHN_USER_VERIFICATION_REQUIREMENT_PREFERRED,
+            UserVerificationPolicy::Discouraged_DO_NOT_USE => {
+                WEBAUTHN_USER_VERIFICATION_REQUIREMENT_DISCOURAGED
+            }
+        },
+    }
+}
+
+fn transport_to_native(transport: &AuthenticatorTransport) -> u32 {
+    match transport {
+        AuthenticatorTransport::Ble => WEBAUTHN_CTAP_TRANSPORT_BLE,
+        AuthenticatorTransport::Internal => WEBAUTHN_CTAP_TRANSPORT_INTERNAL,
+        AuthenticatorTransport::Nfc => WEBAUTHN_CTAP_TRANSPORT_NFC,
+        AuthenticatorTransport::Usb => WEBAUTHN_CTAP_TRANSPORT_USB,
+    }
+}
+
+fn transports_to_bitmask(transports: &Option<Vec<AuthenticatorTransport>>) -> u32 {
+    match transports {
+        None => 0,
+        Some(transports) => transports.into_iter().map(transport_to_native).sum(),
+    }
+}
+struct WinCredentialList {
+    native: WEBAUTHN_CREDENTIAL_LIST,
+    _p: *const WEBAUTHN_CREDENTIAL_EX,
+    _l: Vec<WEBAUTHN_CREDENTIAL_EX>,
+    _ids: Vec<String>,
+}
+
+impl WinCredentialList {
+    fn try_from(
+        credentials: &Option<Vec<PublicKeyCredentialDescriptor>>,
+    ) -> Result<Option<Pin<Box<Self>>>, WebauthnCError> {
+        let credentials = match credentials {
+            None => return Ok(None),
+            Some(c) => c,
+        };
+        if credentials.is_empty() {
+            return Ok(None);
+        }
+
+        // Check that all the credential types are supported.
+        for c in credentials.iter() {
+            if c.type_ != "public-key".to_string() {
+                println!("Unsupported credential type: {:?}", c);
+                return Err(WebauthnCError::Internal);
+            }
+        }
+
+        let len = credentials.len();
+        let res = Self {
+            native: Default::default(),
+            _p: std::ptr::null(),
+            _l: Vec::with_capacity(len),
+            _ids: credentials
+                .iter()
+                .map(|c| c.id.clone().to_string())
+                .collect(),
+        };
+
+        // Box the struct so it doesn't move.
+        let mut boxed = Box::pin(res);
+        let id_ptr = boxed._ids.as_ptr();
+
+        // Put in all the "native" values
+        unsafe {
+            let mut_ref: Pin<&mut Self> = Pin::as_mut(&mut boxed);
+            let l = &mut Pin::get_unchecked_mut(mut_ref)._l;
+            let l_ptr = l.as_mut_ptr();
+            for i in 0..len {
+                let id = id_ptr.add(i);
+                *l_ptr.add(i) = WEBAUTHN_CREDENTIAL_EX {
+                    dwVersion: WEBAUTHN_CREDENTIAL_EX_CURRENT_VERSION,
+                    cbId: (*id).len() as u32,
+                    pbId: id as *mut _,
+                    // TODO: support more than public-key
+                    pwszCredentialType: CREDENTIAL_TYPE_PUBLIC_KEY.into(),
+                    dwTransports: transports_to_bitmask(&credentials[i].transports),
+                };
+            }
+
+            l.set_len(len);
+        }
+
+        // Add a pointer to the pointer...
+        let p = boxed._l.as_ptr();
+        unsafe {
+            let mut_ref: Pin<&mut Self> = Pin::as_mut(&mut boxed);
+            Pin::get_unchecked_mut(mut_ref)._p = p;
+        }
+
+        let native = WEBAUTHN_CREDENTIAL_LIST {
+            cCredentials: len as u32,
+            ppCredentials: std::ptr::addr_of!(boxed._p) as *mut *mut _,
+        };
+
+        // Drop in the native struct
+        unsafe {
+            let mut_ref: Pin<&mut Self> = Pin::as_mut(&mut boxed);
+            Pin::get_unchecked_mut(mut_ref).native = native;
+        }
+        trace!(?boxed.native);
+
+        Ok(Some(boxed))
+    }
+}
+
 struct WinAuthenticatorMakeCredentialOptions {
     native: WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS,
+    _exclude_credentials: Option<Pin<Box<WinCredentialList>>>,
 }
 
 impl WinAuthenticatorMakeCredentialOptions {
-    fn new(options: &PublicKeyCredentialCreationOptions, timeout_ms: u32) -> Self {
+    fn new(
+        options: &PublicKeyCredentialCreationOptions,
+        timeout_ms: u32,
+    ) -> Result<Pin<Box<Self>>, WebauthnCError> {
+        let exclude_credentials = WinCredentialList::try_from(&options.exclude_credentials)?;
+
+        let res = Self {
+            native: Default::default(),
+            _exclude_credentials: exclude_credentials,
+        };
+
+        // Box the struct so it doesn't move.
+        let mut boxed = Box::pin(res);
+
         let native = WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS {
             dwVersion: WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS_CURRENT_VERSION,
             dwTimeoutMilliseconds: timeout_ms,
-            // TODO
+            // Superceded by pExcludeCredentialList for v3
             CredentialList: WEBAUTHN_CREDENTIALS {
                 cCredentials: 0,
                 pCredentials: [].as_mut_ptr(),
@@ -292,25 +429,48 @@ impl WinAuthenticatorMakeCredentialOptions {
                 cExtensions: 0,
                 pExtensions: [].as_mut_ptr(),
             },
-            dwAuthenticatorAttachment: 0,
-            bRequireResidentKey: false.into(),
-            dwUserVerificationRequirement: 0,
+            dwAuthenticatorAttachment: attachment_to_native(
+                &options
+                    .authenticator_selection
+                    .as_ref()
+                    .map(|s| &s.authenticator_attachment)
+                    .unwrap_or(&None),
+            ),
+            bRequireResidentKey: options
+                .authenticator_selection
+                .as_ref()
+                .map(|s| s.require_resident_key)
+                .unwrap_or(false)
+                .into(),
+            dwUserVerificationRequirement: user_verification_to_native(
+                options
+                    .authenticator_selection
+                    .as_ref()
+                    .map(|s| &s.user_verification),
+            ),
             dwAttestationConveyancePreference: 0,
             dwFlags: 0,
             pCancellationId: std::ptr::null_mut(),
-            pExcludeCredentialList: std::ptr::null_mut(),
+            pExcludeCredentialList: match &boxed._exclude_credentials {
+                None => std::ptr::null_mut(),
+                Some(l) => std::ptr::addr_of!(l.native) as *mut _,
+            },
             dwEnterpriseAttestation: 0,
             dwLargeBlobSupport: 0,
             bPreferResidentKey: false.into(),
         };
-        Self { native }
-    }
-}
 
-impl AsRef<WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS>
-    for WinAuthenticatorMakeCredentialOptions
-{
-    fn as_ref(&self) -> &WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS {
+        unsafe {
+            let mut_ref: Pin<&mut Self> = Pin::as_mut(&mut boxed);
+            Pin::get_unchecked_mut(mut_ref).native = native;
+        }
+
+        trace!(?boxed.native);
+
+        Ok(boxed)
+    }
+
+    fn native_ptr<'a>(&'a self) -> &'a WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS {
         &self.native
     }
 }
@@ -376,19 +536,19 @@ impl WinCoseCredentialParameters {
         let p_ptr = boxed._params.as_ptr();
         unsafe {
             let mut_ref: Pin<&mut Self> = Pin::as_mut(&mut boxed);
-            let mut l = &mut Pin::get_unchecked_mut(mut_ref)._l;
+            let l = &mut Pin::get_unchecked_mut(mut_ref)._l;
             let l_ptr = l.as_mut_ptr();
             for i in 0..len {
                 *l_ptr.add(i) = (*p_ptr.add(i)).native;
             }
-            
+
             l.set_len(len);
         }
 
         // let mut l: Vec<WEBAUTHN_COSE_CREDENTIAL_PARAMETER> =
         //     params.iter().map(|p| p.native).collect();
 
-        let native = WEBAUTHN_COSE_CREDENTIAL_PARAMETERS {            
+        let native = WEBAUTHN_COSE_CREDENTIAL_PARAMETERS {
             cCredentialParameters: boxed._l.len() as u32,
             pCredentialParameters: boxed._l.as_mut_ptr() as *mut _,
         };
@@ -404,12 +564,14 @@ impl WinCoseCredentialParameters {
     fn native_ptr<'a>(&'a self) -> &'a WEBAUTHN_COSE_CREDENTIAL_PARAMETERS {
         &self.native
     }
-
 }
 
-fn copy_ptr<T>(cb: u32, pb: *const T) -> Result<Vec<T>, WebauthnCError> where T: Clone {
+fn copy_ptr<T>(cb: u32, pb: *const T) -> Result<Vec<T>, WebauthnCError>
+where
+    T: Clone,
+{
     if pb.is_null() {
-        return Err(WebauthnCError::Internal)
+        return Err(WebauthnCError::Internal);
     }
     let mut dst: Vec<T> = Vec::with_capacity(cb as usize);
     unsafe {
@@ -434,7 +596,7 @@ fn convert_attestation(
     //     cred_id.set_len(cred_id_len);
     // }
 
-    // let attestation_len 
+    // let attestation_len
 
     let id: String = Base64UrlSafeData(cred_id.clone()).to_string();
 
