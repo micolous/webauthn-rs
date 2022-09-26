@@ -3,9 +3,8 @@ use crate::{AuthenticatorBackend, Url};
 
 use base64urlsafedata::Base64UrlSafeData;
 use std::collections::BTreeMap;
-use std::marker::{PhantomData, PhantomPinned};
+use std::marker::PhantomPinned;
 use std::pin::Pin;
-use std::ptr::NonNull;
 use std::time::Duration;
 use webauthn_rs_proto::{
     AllowCredentials, AuthenticationExtensionsClientOutputs, AuthenticatorAssertionResponseRaw,
@@ -16,26 +15,17 @@ use webauthn_rs_proto::{
 };
 
 use std::thread::sleep;
-use windows::core::{GUID, HSTRING, PCWSTR};
+use windows::core::{HSTRING, PCWSTR};
 use windows::w;
 use windows::Win32::Foundation::{GetLastError, HWND};
 use windows::Win32::Networking::WindowsWebServices::*;
-use windows::Win32::System::Console::{GetConsoleTitleW, GetConsoleWindow, SetConsoleTitleW};
+use windows::Win32::System::Console::{GetConsoleTitleW, SetConsoleTitleW};
 use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
 
-pub struct Win10 {
-    //    rp: WEBAUTHN_RP_ENTITY_INFORMATION,
-}
+pub struct Win10 {}
 
-const ID: &'static HSTRING = w!("Id:webauthn-authenticator-rs");
-const NAME: &'static HSTRING = w!("Name:webauthn-authenticator-rs");
 const SHA_256: &'static HSTRING = w!("SHA-256");
 const CREDENTIAL_TYPE_PUBLIC_KEY: &'static HSTRING = w!("public-key");
-
-fn str_to_pcwstr(s: &str) -> PCWSTR {
-    let h: HSTRING = s.into();
-    (&h).into()
-}
 
 impl Default for Win10 {
     fn default() -> Self {
@@ -539,10 +529,6 @@ impl WinCredentialList {
 
         Ok(Some(boxed))
     }
-
-    fn native_ptr<'a>(&'a self) -> &'a WEBAUTHN_CREDENTIAL_LIST {
-        &self.native
-    }
 }
 
 struct WinAuthenticatorMakeCredentialOptions {
@@ -804,7 +790,8 @@ fn convert_attestation(
     client_data_json: String,
 ) -> Result<RegisterPublicKeyCredential, WebauthnCError> {
     let cred_id = copy_ptr(a.cbCredentialId, a.pbCredentialId).ok_or(WebauthnCError::Internal)?;
-    let attesation_object = copy_ptr(a.cbAttestationObject, a.pbAttestationObject).ok_or(WebauthnCError::Internal)?;
+    let attesation_object =
+        copy_ptr(a.cbAttestationObject, a.pbAttestationObject).ok_or(WebauthnCError::Internal)?;
     let type_: String = unsafe { a.pwszFormatType.to_string().unwrap() };
 
     let id: String = Base64UrlSafeData(cred_id.clone()).to_string();
@@ -827,10 +814,13 @@ fn convert_assertion(
     client_data_json: String,
 ) -> Result<PublicKeyCredential, WebauthnCError> {
     let user_id = copy_ptr(a.cbUserId, a.pbUserId);
-    let authenticator_data = copy_ptr(a.cbAuthenticatorData, a.pbAuthenticatorData).ok_or(WebauthnCError::Internal)?;
+    let authenticator_data =
+        copy_ptr(a.cbAuthenticatorData, a.pbAuthenticatorData).ok_or(WebauthnCError::Internal)?;
     let signature = copy_ptr(a.cbSignature, a.pbSignature).ok_or(WebauthnCError::Internal)?;
 
-    let credential_id = Base64UrlSafeData(copy_ptr(a.Credential.cbId, a.Credential.pbId).ok_or(WebauthnCError::Internal)?);
+    let credential_id = Base64UrlSafeData(
+        copy_ptr(a.Credential.cbId, a.Credential.pbId).ok_or(WebauthnCError::Internal)?,
+    );
     let type_: String = unsafe { a.Credential.pwszCredentialType.to_string().unwrap() };
 
     Ok(PublicKeyCredential {
@@ -842,7 +832,7 @@ fn convert_assertion(
             signature: Base64UrlSafeData(signature),
             user_handle: user_id.map(Base64UrlSafeData),
         },
-        type_: "public-key".to_string(),
+        type_,
         // TODO
         extensions: AuthenticationExtensionsClientOutputs::default(),
     })
