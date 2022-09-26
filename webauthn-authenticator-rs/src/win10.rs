@@ -81,7 +81,7 @@ impl AuthenticatorBackend for Win10 {
                 hwnd,
                 &self.rp,
                 userinfo.native_ptr(),
-                pubkeycredparams.as_ref(),
+                pubkeycredparams.native_ptr(),
                 clientdata.native_ptr(),
                 Some(makecredopts.as_ref()),
             )
@@ -318,54 +318,93 @@ impl AsRef<WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS>
 /// Wrapper for [WEBAUTHN_COSE_CREDENTIAL_PARAMETER] to ensure pointer lifetime.
 struct WinCoseCredentialParameter {
     native: WEBAUTHN_COSE_CREDENTIAL_PARAMETER,
-    typ: HSTRING,
+    _typ: HSTRING,
 }
 
-impl From<&PubKeyCredParams> for WinCoseCredentialParameter {
-    fn from(p: &PubKeyCredParams) -> Self {
-        let typ: HSTRING = p.type_.clone().into();
+impl WinCoseCredentialParameter {
+    fn from(p: &PubKeyCredParams) -> Pin<Box<Self>> {
+        let res = Self {
+            native: Default::default(),
+            _typ: p.type_.clone().into(),
+        };
+
+        let mut boxed = Box::pin(res);
+
         let native = WEBAUTHN_COSE_CREDENTIAL_PARAMETER {
             dwVersion: WEBAUTHN_COSE_CREDENTIAL_PARAMETER_CURRENT_VERSION,
-            pwszCredentialType: (&typ).into(),
+            pwszCredentialType: (&boxed._typ).into(),
             lAlg: p.alg as i32,
         };
-        Self { typ, native }
+
+        unsafe {
+            let mut_ref: Pin<&mut Self> = Pin::as_mut(&mut boxed);
+            Pin::get_unchecked_mut(mut_ref).native = native;
+        }
+
+        boxed
     }
 }
 
 struct WinCoseCredentialParameters {
     native: WEBAUTHN_COSE_CREDENTIAL_PARAMETERS,
-    // params: Vec<WinCoseCredentialParameter>,
-    l: Vec<WEBAUTHN_COSE_CREDENTIAL_PARAMETER>,
+    _params: Vec<Pin<Box<WinCoseCredentialParameter>>>,
+    _l: Vec<WEBAUTHN_COSE_CREDENTIAL_PARAMETER>,
 }
 
-impl From<Vec<WinCoseCredentialParameter>> for WinCoseCredentialParameters {
-    fn from(params: Vec<WinCoseCredentialParameter>) -> Self {
-        let mut l: Vec<WEBAUTHN_COSE_CREDENTIAL_PARAMETER> =
-            params.iter().map(|p| p.native).collect();
-
-        let native = WEBAUTHN_COSE_CREDENTIAL_PARAMETERS {
-            cCredentialParameters: l.len() as u32,
-            pCredentialParameters: l.as_mut_ptr() as *mut _,
-        };
-        Self { l, native }
-    }
-}
-
-impl From<&Vec<PubKeyCredParams>> for WinCoseCredentialParameters {
-    fn from(params: &Vec<PubKeyCredParams>) -> Self {
-        let params: Vec<WinCoseCredentialParameter> = params
+impl WinCoseCredentialParameters {
+    fn from(params: &Vec<PubKeyCredParams>) -> Pin<Box<Self>> {
+        let params: Vec<Pin<Box<WinCoseCredentialParameter>>> = params
             .iter()
             .map(WinCoseCredentialParameter::from)
             .collect();
-        WinCoseCredentialParameters::from(params)
+        WinCoseCredentialParameters::from_wrapped(params)
     }
-}
 
-impl AsRef<WEBAUTHN_COSE_CREDENTIAL_PARAMETERS> for WinCoseCredentialParameters {
-    fn as_ref(&self) -> &WEBAUTHN_COSE_CREDENTIAL_PARAMETERS {
+    fn from_wrapped(params: Vec<Pin<Box<WinCoseCredentialParameter>>>) -> Pin<Box<Self>> {
+        // Create the result struct first, so we get stable addresses for _params and _l.
+        let len = params.len();
+        let res = Self {
+            native: Default::default(),
+            _l: Vec::with_capacity(len),
+            _params: params,
+        };
+
+        // Box the struct so it doesn't move.
+        let mut boxed = Box::pin(res);
+
+        // Put in all the "native" values
+        let p_ptr = boxed._params.as_ptr();
+        unsafe {
+            let mut_ref: Pin<&mut Self> = Pin::as_mut(&mut boxed);
+            let mut l = &mut Pin::get_unchecked_mut(mut_ref)._l;
+            let l_ptr = l.as_mut_ptr();
+            for i in 0..len {
+                *l_ptr.add(i) = (*p_ptr.add(i)).native;
+            }
+            
+            l.set_len(len);
+        }
+
+        // let mut l: Vec<WEBAUTHN_COSE_CREDENTIAL_PARAMETER> =
+        //     params.iter().map(|p| p.native).collect();
+
+        let native = WEBAUTHN_COSE_CREDENTIAL_PARAMETERS {            
+            cCredentialParameters: boxed._l.len() as u32,
+            pCredentialParameters: boxed._l.as_mut_ptr() as *mut _,
+        };
+
+        unsafe {
+            let mut_ref: Pin<&mut Self> = Pin::as_mut(&mut boxed);
+            Pin::get_unchecked_mut(mut_ref).native = native;
+        }
+
+        boxed
+    }
+
+    fn native_ptr<'a>(&'a self) -> &'a WEBAUTHN_COSE_CREDENTIAL_PARAMETERS {
         &self.native
     }
+
 }
 
 fn copy_ptr<T>(cb: u32, pb: *const T) -> Result<Vec<T>, WebauthnCError> where T: Clone {
@@ -387,6 +426,7 @@ fn convert_attestation(
     let cred_id = copy_ptr(a.cbCredentialId, a.pbCredentialId)?;
     let attesation = copy_ptr(a.cbAttestation, a.pbAttestation)?;
     let type_: String = unsafe { a.pwszFormatType.to_string().unwrap() };
+
     // let cred_id_len = a.cbCredentialId as usize;
     // let mut cred_id: Vec<u8> = Vec::with_capacity(cred_id_len);
     // unsafe {
