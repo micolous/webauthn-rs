@@ -167,11 +167,11 @@ fn get_hwnd() -> HWND {
      * https://github.com/microsoft/vscode/issues/42356
      */
 
-    let hwnd = unsafe { GetConsoleWindow() };
-    println!("HWND = {:?}", hwnd);
-    if hwnd != HWND(0) {
-        return hwnd;
-    }
+    // let hwnd = unsafe { GetConsoleWindow() };
+    // println!("HWND = {:?}", hwnd);
+    // if hwnd != HWND(0) {
+    //     return hwnd;
+    // }
 
     let mut old_title: [u16; 65536] = [0; 65536];
 
