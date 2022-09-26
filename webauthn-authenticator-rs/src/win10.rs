@@ -114,40 +114,65 @@ impl AuthenticatorBackend for Win10 {
 }
 
 fn get_hwnd() -> HWND {
-    unsafe { GetConsoleWindow() }
-    /*
-        let mut old_title: [u16; 65536] = [0; 65536];
+    /* TODO: make this work properly for non-console apps.
+     *
+     * The Windows WebAuthn APIs expect a HWND to know where to put the FIDO
+     * GUI (centred over the calling application window).
+     * 
+     * GetConsoleWindow() only works with the "native" console, and not virtual
+     * terminals: Windows Terminal and VS Code give a valid HWND that has the
+     * dialog at the top-left of the screen but *behind* the active window.
+     * 
+     * Windows' docs suggest an alternative: change the console title to
+     * some random value (SetConsoleTitleW), wait a moment, then search for it
+     * (FindWindowW):
+     * https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/obtain-console-window-handle
+     * 
+     * This works reliably with Windows Terminal, but not with VS Code. :(
+     * 
+     * https://github.com/microsoft/terminal/issues/2988
+     * https://github.com/microsoft/vscode/issues/42356
+     */
 
-        // Make a random title to find
-        let mut r: [u8; 8] = [0; 8];
-        openssl::rand::rand_bytes(&mut r).expect("openssl::rand_bytes");
-        let r: HSTRING = (&format!("{:?}", r)).into();
+    let hwnd = unsafe {
+        GetConsoleWindow()
+    };
+    println!("HWND = {:?}", hwnd);
+    if hwnd != HWND(0) {
+        return hwnd;
+    }
 
-        unsafe {
-            let len = GetConsoleTitleW(&mut old_title);
-            if len == 0 {
-                panic!("GetConsoleTitleW => {:?}", GetLastError());
-            }
-            // println!("Console title: ({}) = {:?}", len, old_title);
+    let mut old_title: [u16; 65536] = [0; 65536];
 
-            let res = SetConsoleTitleW(&r);
-            if !res.as_bool() {
-                panic!("SetConsoleTitleW => {:?}", GetLastError());
-            }
+    // Make a random title to find
+    let mut r: [u8; 8] = [0; 8];
+    openssl::rand::rand_bytes(&mut r).expect("openssl::rand_bytes");
+    let r: HSTRING = (&format!("{:?}", r)).into();
 
-            sleep(Duration::from_millis(500));
-
-            let hwnd = FindWindowW(PCWSTR::null(), &r);
-
-            let res = SetConsoleTitleW(PCWSTR(old_title.as_ptr()));
-            if !res.as_bool() {
-                panic!("SetConsoleTitleW => {:?}", GetLastError());
-            }
-
-            println!("HWND = {:?}", hwnd);
-            hwnd
+    unsafe {
+        let len = GetConsoleTitleW(&mut old_title);
+        if len == 0 {
+            panic!("GetConsoleTitleW => {:?}", GetLastError());
         }
-    */
+        // println!("Console title: ({}) = {:?}", len, old_title);
+
+        let res = SetConsoleTitleW(&r);
+        if !res.as_bool() {
+            panic!("SetConsoleTitleW => {:?}", GetLastError());
+        }
+
+        sleep(Duration::from_millis(500));
+
+        let hwnd = FindWindowW(PCWSTR::null(), &r);
+
+        let res = SetConsoleTitleW(PCWSTR(old_title.as_ptr()));
+        if !res.as_bool() {
+            panic!("SetConsoleTitleW => {:?}", GetLastError());
+        }
+
+        println!("HWND = {:?}", hwnd);
+        hwnd
+    }
 }
 
 /// Wrapper for [WEBAUTHN_USER_ENTITY_INFORMATION] to ensure pointer lifetime.
