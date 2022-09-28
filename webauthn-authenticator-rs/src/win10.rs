@@ -25,10 +25,10 @@ use webauthn_rs_proto::{
 };
 
 use windows::{
-    core::{BOOL, HSTRING, PCWSTR},
+    core::{HSTRING, PCWSTR},
     w,
     Win32::{
-        Foundation::{GetLastError, HWND},
+        Foundation::{BOOL, GetLastError, HWND},
         Networking::WindowsWebServices::*,
         System::Console::{GetConsoleTitleW, GetConsoleWindow, SetConsoleTitleW},
         UI::WindowsAndMessaging::FindWindowW,
