@@ -1,3 +1,11 @@
+//! Bindings for Windows 10 Webauthn API
+//!
+//! This API is available in Windows 10 bulid 1903 and later.
+//!
+//! API docs:
+//!
+//! * [MSDN: WebAuthn](https://learn.microsoft.com/en-us/windows/win32/api/webauthn/)
+//! * [webauthn.h](github.com/microsoft/webauthn) (describes versions)
 use crate::error::WebauthnCError;
 use crate::{AuthenticatorBackend, Url};
 
@@ -17,7 +25,7 @@ use webauthn_rs_proto::{
 };
 
 use windows::{
-    core::{HSTRING, PCWSTR},
+    core::{BOOL, HSTRING, PCWSTR},
     w,
     Win32::{
         Foundation::{GetLastError, HWND},
@@ -29,7 +37,11 @@ use windows::{
 
 pub struct Win10 {}
 
+// Most constants are `&str`, but APIs expect `HSTRING`... there's no good work-around.
+// https://github.com/microsoft/windows-rs/issues/2049
+/// [WEBAUTHN_HASH_ALGORITHM_SHA_256]
 const SHA_256: &HSTRING = w!("SHA-256");
+/// [WEBAUTHN_CREDENTIAL_TYPE_PUBLIC_KEY]
 const CREDENTIAL_TYPE_PUBLIC_KEY: &HSTRING = w!("public-key");
 
 impl Default for Win10 {
@@ -53,7 +65,7 @@ impl Default for Win10 {
 }
 
 /// Smart pointer type to auto-[Drop] bare pointers we got from Windows' API,
-/// establishing a strict lifetime for data that we need to tell Windows to 
+/// establishing a strict lifetime for data that we need to tell Windows to
 /// free.
 ///
 /// All fields of this struct are considered private.
@@ -135,7 +147,7 @@ impl AuthenticatorBackend for Win10 {
             })?;
 
             WinPtr::new(r, |a| WebAuthNFreeCredentialAttestation(Some(a)))
-                    .ok_or(WebauthnCError::Internal)?
+                .ok_or(WebauthnCError::Internal)?
         };
 
         println!("got result from WebAuthNAuthenticatorMakeCredential");
@@ -182,7 +194,11 @@ impl AuthenticatorBackend for Win10 {
         };
 
         println!("got result from WebAuthNAuthenticatorGetAssertion");
-        convert_assertion(&native_result, &clientdata.client_data_json)
+        convert_assertion(
+            &native_result,
+            &clientdata.client_data_json,
+            getassertopts.app_id_used.into(),
+        )
         // println!("converted:");
         // println!("{:?}", c);
 
@@ -300,7 +316,7 @@ impl WinRpEntityInformation {
     }
 }
 
-/// Wrapper for [WEBAUTHN_USER_ENTITY_INFORMATION] to ensure pointer lifetime.
+/// Wrapper for [WEBAUTHN_USER_ENTITY_INFORMATION] to ensure pointer lifetime, analgous to [User].
 struct WinUserEntityInformation {
     native: WEBAUTHN_USER_ENTITY_INFORMATION,
     _id: String,
@@ -451,19 +467,19 @@ fn transport_to_native(transport: &AuthenticatorTransport) -> u32 {
 /// Converts a bitmask of native transports into [AuthenticatorTransport].
 fn native_to_transports(t: u32) -> Vec<AuthenticatorTransport> {
     let mut o: Vec<AuthenticatorTransport> = Vec::new();
-    if t & WEBAUTHN_CTAP_TRANSPORT_BLE == WEBAUTHN_CTAP_TRANSPORT_BLE {
+    if t & WEBAUTHN_CTAP_TRANSPORT_BLE != 0 {
         o.push(AuthenticatorTransport::Ble);
     }
-    if t & WEBAUTHN_CTAP_TRANSPORT_INTERNAL == WEBAUTHN_CTAP_TRANSPORT_INTERNAL {
+    if t & WEBAUTHN_CTAP_TRANSPORT_INTERNAL != 0 {
         o.push(AuthenticatorTransport::Internal);
     }
-    if t & WEBAUTHN_CTAP_TRANSPORT_NFC == WEBAUTHN_CTAP_TRANSPORT_NFC {
+    if t & WEBAUTHN_CTAP_TRANSPORT_NFC != 0 {
         o.push(AuthenticatorTransport::Nfc);
     }
-    if t & WEBAUTHN_CTAP_TRANSPORT_TEST == WEBAUTHN_CTAP_TRANSPORT_TEST {
+    if t & WEBAUTHN_CTAP_TRANSPORT_TEST != 0 {
         o.push(AuthenticatorTransport::Test);
     }
-    if t & WEBAUTHN_CTAP_TRANSPORT_USB == WEBAUTHN_CTAP_TRANSPORT_USB {
+    if t & WEBAUTHN_CTAP_TRANSPORT_USB != 0 {
         o.push(AuthenticatorTransport::Usb);
     }
     o
@@ -478,6 +494,8 @@ fn transports_to_bitmask(transports: &Option<Vec<AuthenticatorTransport>>) -> u3
     }
 }
 
+/// Wrapper for [WEBAUTHN_CREDENTIAL_LIST] to ensure pointer lifetime, analogous to
+/// [PublicKeyCredentialDescriptor] and [AllowCredentials].
 struct WinCredentialList {
     /// Native structure, which points to everything else here.
     native: WEBAUTHN_CREDENTIAL_LIST,
@@ -489,6 +507,7 @@ struct WinCredentialList {
     _ids: Vec<Base64UrlSafeData>,
 }
 
+/// Trait to make [PublicKeyCredentialDescriptor] and [AllowCredentials] look the same.
 trait CredentialType {
     fn type_(&self) -> String;
     fn id(&self) -> Base64UrlSafeData;
@@ -602,6 +621,8 @@ impl WinCredentialList {
     }
 }
 
+/// Wrapper for [WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS] to ensure
+/// pointer lifetime, analogous to [PublicKeyCredentialCreationOptions].
 struct WinAuthenticatorMakeCredentialOptions {
     native: WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS,
     _exclude_credentials: Option<Pin<Box<WinCredentialList>>>,
@@ -631,6 +652,7 @@ impl WinAuthenticatorMakeCredentialOptions {
                 cCredentials: 0,
                 pCredentials: [].as_mut_ptr(),
             },
+            // TODO
             Extensions: WEBAUTHN_EXTENSIONS {
                 cExtensions: 0,
                 pExtensions: [].as_mut_ptr(),
@@ -681,10 +703,36 @@ impl WinAuthenticatorMakeCredentialOptions {
     }
 }
 
-/// Wrapper for [WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS] to ensure pointer lifetime
+/// Wrapper for [WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS] to ensure pointer lifetime.
+///
+/// https://learn.microsoft.com/en-us/windows/win32/api/webauthn/ns-webauthn-webauthn_authenticator_get_assertion_options
 struct WinAuthenticatorGetAssertionOptions {
     native: WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS,
     _allow_credentials: Option<Pin<Box<WinCredentialList>>>,
+    _app_id: Option<HSTRING>,
+
+    /// Used as a *return* value from GetAssertion as to whether the U2F AppId was used,
+    /// equivalent to [AuthenticationExtensionsClientOutputs::appid].
+    ///
+    /// Why here? Because for some reason, Windows' API decides to put a pointer for
+    /// mutable *return* value inside an `_In_opt_ *const ptr` *request* value
+    /// ([WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS]): `pbU2fAppId`.
+    ///
+    /// The documentation was very opaque here, but [Firefox's implementation][ffx]
+    /// appears to correctly deal with this nonsense.
+    ///
+    /// However, [Chromium's implementation][chr] appears to have misunderstood this field,
+    /// and always passes in pointers to `static BOOL` values `kUseAppIdTrue` or
+    /// `kUseAppIdFalse` (depending on whether the extension was present) and doesn't read
+    /// the response.
+    ///
+    /// Unfortunately, it looks like the WebAuthn API has been frozen for Windows 10, and
+    /// the new revisions are only on Windows 11. So it's unlikely this will ever be
+    /// properly fixed. 🙃
+    ///
+    /// [chr]: https://chromium.googlesource.com/chromium/src/+/f62b8f341c14be84c6c995133f485d76a58de090/device/fido/win/webauthn_api.cc#520
+    /// [ffx]: https://github.com/mozilla/gecko-dev/blob/620490a051a1fc72563e1c6bbecfe7346122a6bc/dom/webauthn/WinWebAuthnManager.cpp#L714-L716
+    app_id_used: BOOL,
 }
 
 impl WinAuthenticatorGetAssertionOptions {
@@ -697,6 +745,12 @@ impl WinAuthenticatorGetAssertionOptions {
         let res = Self {
             native: Default::default(),
             _allow_credentials: allow_credentials,
+            _app_id: options
+                .extensions
+                .as_ref()
+                .map(|e| e.appid.as_ref().map(|a| a.clone().into()))
+                .flatten(),
+            app_id_used: false.into(),
         };
 
         // Box the struct so it doesn't move.
@@ -719,10 +773,11 @@ impl WinAuthenticatorGetAssertionOptions {
                 &options.user_verification,
             )),
             dwFlags: 0,
-            // TODO
-            pbU2fAppId: std::ptr::null_mut(),
-            // TODO
-            pwszU2fAppId: PCWSTR::null(),
+            pwszU2fAppId: match &boxed._app_id {
+                None => PCWSTR::null(),
+                Some(l) => l.into(),
+            },
+            pbU2fAppId: std::ptr::addr_of_mut!(boxed.app_id_used),
             pCancellationId: std::ptr::null_mut(),
             pAllowCredentialList: match &boxed._allow_credentials {
                 None => std::ptr::null_mut(),
@@ -887,6 +942,7 @@ fn convert_attestation(
 fn convert_assertion(
     a: &WEBAUTHN_ASSERTION,
     client_data_json: &String,
+    app_id_used: bool,
 ) -> Result<PublicKeyCredential, WebauthnCError> {
     let user_id = copy_ptr(a.cbUserId, a.pbUserId);
     let authenticator_data =
@@ -913,7 +969,10 @@ fn convert_assertion(
             user_handle: user_id.map(Base64UrlSafeData),
         },
         type_,
-        // TODO
-        extensions: AuthenticationExtensionsClientOutputs::default(),
+        extensions: AuthenticationExtensionsClientOutputs {
+            appid: Some(app_id_used),
+            // TODO
+            ..Default::default()
+        },
     })
 }
