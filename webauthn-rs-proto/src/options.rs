@@ -4,6 +4,7 @@
 use base64urlsafedata::Base64UrlSafeData;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use url::Url;
 
 /// A credential ID type. At the moment this is a vector of bytes, but
 /// it could also be a future change for this to be base64 string instead.

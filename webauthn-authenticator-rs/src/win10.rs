@@ -3,7 +3,8 @@ use crate::{AuthenticatorBackend, Url};
 
 use base64urlsafedata::Base64UrlSafeData;
 use std::collections::BTreeMap;
-use std::marker::PhantomPinned;
+use std::marker::{PhantomData, PhantomPinned};
+use std::ops::Deref;
 use std::pin::Pin;
 use std::thread::sleep;
 use std::time::Duration;
@@ -51,14 +52,65 @@ impl Default for Win10 {
     }
 }
 
+/// Smart pointer type to auto-[Drop] bare pointers we got from Windows' API,
+/// establishing a strict lifetime for data that we need to tell Windows to 
+/// free.
+///
+/// All fields of this struct are considered private.
+struct WinPtr<'a, T: 'a> {
+    _free: unsafe fn(*const T) -> (),
+    _ptr: *const T,
+    _phantom: PhantomData<&'a T>,
+}
+
+impl<'a, T> WinPtr<'a, T> {
+    /// Creates a wrapper around a `*const T` Pointer to automatically call its
+    /// `free` function when this struct is dropped.
+    ///
+    /// Returns `None` if `ptr` is null.
+    unsafe fn new(ptr: *const T, free: unsafe fn(*const T) -> ()) -> Option<Self> {
+        if ptr.is_null() {
+            None
+        } else {
+            // println!("new_ptr: r={:?}", ptr);
+            Some(Self {
+                _free: free,
+                _ptr: ptr,
+                _phantom: PhantomData,
+            })
+        }
+    }
+}
+
+impl<'a, T> Deref for WinPtr<'a, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        // This is as safe as we can, because we null-checked in `new()` and
+        // this type is immutable.
+        unsafe { &(*self._ptr) }
+    }
+}
+
+impl<'a, T> Drop for WinPtr<'a, T> {
+    fn drop(&mut self) {
+        // println!("free_ptr: r={:?}, {:?}", self._raw, std::ptr::addr_of!(self._ptr));
+        unsafe { (self._free)(self._ptr) }
+    }
+}
+
 impl AuthenticatorBackend for Win10 {
+    /// Perform a registration action using Windows WebAuth API.
+    ///
+    /// This wraps [WebAuthNAuthenticatorMakeCredential].
+    ///
+    /// [WebAuthnAuthenticatorMakeCredential]: https://learn.microsoft.com/en-us/windows/win32/api/webauthn/nf-webauthn-webauthnauthenticatormakecredential
     fn perform_register(
         &mut self,
         origin: Url,
         options: PublicKeyCredentialCreationOptions,
         timeout_ms: u32,
     ) -> Result<RegisterPublicKeyCredential, WebauthnCError> {
-        let hwnd = get_hwnd();
+        let hwnd = get_hwnd().ok_or(WebauthnCError::CannotFindHWND)?;
         let rp = WinRpEntityInformation::from(&options.rp);
         let userinfo = WinUserEntityInformation::from(&options.user);
         let pubkeycredparams = WinCoseCredentialParameters::from(&options.pub_key_cred_params);
@@ -67,8 +119,8 @@ impl AuthenticatorBackend for Win10 {
         let makecredopts = WinAuthenticatorMakeCredentialOptions::new(&options, timeout_ms)?;
 
         println!("WebAuthNAuthenticatorMakeCredential()");
-        let result = unsafe {
-            WebAuthNAuthenticatorMakeCredential(
+        let native_result = unsafe {
+            let r = WebAuthNAuthenticatorMakeCredential(
                 hwnd,
                 rp.native_ptr(),
                 userinfo.native_ptr(),
@@ -76,27 +128,29 @@ impl AuthenticatorBackend for Win10 {
                 clientdata.native_ptr(),
                 Some(makecredopts.native_ptr()),
             )
-            .map(|r| r.as_ref().ok_or(WebauthnCError::Internal))
+            .map_err(|e| {
+                // TODO: map error codes, if we learn them...
+                error!("Error: {:?}", e);
+                WebauthnCError::Internal
+            })?;
+
+            WinPtr::new(r, |a| WebAuthNFreeCredentialAttestation(Some(a)))
+                    .ok_or(WebauthnCError::Internal)?
         };
 
         println!("got result from WebAuthNAuthenticatorMakeCredential");
-        let result = result.map_err(|e| {
-            println!("Error: {:?}", e);
-            WebauthnCError::Internal
-        })?;
 
-        result.map(|a| {
-            println!("response data:");
-            println!("{:?}", a);
-
-            let c = convert_attestation(a, &clientdata.client_data_json);
-            println!("converted:");
-            println!("{:?}", c);
-
-            c
-        })?
+        convert_attestation(&native_result, &clientdata.client_data_json)
+        // println!("converted:");
+        // println!("{:?}", c);
+        // c
     }
 
+    /// Perform an authentication action using Windows WebAuth API.
+    ///
+    /// This wraps [WebAuthNAuthenticatorGetAssertion].
+    ///
+    /// [WebAuthNAuthenticatorGetAssertion]: https://learn.microsoft.com/en-us/windows/win32/api/webauthn/nf-webauthn-webauthnauthenticatorgetassertion
     fn perform_auth(
         &mut self,
         origin: Url,
@@ -104,65 +158,68 @@ impl AuthenticatorBackend for Win10 {
         timeout_ms: u32,
     ) -> Result<PublicKeyCredential, WebauthnCError> {
         trace!(?options);
-        let hwnd = get_hwnd();
+        let hwnd = get_hwnd().ok_or(WebauthnCError::CannotFindHWND)?;
         let rp_id: HSTRING = options.rp_id.clone().into();
         let clientdata =
             WinClientData::try_from(&get_to_clientdata(origin, options.challenge.clone()))?;
         let getassertopts = WinAuthenticatorGetAssertionOptions::new(&options, timeout_ms)?;
         // WebAuthNAuthenticatorGetAssertion
         println!("WebAuthNAuthenticatorGetAssertion()");
-        let result = unsafe {
-            WebAuthNAuthenticatorGetAssertion(
+        let native_result = unsafe {
+            let r = WebAuthNAuthenticatorGetAssertion(
                 hwnd,
                 &rp_id,
                 clientdata.native_ptr(),
                 Some(getassertopts.native_ptr()),
             )
-            .map(|r| r.as_ref().ok_or(WebauthnCError::Internal))
+            .map_err(|e| {
+                // TODO: map error codes, if we learn them...
+                error!("Error: {:?}", e);
+                WebauthnCError::Internal
+            })?;
+
+            WinPtr::new(r, WebAuthNFreeAssertion).ok_or(WebauthnCError::Internal)?
         };
 
         println!("got result from WebAuthNAuthenticatorGetAssertion");
-        let result = result.map_err(|e| {
-            println!("Error: {:?}", e);
-            WebauthnCError::Internal
-        })?;
+        convert_assertion(&native_result, &clientdata.client_data_json)
+        // println!("converted:");
+        // println!("{:?}", c);
 
-        result.map(|a| {
-            println!("response data:");
-            println!("{:?}", a);
-
-            let c = convert_assertion(a, &clientdata.client_data_json);
-            println!("converted:");
-            println!("{:?}", c);
-
-            c
-        })?
+        // c
     }
 }
 
-fn get_hwnd() -> HWND {
-    /* TODO: make this work properly for non-console apps.
-     *
-     * The Windows WebAuthn APIs expect a HWND to know where to put the FIDO
-     * GUI (centred over the calling application window).
-     *
-     * GetConsoleWindow() only works with the "native" console, and not virtual
-     * terminals: Windows Terminal and VS Code give a valid HWND that has the
-     * dialog at the top-left of the screen but *behind* the active window.
-     *
-     * Windows' docs suggest an alternative: change the console title to
-     * some random value (SetConsoleTitleW), wait a moment, then search for it
-     * (FindWindowW):
-     * https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/obtain-console-window-handle
-     *
-     * This works reliably with Windows Terminal, but not with VS Code. :(
-     *
-     * https://github.com/microsoft/terminal/issues/2988
-     * https://github.com/microsoft/vscode/issues/42356
-     */
+/// Try to find the [HWND] for the current application.
+///
+/// Returns [None] if we couldn't find it.
+///
+/// **TODO:** make this work properly for non-console apps.
+///
+/// The Windows WebAuthn APIs expect a HWND to know where to put the FIDO
+/// GUI (centred over the calling application window).
+///
+/// `GetConsoleWindow()` only works with the "native" console, and not virtual
+/// terminals, which is a bug: [Windows Terminal][terminal] and [VS Code][vscode]
+/// give a valid HWND that has the dialog at the top-left of the screen (probably
+/// conhost?), rather rather than centred over the terminal, and don't change
+/// focus properly. VS Code also [doesn't propagate z-order changes][vscode],
+/// so the dialog appears behind. Windows Terminal [fixed that bug][terminal],
+/// but it still does weird things to <kbd>Alt</kbd> + <kbd>Tab</kbd>.
+///
+/// [Windows' docs suggest an alternative][hack]: change the console title to
+/// some random value (`SetConsoleTitleW`), wait a moment, then search for it
+/// (`FindWindowW`). However, that only works with Windows Terminal, so
+/// VS Code is still stuck with the dialog opening in the background.
+///
+/// [hack]: https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/obtain-console-window-handle
+/// [terminal]: https://github.com/microsoft/terminal/issues/2988
+/// [vscode]: https://github.com/microsoft/vscode/issues/42356
+fn get_hwnd() -> Option<HWND> {
     let chwnd = unsafe { GetConsoleWindow() };
-    println!("GetConsoleWindow HWND = {:?}", chwnd);
+    trace!("GetConsoleWindow HWND = {:?}", chwnd);
 
+    let chwnd = if chwnd == HWND(0) { None } else { Some(chwnd) };
     let mut old_title: [u16; 65536] = [0; 65536];
 
     // Make a random title to find
@@ -193,13 +250,11 @@ fn get_hwnd() -> HWND {
             error!("SetConsoleTitleW => {:?}", GetLastError());
         }
 
-        println!("FindWindowW HWND = {:?}", hwnd);
+        trace!("FindWindowW HWND = {:?}", hwnd);
         if hwnd != HWND(0) {
-            hwnd
-        } else if chwnd != HWND(0) {
-            chwnd
+            Some(hwnd)
         } else {
-            panic!("Cannot find hwnd");
+            chwnd
         }
     }
 }
@@ -219,7 +274,7 @@ impl WinRpEntityInformation {
             native: Default::default(),
             _id: rp.id.clone().into(),
             _name: rp.name.clone().into(),
-            _icon: rp.icon.as_ref().map(|i| i.clone().into()),
+            _icon: rp.icon.as_ref().map(|i| i.clone().as_ref().into()),
         };
 
         let mut boxed = Box::pin(res);
@@ -263,7 +318,7 @@ impl WinUserEntityInformation {
             _id: u.id.clone().to_string(),
             _name: u.name.clone().into(),
             _display_name: u.display_name.clone().into(),
-            _icon: u.icon.as_ref().map(|i| i.clone().into()),
+            _icon: u.icon.as_ref().map(|i| i.clone().as_ref().into()),
             _pin: PhantomPinned,
         };
 
@@ -327,7 +382,7 @@ impl WinClientData {
         Ok(boxed)
     }
 
-    fn native_ptr(&self) -> &WEBAUTHN_CLIENT_DATA {
+    fn native_ptr(&self) -> *const WEBAUTHN_CLIENT_DATA {
         &self.native
     }
 }
@@ -502,7 +557,7 @@ impl WinCredentialList {
             let mut_ptr = Pin::get_unchecked_mut(mut_ref);
             let l = &mut mut_ptr._l;
             let l_ptr = l.as_mut_ptr();
-            for i in 0..len {
+            for (i, credential) in credentials.iter().enumerate() {
                 let id = &mut mut_ptr._ids[i];
                 *l_ptr.add(i) = WEBAUTHN_CREDENTIAL_EX {
                     dwVersion: WEBAUTHN_CREDENTIAL_EX_CURRENT_VERSION,
@@ -510,7 +565,7 @@ impl WinCredentialList {
                     pbId: id.0.as_mut_ptr() as *mut _,
                     // TODO: support more than public-key
                     pwszCredentialType: CREDENTIAL_TYPE_PUBLIC_KEY.into(),
-                    dwTransports: credentials[i].transports(),
+                    dwTransports: credential.transports(),
                 };
             }
 
@@ -808,7 +863,11 @@ fn convert_attestation(
     let cred_id = copy_ptr(a.cbCredentialId, a.pbCredentialId).ok_or(WebauthnCError::Internal)?;
     let attesation_object =
         copy_ptr(a.cbAttestationObject, a.pbAttestationObject).ok_or(WebauthnCError::Internal)?;
-    let type_: String = unsafe { a.pwszFormatType.to_string().map_err(|_| WebauthnCError::Internal)? };
+    let type_: String = unsafe {
+        a.pwszFormatType
+            .to_string()
+            .map_err(|_| WebauthnCError::Internal)?
+    };
 
     let id: String = Base64UrlSafeData(cred_id.clone()).to_string();
 
@@ -837,7 +896,12 @@ fn convert_assertion(
     let credential_id = Base64UrlSafeData(
         copy_ptr(a.Credential.cbId, a.Credential.pbId).ok_or(WebauthnCError::Internal)?,
     );
-    let type_: String = unsafe { a.Credential.pwszCredentialType.to_string().map_err(|_| WebauthnCError::Internal)? };
+    let type_: String = unsafe {
+        a.Credential
+            .pwszCredentialType
+            .to_string()
+            .map_err(|_| WebauthnCError::Internal)?
+    };
 
     Ok(PublicKeyCredential {
         id: credential_id.to_string(),

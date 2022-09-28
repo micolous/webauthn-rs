@@ -17,6 +17,8 @@ pub enum WebauthnCError {
     InvalidAssertion,
     MessageTooLarge,
     MessageTooShort,
+    /// Windows only: couldn't find the HWND of the current application.
+    CannotFindHWND,
 }
 
 impl From<Error> for WebauthnCError {
