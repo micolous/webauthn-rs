@@ -6,6 +6,7 @@ use std::io::{stdin, stdout, Write};
 use webauthn_authenticator_rs::prelude::Url;
 use webauthn_authenticator_rs::softtoken::SoftToken;
 use webauthn_authenticator_rs::AuthenticatorBackend;
+use webauthn_rs_core::proto::RequestAuthenticationExtensions;
 use webauthn_rs_core::WebauthnCore as Webauthn;
 
 fn select_provider() -> Box<dyn AuthenticatorBackend> {
@@ -59,11 +60,12 @@ fn main() {
 
     let mut u = select_provider();
 
+    // WARNING: don't use this as an example of how to use the library!
     let wan = Webauthn::new_unsafe_experts_only(
         "https://localhost:8080/auth",
         "localhost",
         vec![url::Url::parse("https://localhost:8080").unwrap()],
-        None,
+        Some(1),
         None,
         None,
     );
@@ -92,7 +94,14 @@ fn main() {
     trace!(?cred);
 
     let (chal, auth_state) = wan
-        .generate_challenge_authenticate(vec![cred], None)
+        .generate_challenge_authenticate(
+            vec![cred],
+            Some(RequestAuthenticationExtensions {
+                appid: Some("example.app.id".to_string()),
+                get_cred_blob: None,
+                uvm: None,
+            }),
+        )
         .unwrap();
 
     let r = u
@@ -106,6 +115,7 @@ fn main() {
             e
         })
         .expect("Failed to auth");
+    trace!(?r);
 
     let auth_res = wan
         .authenticate_credential(&r, &auth_state)
