@@ -2,19 +2,16 @@ use crate::prelude::WebauthnCError;
 use std::ffi::c_void;
 use std::pin::Pin;
 use webauthn_rs_proto::{
-    CredBlobSet, CredProtect, CredentialProtectionPolicy, RegistrationExtensionsClientOutputs,
-    RequestAuthenticationExtensions, RequestRegistrationExtensions,
+    AuthenticationExtensionsClientOutputs, CredBlobSet, CredProtect, CredentialProtectionPolicy,
+    RegistrationExtensionsClientOutputs, RequestAuthenticationExtensions,
+    RequestRegistrationExtensions,
 };
 
 use super::WinWrapper;
 
 use windows::{
-    core::{HSTRING, PCWSTR},
-    w,
-    Win32::{
-        Foundation::{GetLastError, BOOL, HWND},
-        Networking::WindowsWebServices::*,
-    },
+    core::HSTRING,
+    Win32::{Foundation::BOOL, Networking::WindowsWebServices::*},
 };
 
 // const WEBAUTHN_EXTENSIONS_IDENTIFIER_HMAC_SECRET: &HSTRING = w!("hmac-secret");
@@ -241,7 +238,7 @@ impl TryFrom<&WEBAUTHN_EXTENSION> for WinExtensionMakeCredentialResponse {
     }
 }
 
-pub fn native_to_registration(
+pub fn native_to_registration_extensions(
     native: &WEBAUTHN_EXTENSIONS,
 ) -> Result<RegistrationExtensionsClientOutputs, WebauthnCError> {
     let mut o = RegistrationExtensionsClientOutputs::default();
@@ -250,9 +247,7 @@ pub fn native_to_registration(
         let extn = unsafe { &*native.pExtensions.add(i) };
         let win = WinExtensionMakeCredentialResponse::try_from(extn)?;
         match win {
-            WinExtensionMakeCredentialResponse::HmacSecret(v) => {
-                o.hmac_secret = Some(v)
-            }
+            WinExtensionMakeCredentialResponse::HmacSecret(v) => o.hmac_secret = Some(v),
             WinExtensionMakeCredentialResponse::CredProtect(v) => {
                 o.cred_protect = credential_protection_policy_from_native(v);
             }
@@ -288,6 +283,24 @@ impl TryFrom<&WEBAUTHN_EXTENSION> for WinExtensionGetAssertionResponse {
             }
         }
     }
+}
+
+pub fn native_to_assertion_extensions(
+    native: &WEBAUTHN_EXTENSIONS,
+) -> Result<AuthenticationExtensionsClientOutputs, WebauthnCError> {
+    let mut o = AuthenticationExtensionsClientOutputs::default();
+
+    for i in 0..(native.cExtensions as usize) {
+        let extn = unsafe { &*native.pExtensions.add(i) };
+        let win = WinExtensionGetAssertionResponse::try_from(extn)?;
+        match win {
+            WinExtensionGetAssertionResponse::CredBlob(b) => {
+                o.cred_blob = Some(b.into());
+            }
+        }
+    }
+
+    Ok(o)
 }
 
 pub struct WinExtensionsRequest<T>

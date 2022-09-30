@@ -15,11 +15,15 @@ mod rp;
 mod user;
 
 use crate::error::WebauthnCError;
-use crate::win10::extensions::{WinExtensionMakeCredentialRequest, WinExtensionsRequest, WinExtensionGetAssertionRequest, native_to_registration};
+use crate::win10::extensions::native_to_assertion_extensions;
 use crate::win10::{
     clientdata::{creation_to_clientdata, get_to_clientdata, WinClientData},
     cose::WinCoseCredentialParameters,
     credential::{native_to_transports, WinCredentialList},
+    extensions::{
+        native_to_registration_extensions, WinExtensionGetAssertionRequest,
+        WinExtensionMakeCredentialRequest, WinExtensionsRequest,
+    },
     native::{WinPtr, WinWrapper},
     rp::WinRpEntityInformation,
     user::WinUserEntityInformation,
@@ -30,11 +34,9 @@ use base64urlsafedata::Base64UrlSafeData;
 use std::thread::sleep;
 use std::time::Duration;
 use webauthn_rs_proto::{
-    AuthenticationExtensionsClientOutputs, AuthenticatorAssertionResponseRaw,
-    AuthenticatorAttachment, AuthenticatorAttestationResponseRaw, PublicKeyCredential,
-    PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
-    RegisterPublicKeyCredential, RegistrationExtensionsClientOutputs,
-    UserVerificationPolicy,
+    AuthenticatorAssertionResponseRaw, AuthenticatorAttachment,
+    AuthenticatorAttestationResponseRaw, PublicKeyCredential, PublicKeyCredentialCreationOptions,
+    PublicKeyCredentialRequestOptions, RegisterPublicKeyCredential, UserVerificationPolicy,
 };
 
 use windows::{
@@ -178,7 +180,7 @@ impl AuthenticatorBackend for Win10 {
             id,
             raw_id: Base64UrlSafeData(cred_id),
             type_,
-            extensions: native_to_registration(&a.Extensions)?,
+            extensions: native_to_registration_extensions(&a.Extensions)?,
             response: AuthenticatorAttestationResponseRaw {
                 attestation_object: Base64UrlSafeData(attesation_object),
                 client_data_json: Base64UrlSafeData(
@@ -303,8 +305,8 @@ impl AuthenticatorBackend for Win10 {
                 .map_err(|_| WebauthnCError::Internal)?
         };
 
-        // let mut extensions = native_to_registration(&a.Extensions);
-        // extensions.appid = Some(app_id_used.into());
+        let mut extensions = native_to_assertion_extensions(&a.Extensions)?;
+        extensions.appid = Some(app_id_used.into());
 
         Ok(PublicKeyCredential {
             id: credential_id.to_string(),
@@ -318,11 +320,7 @@ impl AuthenticatorBackend for Win10 {
                 user_handle: user_id.map(Base64UrlSafeData),
             },
             type_,
-            extensions: AuthenticationExtensionsClientOutputs {
-                appid: Some(app_id_used.into()),
-                // TODO
-                ..Default::default()
-            },
+            extensions,
         })
 
         // println!("converted:");
