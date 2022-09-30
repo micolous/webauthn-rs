@@ -50,9 +50,12 @@ impl<'a, T> Drop for WinPtr<'a, T> {
     }
 }
 
-/// Wrapper for native types of data we own (U) which represent some other type in the library (T).
+/// Wrapper for native types of data we own (T) which represent some other type in the Win32 API (NativeType).
 pub trait WinWrapper<T> {
+    /// Type in the Win32 API which is being wrapped.
     type NativeType;
+    /// Creates a new native structure
     fn new(rp: &T) -> Result<Pin<Box<Self>>, WebauthnCError>;
+    /// Returns a pointer to the native structure
     fn native_ptr(&self) -> &Self::NativeType;
 }

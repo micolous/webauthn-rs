@@ -1,8 +1,8 @@
-//! Bindings for Windows 10 Webauthn API
+//! Bindings for Windows 10 Webauthn API.
 //!
 //! This API is available in Windows 10 bulid 1903 and later.
 //!
-//! API docs:
+//! ## API docs
 //!
 //! * [MSDN: WebAuthn](https://learn.microsoft.com/en-us/windows/win32/api/webauthn/)
 //! * [webauthn.h](github.com/microsoft/webauthn) (describes versions)
@@ -15,6 +15,7 @@ mod rp;
 mod user;
 
 use crate::error::WebauthnCError;
+use crate::win10::extensions::{WinExtensionMakeCredentialRequest, WinExtensionsRequest, WinExtensionGetAssertionRequest, native_to_registration};
 use crate::win10::{
     clientdata::{creation_to_clientdata, get_to_clientdata, WinClientData},
     cose::WinCoseCredentialParameters,
@@ -29,11 +30,11 @@ use base64urlsafedata::Base64UrlSafeData;
 use std::thread::sleep;
 use std::time::Duration;
 use webauthn_rs_proto::{
- AuthenticationExtensionsClientOutputs, AuthenticatorAssertionResponseRaw,
+    AuthenticationExtensionsClientOutputs, AuthenticatorAssertionResponseRaw,
     AuthenticatorAttachment, AuthenticatorAttestationResponseRaw, PublicKeyCredential,
-    PublicKeyCredentialCreationOptions,
-    PublicKeyCredentialRequestOptions, RegisterPublicKeyCredential,
-    RegistrationExtensionsClientOutputs, UserVerificationPolicy,
+    PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
+    RegisterPublicKeyCredential, RegistrationExtensionsClientOutputs,
+    UserVerificationPolicy,
 };
 
 use windows::{
@@ -92,6 +93,10 @@ impl AuthenticatorBackend for Win10 {
         } else {
             None
         };
+        let extensions = match &options.extensions {
+            Some(e) => WinExtensionsRequest::new(e)?,
+            None => Box::pin(WinExtensionsRequest::<WinExtensionMakeCredentialRequest>::default()),
+        };
 
         let makecredopts = WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS {
             dwVersion: WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS_CURRENT_VERSION,
@@ -101,11 +106,7 @@ impl AuthenticatorBackend for Win10 {
                 cCredentials: 0,
                 pCredentials: [].as_mut_ptr(),
             },
-            // TODO
-            Extensions: WEBAUTHN_EXTENSIONS {
-                cExtensions: 0,
-                pExtensions: [].as_mut_ptr(),
-            },
+            Extensions: *extensions.native_ptr(),
             dwAuthenticatorAttachment: attachment_to_native(
                 options
                     .authenticator_selection
@@ -130,7 +131,7 @@ impl AuthenticatorBackend for Win10 {
             pCancellationId: std::ptr::null_mut(),
             pExcludeCredentialList: match &mut exclude_credentials {
                 None => std::ptr::null(),
-                Some(l) => &l.native
+                Some(l) => &l.native,
             } as *mut _,
             dwEnterpriseAttestation: 0,
             dwLargeBlobSupport: 0,
@@ -138,6 +139,7 @@ impl AuthenticatorBackend for Win10 {
         };
 
         println!("WebAuthNAuthenticatorMakeCredential()");
+        trace!(?makecredopts);
         let a = unsafe {
             let r = WebAuthNAuthenticatorMakeCredential(
                 hwnd,
@@ -158,6 +160,7 @@ impl AuthenticatorBackend for Win10 {
         };
 
         println!("got result from WebAuthNAuthenticatorMakeCredential");
+        trace!("{:?}", (*a));
 
         let cred_id =
             copy_ptr(a.cbCredentialId, a.pbCredentialId).ok_or(WebauthnCError::Internal)?;
@@ -175,7 +178,7 @@ impl AuthenticatorBackend for Win10 {
             id,
             raw_id: Base64UrlSafeData(cred_id),
             type_,
-            extensions: RegistrationExtensionsClientOutputs::default(),
+            extensions: native_to_registration(&a.Extensions)?,
             response: AuthenticatorAttestationResponseRaw {
                 attestation_object: Base64UrlSafeData(attesation_object),
                 client_data_json: Base64UrlSafeData(
@@ -203,8 +206,7 @@ impl AuthenticatorBackend for Win10 {
         trace!(?options);
         let hwnd = get_hwnd().ok_or(WebauthnCError::CannotFindHWND)?;
         let rp_id: HSTRING = options.rp_id.clone().into();
-        let clientdata =
-            WinClientData::new(&get_to_clientdata(origin, options.challenge.clone()))?;
+        let clientdata = WinClientData::new(&get_to_clientdata(origin, options.challenge.clone()))?;
 
         let mut allow_credentials = WinCredentialList::new(options.allow_credentials.as_ref())?;
 
@@ -235,6 +237,10 @@ impl AuthenticatorBackend for Win10 {
         // [chr]: https://chromium.googlesource.com/chromium/src/+/f62b8f341c14be84c6c995133f485d76a58de090/device/fido/win/webauthn_api.cc#520
         // [ffx]: https://github.com/mozilla/gecko-dev/blob/620490a051a1fc72563e1c6bbecfe7346122a6bc/dom/webauthn/WinWebAuthnManager.cpp#L714-L716
         let mut app_id_used: BOOL = false.into();
+        let extensions = match &options.extensions {
+            Some(e) => WinExtensionsRequest::new(e)?,
+            None => Box::pin(WinExtensionsRequest::<WinExtensionGetAssertionRequest>::default()),
+        };
 
         let getassertopts = WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS {
             dwVersion: WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS_CURRENT_VERSION,
@@ -244,10 +250,7 @@ impl AuthenticatorBackend for Win10 {
                 cCredentials: 0,
                 pCredentials: [].as_mut_ptr(),
             },
-            Extensions: WEBAUTHN_EXTENSIONS {
-                cExtensions: 0,
-                pExtensions: [].as_mut_ptr(),
-            },
+            Extensions: *extensions.native_ptr(),
             dwAuthenticatorAttachment: 0, // Not supported?
             dwUserVerificationRequirement: user_verification_to_native(Some(
                 &options.user_verification,
@@ -299,6 +302,9 @@ impl AuthenticatorBackend for Win10 {
                 .to_string()
                 .map_err(|_| WebauthnCError::Internal)?
         };
+
+        // let mut extensions = native_to_registration(&a.Extensions);
+        // extensions.appid = Some(app_id_used.into());
 
         Ok(PublicKeyCredential {
             id: credential_id.to_string(),
