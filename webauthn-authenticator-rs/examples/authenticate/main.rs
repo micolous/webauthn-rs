@@ -6,7 +6,7 @@ use std::io::{stdin, stdout, Write};
 use webauthn_authenticator_rs::prelude::Url;
 use webauthn_authenticator_rs::softtoken::SoftToken;
 use webauthn_authenticator_rs::AuthenticatorBackend;
-use webauthn_rs_core::proto::RequestAuthenticationExtensions;
+use webauthn_rs_core::proto::{RequestAuthenticationExtensions, CredBlobGet};
 use webauthn_rs_core::WebauthnCore as Webauthn;
 
 fn select_provider() -> Box<dyn AuthenticatorBackend> {
@@ -98,7 +98,7 @@ fn main() {
             vec![cred],
             Some(RequestAuthenticationExtensions {
                 appid: Some("example.app.id".to_string()),
-                get_cred_blob: None,
+                get_cred_blob: Some(CredBlobGet(true)),
                 uvm: None,
             }),
         )

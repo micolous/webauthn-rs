@@ -99,6 +99,7 @@ impl AuthenticatorBackend for Win10 {
             Some(e) => WinExtensionsRequest::new(e)?,
             None => Box::pin(WinExtensionsRequest::<WinExtensionMakeCredentialRequest>::default()),
         };
+        trace!("native extn: {:?}", extensions.native_ptr());
 
         let makecredopts = WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS {
             dwVersion: WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS_CURRENT_VERSION,
@@ -141,6 +142,7 @@ impl AuthenticatorBackend for Win10 {
         };
 
         println!("WebAuthNAuthenticatorMakeCredential()");
+        trace!("native: {:?}", extensions.native_ptr());
         trace!(?makecredopts);
         let a = unsafe {
             let r = WebAuthNAuthenticatorMakeCredential(
@@ -160,6 +162,7 @@ impl AuthenticatorBackend for Win10 {
             WinPtr::new(r, |a| WebAuthNFreeCredentialAttestation(Some(a)))
                 .ok_or(WebauthnCError::Internal)?
         };
+        drop(extensions);
 
         println!("got result from WebAuthNAuthenticatorMakeCredential");
         trace!("{:?}", (*a));
@@ -269,6 +272,7 @@ impl AuthenticatorBackend for Win10 {
             cbCredLargeBlob: 0,
             pbCredLargeBlob: std::ptr::null_mut(),
         };
+
 
         // WebAuthNAuthenticatorGetAssertion
         println!("WebAuthNAuthenticatorGetAssertion()");

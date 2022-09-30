@@ -17,11 +17,13 @@ use windows::{
 // const WEBAUTHN_EXTENSIONS_IDENTIFIER_HMAC_SECRET: &HSTRING = w!("hmac-secret");
 // const WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_PROTECT: &HSTRING = w!("credProtect");
 
+#[derive(Debug)]
 pub struct WinCredBlobSet {
     native: WEBAUTHN_CRED_BLOB_EXTENSION,
     blob: CredBlobSet,
 }
 
+#[derive(Debug)]
 pub(crate) enum WinExtensionMakeCredentialRequest {
     HmacSecret(BOOL),
     CredProtect(WEBAUTHN_CRED_PROTECT_EXTENSION_IN),
@@ -29,6 +31,7 @@ pub(crate) enum WinExtensionMakeCredentialRequest {
     MinPinLength(BOOL),
 }
 
+#[derive(Debug)]
 pub(crate) enum WinExtensionGetAssertionRequest {
     CredBlob(BOOL),
 }
@@ -305,7 +308,7 @@ pub fn native_to_assertion_extensions(
 
 pub struct WinExtensionsRequest<T>
 where
-    T: WinExtensionRequestType,
+    T: WinExtensionRequestType + std::fmt::Debug,
 {
     native: WEBAUTHN_EXTENSIONS,
     native_list: Vec<WEBAUTHN_EXTENSION>,
@@ -315,7 +318,7 @@ where
 
 impl<T> Default for WinExtensionsRequest<T>
 where
-    T: WinExtensionRequestType,
+    T: WinExtensionRequestType + std::fmt::Debug,
 {
     fn default() -> Self {
         Self {
@@ -329,7 +332,8 @@ where
 
 impl<T> WinWrapper<T::WrappedType> for WinExtensionsRequest<T>
 where
-    T: WinExtensionRequestType,
+    T: WinExtensionRequestType + std::fmt::Debug,
+    T::WrappedType: std::fmt::Debug
 {
     type NativeType = WEBAUTHN_EXTENSIONS;
     fn native_ptr(&self) -> &WEBAUTHN_EXTENSIONS {
@@ -338,6 +342,7 @@ where
 
     fn new(e: &T::WrappedType) -> Result<Pin<Box<Self>>, WebauthnCError> {
         // Convert the extensions to a Windows-ish type
+        trace!(?e);
         let extensions = T::to_native(e);
         let len = extensions.len();
 
@@ -348,6 +353,7 @@ where
             extensions,
         };
 
+        trace!(?res.extensions);
         // Put our final struct on the heap
         let mut boxed = Box::pin(res);
 
