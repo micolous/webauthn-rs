@@ -13,9 +13,9 @@ use windows::{
         UI::WindowsAndMessaging::{
             CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
             IsGUIThread, LoadCursorW, LoadIconW, PostMessageW, PostQuitMessage, RegisterClassExW,
-            SetWindowPos, CS_HREDRAW, CS_OWNDC, CS_VREDRAW, CW_USEDEFAULT, HWND_TOP, IDC_ARROW,
-            IDI_APPLICATION, MSG, SWP_NOMOVE, SWP_NOSIZE, WM_CLOSE, WM_DESTROY, WNDCLASSEXW,
-            WS_CAPTION, WS_EX_LEFT, WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
+            SetForegroundWindow, CS_HREDRAW, CS_OWNDC, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW,
+            IDI_APPLICATION, MSG, SW_SHOWNORMAL, WM_CLOSE, WM_DESTROY, WNDCLASSEXW,
+            WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUPWINDOW, ShowWindow, GetForegroundWindow, GetWindowThreadProcessId,
         },
     },
 };
@@ -93,14 +93,15 @@ impl Window {
                 assert!(IsGUIThread(true).as_bool());
             }
 
+            // https://github.com/mgbowen/windows-fido-bridge/blob/master/src/win32_middleware_common/src/window.cpp
             let hwnd = unsafe {
                 let hinstance = get_hinstance();
 
                 CreateWindowExW(
-                    WS_EX_LEFT,
+                    WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
                     WINDOW_CLASS,
                     WINDOW_CLASS,
-                    WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+                    WS_POPUPWINDOW,
                     CW_USEDEFAULT,
                     CW_USEDEFAULT,
                     10,
@@ -120,11 +121,14 @@ impl Window {
             }
 
             unsafe {
-                //ShowWindow(hwnd, SW_SHOWNORMAL);
+                ShowWindow(hwnd, SW_SHOWNORMAL);
+                if !SetForegroundWindow(hwnd).as_bool() {
+                    debug!("Tried to set the foreground window, but the request was denied.");
+                }
                 //UpdateWindow(hwnd);
-                assert!(
-                    SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE).as_bool()
-                );
+                // assert!(
+                //     SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE).as_bool()
+                // );
             }
 
             let mut msg: MSG = Default::default();
@@ -133,7 +137,7 @@ impl Window {
                 if !res {
                     break;
                 }
-                trace!(?msg);
+                // trace!(?msg);
                 unsafe {
                     DispatchMessageW(&msg);
                 }
@@ -163,3 +167,30 @@ impl Into<HWND> for &Window {
         self.hwnd
     }
 }
+
+struct ForegroundWindowInfo {
+    hwnd: HWND,
+    owner_process_file_path: HSTRING,
+    owner_process_file_name: HSTRING,
+}
+
+impl ForegroundWindowInfo {
+    unsafe fn get() -> Result<Self, ()> {
+        let foreground_window = GetForegroundWindow();
+        if foreground_window == HWND(0) {
+            error!("GetForegroundWindow failed");
+            return Err(());
+        }
+
+        let mut foreground_pid: u32 = 0;
+        let foreground_thread_id = GetWindowThreadProcessId(foreground_window, Some(&mut foreground_pid));
+        if foreground_thread_id == 0 {
+            error!("GetWindowThreadProcessId failed");
+            return Err(());
+        }
+
+        //let h = OpenProcess();
+        todo!();
+    }
+}
+
