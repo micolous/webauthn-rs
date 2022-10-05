@@ -16,7 +16,6 @@ pub struct WinRpEntityInformation {
     native: WEBAUTHN_RP_ENTITY_INFORMATION,
     id: HSTRING,
     name: HSTRING,
-    icon: Option<HSTRING>,
 }
 
 impl WinWrapper<RelyingParty> for WinRpEntityInformation {
@@ -26,7 +25,6 @@ impl WinWrapper<RelyingParty> for WinRpEntityInformation {
             native: Default::default(),
             id: rp.id.clone().into(),
             name: rp.name.clone().into(),
-            icon: rp.icon.as_ref().map(|i| i.clone().as_ref().into()),
         };
 
         let mut boxed = Box::pin(res);
@@ -35,7 +33,7 @@ impl WinWrapper<RelyingParty> for WinRpEntityInformation {
             dwVersion: WEBAUTHN_RP_ENTITY_INFORMATION_CURRENT_VERSION,
             pwszId: (&boxed.id).into(),
             pwszName: (&boxed.name).into(),
-            pwszIcon: boxed.icon.as_ref().map_or(PCWSTR::null(), |i| i.into()),
+            pwszIcon: PCWSTR::null(),
         };
 
         // Update the boxed type with the proper native object.

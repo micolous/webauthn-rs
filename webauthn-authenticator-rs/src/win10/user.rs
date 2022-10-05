@@ -17,7 +17,6 @@ pub struct WinUserEntityInformation {
     _id: String,
     _name: HSTRING,
     _display_name: HSTRING,
-    _icon: Option<HSTRING>,
 }
 
 impl WinWrapper<User> for WinUserEntityInformation {
@@ -29,7 +28,6 @@ impl WinWrapper<User> for WinUserEntityInformation {
             _id: u.id.clone().to_string(),
             _name: u.name.clone().into(),
             _display_name: u.display_name.clone().into(),
-            _icon: u.icon.as_ref().map(|i| i.clone().as_ref().into()),
         };
 
         let mut boxed = Box::pin(res);
@@ -40,7 +38,7 @@ impl WinWrapper<User> for WinUserEntityInformation {
             cbId: boxed._id.len() as u32,
             pbId: boxed._id.as_ptr() as *mut _,
             pwszName: (&boxed._name).into(),
-            pwszIcon: boxed._icon.as_ref().map_or(PCWSTR::null(), |i| i.into()),
+            pwszIcon: PCWSTR::null(),
             pwszDisplayName: (&boxed._display_name).into(),
         };
 

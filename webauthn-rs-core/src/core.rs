@@ -211,13 +211,11 @@ impl WebauthnCore {
                 rp: RelyingParty {
                     name: self.rp_name.clone(),
                     id: self.rp_id.clone(),
-                    icon: Url::parse("https://github.com/kanidm/kanidm/raw/master/artwork/logo-small.png").ok(),
                 },
                 user: User {
                     id: Base64UrlSafeData(user_id),
                     name: user_name.to_string(),
                     display_name: user_display_name.to_string(),
-                    icon: Url::parse("https://github.com/kanidm/kanidm/raw/master/artwork/logo-xmas-small.png").ok(),
                 },
                 challenge: challenge.clone().into(),
                 pub_key_cred_params: credential_algorithms

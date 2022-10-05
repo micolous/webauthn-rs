@@ -93,13 +93,11 @@ impl<T: Token> Ctap2_1_pre<T> {
             rp: RelyingParty {
                 name: "test".to_string(),
                 id: "test".to_string(),
-                icon: None,
             },
             user: User {
                 id: Base64UrlSafeData("test".as_bytes().into()),
                 name: "test".to_string(),
                 display_name: "test".to_string(),
-                icon: None,
             },
             pub_key_cred_params: vec![PubKeyCredParams {
                 type_: "public-key".to_string(),
