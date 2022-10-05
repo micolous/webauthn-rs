@@ -10,6 +10,7 @@ mod clientdata;
 mod cose;
 mod credential;
 mod extensions;
+mod gui;
 mod native;
 mod rp;
 mod user;
@@ -24,6 +25,7 @@ use crate::win10::{
         native_to_registration_extensions, WinExtensionGetAssertionRequest,
         WinExtensionMakeCredentialRequest, WinExtensionsRequest,
     },
+    gui::Window,
     native::{WinPtr, WinWrapper},
     rp::WinRpEntityInformation,
     user::WinUserEntityInformation,
@@ -31,8 +33,6 @@ use crate::win10::{
 use crate::{AuthenticatorBackend, Url};
 
 use base64urlsafedata::Base64UrlSafeData;
-use std::thread::sleep;
-use std::time::Duration;
 use webauthn_rs_proto::{
     AuthenticatorAssertionResponseRaw, AuthenticatorAttachment,
     AuthenticatorAttestationResponseRaw, PublicKeyCredential, PublicKeyCredentialCreationOptions,
@@ -41,12 +41,7 @@ use webauthn_rs_proto::{
 
 use windows::{
     core::{HSTRING, PCWSTR},
-    Win32::{
-        Foundation::{GetLastError, BOOL, HWND},
-        Networking::WindowsWebServices::*,
-        System::Console::{GetConsoleTitleW, GetConsoleWindow, SetConsoleTitleW},
-        UI::WindowsAndMessaging::FindWindowW,
-    },
+    Win32::{Foundation::BOOL, Networking::WindowsWebServices::*},
 };
 
 pub struct Win10 {}
@@ -83,7 +78,8 @@ impl AuthenticatorBackend for Win10 {
         options: PublicKeyCredentialCreationOptions,
         timeout_ms: u32,
     ) -> Result<RegisterPublicKeyCredential, WebauthnCError> {
-        let hwnd = get_hwnd().ok_or(WebauthnCError::CannotFindHWND)?;
+        let hwnd = Window::new()?;
+        // let hwnd = get_hwnd().ok_or(WebauthnCError::CannotFindHWND)?;
         let rp = WinRpEntityInformation::new(&options.rp)?;
         let userinfo = WinUserEntityInformation::new(&options.user)?;
         let pubkeycredparams = WinCoseCredentialParameters::new(&options.pub_key_cred_params)?;
@@ -146,7 +142,7 @@ impl AuthenticatorBackend for Win10 {
         trace!(?makecredopts);
         let a = unsafe {
             let r = WebAuthNAuthenticatorMakeCredential(
-                hwnd,
+                &hwnd,
                 rp.native_ptr(),
                 userinfo.native_ptr(),
                 pubkeycredparams.native_ptr(),
@@ -165,6 +161,7 @@ impl AuthenticatorBackend for Win10 {
         drop(extensions);
 
         println!("got result from WebAuthNAuthenticatorMakeCredential");
+        drop(hwnd);
         trace!("{:?}", (*a));
 
         let cred_id =
@@ -209,7 +206,7 @@ impl AuthenticatorBackend for Win10 {
         timeout_ms: u32,
     ) -> Result<PublicKeyCredential, WebauthnCError> {
         trace!(?options);
-        let hwnd = get_hwnd().ok_or(WebauthnCError::CannotFindHWND)?;
+        let hwnd = Window::new()?;
         let rp_id: HSTRING = options.rp_id.clone().into();
         let clientdata = WinClientData::new(&get_to_clientdata(origin, options.challenge.clone()))?;
 
@@ -273,12 +270,11 @@ impl AuthenticatorBackend for Win10 {
             pbCredLargeBlob: std::ptr::null_mut(),
         };
 
-
         // WebAuthNAuthenticatorGetAssertion
         println!("WebAuthNAuthenticatorGetAssertion()");
         let a = unsafe {
             let r = WebAuthNAuthenticatorGetAssertion(
-                hwnd,
+                &hwnd,
                 &rp_id,
                 clientdata.native_ptr(),
                 Some(&getassertopts),
@@ -293,6 +289,7 @@ impl AuthenticatorBackend for Win10 {
         };
 
         println!("got result from WebAuthNAuthenticatorGetAssertion");
+        drop(hwnd);
 
         let user_id = copy_ptr(a.cbUserId, a.pbUserId);
         let authenticator_data = copy_ptr(a.cbAuthenticatorData, a.pbAuthenticatorData)
@@ -331,75 +328,6 @@ impl AuthenticatorBackend for Win10 {
         // println!("{:?}", c);
 
         // c
-    }
-}
-
-/// Try to find the [HWND] for the current application.
-///
-/// Returns [None] if we couldn't find it.
-///
-/// **TODO:** make this work properly for non-console apps.
-///
-/// The Windows WebAuthn APIs expect a HWND to know where to put the FIDO
-/// GUI (centred over the calling application window).
-///
-/// `GetConsoleWindow()` only works with the "native" console, and not virtual
-/// terminals, which is a bug: [Windows Terminal][terminal] and [VS Code][vscode]
-/// give a valid HWND that has the dialog at the top-left of the screen (probably
-/// conhost?), rather rather than centred over the terminal, and don't change
-/// focus properly. VS Code also [doesn't propagate z-order changes][vscode],
-/// so the dialog appears behind. Windows Terminal [fixed that bug][terminal],
-/// but it still does weird things to <kbd>Alt</kbd> + <kbd>Tab</kbd>.
-///
-/// [Windows' docs suggest an alternative][hack]: change the console title to
-/// some random value (`SetConsoleTitleW`), wait a moment, then search for it
-/// (`FindWindowW`). However, that only works with Windows Terminal, so
-/// VS Code is still stuck with the dialog opening in the background.
-///
-/// [hack]: https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/obtain-console-window-handle
-/// [terminal]: https://github.com/microsoft/terminal/issues/2988
-/// [vscode]: https://github.com/microsoft/vscode/issues/42356
-fn get_hwnd() -> Option<HWND> {
-    let chwnd = unsafe { GetConsoleWindow() };
-    trace!("GetConsoleWindow HWND = {:?}", chwnd);
-
-    let chwnd = if chwnd == HWND(0) { None } else { Some(chwnd) };
-    let mut old_title: [u16; 65536] = [0; 65536];
-
-    // Make a random title to find
-    let mut r: [u8; 8] = [0; 8];
-    openssl::rand::rand_bytes(&mut r).expect("openssl::rand_bytes");
-    let r: HSTRING = (&format!("{:?}", r)).into();
-
-    unsafe {
-        let len = GetConsoleTitleW(&mut old_title);
-        if len == 0 {
-            error!("GetConsoleTitleW => {:?}", GetLastError());
-            return chwnd;
-        }
-        // println!("Console title: ({}) = {:?}", len, old_title);
-
-        let res = SetConsoleTitleW(&r);
-        if !res.as_bool() {
-            error!("SetConsoleTitleW => {:?}", GetLastError());
-            return chwnd;
-        }
-
-        sleep(Duration::from_millis(50));
-
-        let hwnd = FindWindowW(PCWSTR::null(), &r);
-
-        let res = SetConsoleTitleW(PCWSTR(old_title.as_ptr()));
-        if !res.as_bool() {
-            error!("SetConsoleTitleW => {:?}", GetLastError());
-        }
-
-        trace!("FindWindowW HWND = {:?}", hwnd);
-        if hwnd != HWND(0) {
-            Some(hwnd)
-        } else {
-            chwnd
-        }
     }
 }
 
