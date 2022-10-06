@@ -113,7 +113,7 @@ impl<T: CredentialType> WinWrapper<Vec<T>> for WinCredentialList {
         for c in credentials.iter() {
             let typ = c.type_();
             if typ != *"public-key" {
-                println!("Unsupported credential type: {:?}", c);
+                error!("Unsupported credential type: {:?}", c);
                 return Err(WebauthnCError::Internal);
             }
         }
@@ -141,7 +141,6 @@ impl<T: CredentialType> WinWrapper<Vec<T>> for WinCredentialList {
                     dwVersion: WEBAUTHN_CREDENTIAL_EX_CURRENT_VERSION,
                     cbId: id.0.len() as u32,
                     pbId: id.0.as_mut_ptr() as *mut _,
-                    // TODO: support more than public-key
                     pwszCredentialType: CREDENTIAL_TYPE_PUBLIC_KEY.into(),
                     dwTransports: credential.transports(),
                 };
@@ -167,7 +166,8 @@ impl<T: CredentialType> WinWrapper<Vec<T>> for WinCredentialList {
             let mut_ref: Pin<&mut Self> = Pin::as_mut(&mut boxed);
             Pin::get_unchecked_mut(mut_ref).native = native;
         }
-        trace!(?boxed.native);
+
+        // trace!(?boxed.native);
         // unsafe {
         //     let pp = (**boxed.native.ppCredentials) as WEBAUTHN_CREDENTIAL_EX;
         //     trace!("ppCred = {:?}", pp);

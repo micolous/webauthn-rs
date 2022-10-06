@@ -232,7 +232,7 @@ impl Window {
 
 impl Drop for Window {
     fn drop(&mut self) {
-        trace!("dropping window");
+        // trace!("dropping window");
         unsafe {
             PostMessageW(self.hwnd, WM_CLOSE, None, None);
         }
@@ -263,7 +263,7 @@ fn get_window_rect(hwnd: HWND) -> Option<RECT> {
 }
 
 /// Returns half the size of the [RECT] as `(width, height)`.
-fn half_size(rect: RECT) -> (i32, i32) {
+const fn half_size(rect: RECT) -> (i32, i32) {
     (
         ((rect.right - rect.left) / 2),
         ((rect.bottom - rect.top) / 2),

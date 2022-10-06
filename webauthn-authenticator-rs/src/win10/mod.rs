@@ -49,16 +49,16 @@ pub struct Win10 {}
 impl Default for Win10 {
     fn default() -> Self {
         unsafe {
-            println!(
+            trace!(
                 "WebAuthNGetApiVersionNumber(): {}",
                 WebAuthNGetApiVersionNumber()
             );
             match WebAuthNIsUserVerifyingPlatformAuthenticatorAvailable() {
-                Ok(v) => println!(
+                Ok(v) => trace!(
                     "WebAuthNIsUserVerifyingPlatformAuthenticatorAvailable() = {:?}",
                     <_ as Into<bool>>::into(v)
                 ),
-                Err(e) => println!("error requesting platform authenticator: {:?}", e),
+                Err(e) => trace!("error requesting platform authenticator: {:?}", e),
             }
         }
 
@@ -95,7 +95,7 @@ impl AuthenticatorBackend for Win10 {
             Some(e) => WinExtensionsRequest::new(e)?,
             None => Box::pin(WinExtensionsRequest::<WinExtensionMakeCredentialRequest>::default()),
         };
-        trace!("native extn: {:?}", extensions.native_ptr());
+        // trace!("native extn: {:?}", extensions.native_ptr());
 
         let makecredopts = WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS {
             dwVersion: WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS_CURRENT_VERSION,
@@ -137,9 +137,9 @@ impl AuthenticatorBackend for Win10 {
             bPreferResidentKey: false.into(),
         };
 
-        println!("WebAuthNAuthenticatorMakeCredential()");
-        trace!("native: {:?}", extensions.native_ptr());
-        trace!(?makecredopts);
+        // trace!("WebAuthNAuthenticatorMakeCredential()");
+        // trace!("native: {:?}", extensions.native_ptr());
+        // trace!(?makecredopts);
         let a = unsafe {
             let r = WebAuthNAuthenticatorMakeCredential(
                 &hwnd,
@@ -158,11 +158,12 @@ impl AuthenticatorBackend for Win10 {
             WinPtr::new(r, |a| WebAuthNFreeCredentialAttestation(Some(a)))
                 .ok_or(WebauthnCError::Internal)?
         };
+        // These needed to live until WebAuthNAuthenticatorMakeCredential returned.
         drop(extensions);
-
-        println!("got result from WebAuthNAuthenticatorMakeCredential");
         drop(hwnd);
-        trace!("{:?}", (*a));
+
+        // trace!("got result from WebAuthNAuthenticatorMakeCredential");
+        // trace!("{:?}", (*a));
 
         let cred_id =
             copy_ptr(a.cbCredentialId, a.pbCredentialId).ok_or(WebauthnCError::Internal)?;
@@ -189,9 +190,6 @@ impl AuthenticatorBackend for Win10 {
                 transports: Some(native_to_transports(a.dwUsedTransport)),
             },
         })
-        // println!("converted:");
-        // println!("{:?}", c);
-        // c
     }
 
     /// Perform an authentication action using Windows WebAuth API.
@@ -270,8 +268,7 @@ impl AuthenticatorBackend for Win10 {
             pbCredLargeBlob: std::ptr::null_mut(),
         };
 
-        // WebAuthNAuthenticatorGetAssertion
-        println!("WebAuthNAuthenticatorGetAssertion()");
+        // trace!("WebAuthNAuthenticatorGetAssertion()");
         let a = unsafe {
             let r = WebAuthNAuthenticatorGetAssertion(
                 &hwnd,
@@ -287,9 +284,9 @@ impl AuthenticatorBackend for Win10 {
 
             WinPtr::new(r, WebAuthNFreeAssertion).ok_or(WebauthnCError::Internal)?
         };
-
-        println!("got result from WebAuthNAuthenticatorGetAssertion");
+        // This needed to live until WebAuthNAuthenticatorGetAssertion returned.
         drop(hwnd);
+        // trace!("got result from WebAuthNAuthenticatorGetAssertion");
 
         let user_id = copy_ptr(a.cbUserId, a.pbUserId);
         let authenticator_data = copy_ptr(a.cbAuthenticatorData, a.pbAuthenticatorData)
@@ -323,11 +320,6 @@ impl AuthenticatorBackend for Win10 {
             type_,
             extensions,
         })
-
-        // println!("converted:");
-        // println!("{:?}", c);
-
-        // c
     }
 }
 

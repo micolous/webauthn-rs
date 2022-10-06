@@ -320,7 +320,7 @@ where
 
     fn new(e: &T::WrappedType) -> Result<Pin<Box<Self>>, WebauthnCError> {
         // Convert the extensions to a Windows-ish type
-        trace!(?e);
+        // trace!(?e);
         let extensions = T::to_native(e);
         let len = extensions.len();
 
@@ -331,7 +331,7 @@ where
             extensions,
         };
 
-        trace!(?res.extensions);
+        // trace!(?res.extensions);
         // Put our final struct on the heap
         let mut boxed = Box::pin(res);
 

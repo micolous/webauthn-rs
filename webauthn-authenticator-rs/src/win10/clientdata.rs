@@ -1,3 +1,4 @@
+//! Client data wrappers.
 use base64urlsafedata::Base64UrlSafeData;
 use std::collections::BTreeMap;
 use std::pin::Pin;

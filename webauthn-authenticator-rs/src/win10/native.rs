@@ -26,7 +26,7 @@ impl<'a, T> WinPtr<'a, T> {
         if ptr.is_null() {
             None
         } else {
-            // println!("new_ptr: r={:?}", ptr);
+            // trace!("new_ptr: r={:?}", ptr);
             Some(Self {
                 free,
                 ptr,
@@ -45,7 +45,7 @@ impl<'a, T> Deref for WinPtr<'a, T> {
 
 impl<'a, T> Drop for WinPtr<'a, T> {
     fn drop(&mut self) {
-        // println!("free_ptr: r={:?}, {:?}", self._raw, std::ptr::addr_of!(self.ptr));
+        // trace!("free_ptr: r={:?}", self.ptr);
         unsafe { (self.free)(self.ptr) }
     }
 }
