@@ -2,7 +2,7 @@ use crate::prelude::WebauthnCError;
 use std::ffi::c_void;
 use std::pin::Pin;
 use webauthn_rs_proto::{
-    AuthenticationExtensionsClientOutputs, CredBlobSet, CredProtect, CredentialProtectionPolicy,
+    AuthenticationExtensionsClientOutputs, CredBlobSet, CredProtect,
     RegistrationExtensionsClientOutputs, RequestAuthenticationExtensions,
     RequestRegistrationExtensions,
 };
@@ -36,7 +36,7 @@ pub(crate) enum WinExtensionGetAssertionRequest {
     CredBlob(BOOL),
 }
 
-pub trait WinExtensionRequestType
+pub(crate) trait WinExtensionRequestType
 where
     Self: Sized,
 {
@@ -127,31 +127,10 @@ impl WinExtensionRequestType for WinExtensionGetAssertionRequest {
     }
 }
 
-fn credential_protection_policy_from_native(p: u32) -> Option<CredentialProtectionPolicy> {
-    Some(match p {
-        WEBAUTHN_USER_VERIFICATION_OPTIONAL => CredentialProtectionPolicy::UserVerificationOptional,
-        WEBAUTHN_USER_VERIFICATION_OPTIONAL_WITH_CREDENTIAL_ID_LIST => {
-            CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIDList
-        }
-        WEBAUTHN_USER_VERIFICATION_REQUIRED => CredentialProtectionPolicy::UserVerificationRequired,
-        _ => return None,
-    })
-}
-
-fn credential_protection_policy_to_native(p: CredentialProtectionPolicy) -> u32 {
-    match p {
-        CredentialProtectionPolicy::UserVerificationOptional => WEBAUTHN_USER_VERIFICATION_OPTIONAL,
-        CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIDList => {
-            WEBAUTHN_USER_VERIFICATION_OPTIONAL_WITH_CREDENTIAL_ID_LIST
-        }
-        CredentialProtectionPolicy::UserVerificationRequired => WEBAUTHN_USER_VERIFICATION_REQUIRED,
-    }
-}
-
 impl From<&CredProtect> for WinExtensionMakeCredentialRequest {
     fn from(c: &CredProtect) -> Self {
         Self::CredProtect(WEBAUTHN_CRED_PROTECT_EXTENSION_IN {
-            dwCredProtect: credential_protection_policy_to_native(c.credential_protection_policy),
+            dwCredProtect: c.credential_protection_policy as u32,
             bRequireCredProtect: c
                 .enforce_credential_protection_policy
                 .unwrap_or(false)
@@ -189,7 +168,6 @@ enum WinExtensionMakeCredentialResponse {
     MinPinLength(u32),
 }
 
-// TODO
 enum WinExtensionGetAssertionResponse {
     CredBlob(Vec<u8>),
 }
@@ -252,7 +230,7 @@ pub fn native_to_registration_extensions(
         match win {
             WinExtensionMakeCredentialResponse::HmacSecret(v) => o.hmac_secret = Some(v),
             WinExtensionMakeCredentialResponse::CredProtect(v) => {
-                o.cred_protect = credential_protection_policy_from_native(v);
+                o.cred_protect = (v as u8).try_into().ok();
             }
             WinExtensionMakeCredentialResponse::CredBlob(v) => {
                 o.cred_blob = Some(v);
@@ -306,7 +284,7 @@ pub fn native_to_assertion_extensions(
     Ok(o)
 }
 
-pub struct WinExtensionsRequest<T>
+pub(crate) struct WinExtensionsRequest<T>
 where
     T: WinExtensionRequestType + std::fmt::Debug,
 {
@@ -333,7 +311,7 @@ where
 impl<T> WinWrapper<T::WrappedType> for WinExtensionsRequest<T>
 where
     T: WinExtensionRequestType + std::fmt::Debug,
-    T::WrappedType: std::fmt::Debug
+    T::WrappedType: std::fmt::Debug,
 {
     type NativeType = WEBAUTHN_EXTENSIONS;
     fn native_ptr(&self) -> &WEBAUTHN_EXTENSIONS {
