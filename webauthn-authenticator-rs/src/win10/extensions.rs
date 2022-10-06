@@ -200,16 +200,16 @@ impl TryFrom<&WEBAUTHN_EXTENSION> for WinExtensionMakeCredentialResponse {
         };
         // let id = &HSTRING::from_wide(unsafe { e.pwszExtensionIdentifier.as_wide() });
         match id.as_str() {
-            WEBAUTHN_EXTENSIONS_IDENTIFIER_HMAC_SECRET => read_extension::<'_, BOOL, _>(&e)
+            WEBAUTHN_EXTENSIONS_IDENTIFIER_HMAC_SECRET => read_extension::<'_, BOOL, _>(e)
                 .map(WinExtensionMakeCredentialResponse::HmacSecret),
             WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_PROTECT => {
-                read_extension2(&e).map(WinExtensionMakeCredentialResponse::CredProtect)
+                read_extension2(e).map(WinExtensionMakeCredentialResponse::CredProtect)
             }
             WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_BLOB => {
-                read_extension::<'_, BOOL, _>(&e).map(WinExtensionMakeCredentialResponse::CredBlob)
+                read_extension::<'_, BOOL, _>(e).map(WinExtensionMakeCredentialResponse::CredBlob)
             }
             WEBAUTHN_EXTENSIONS_IDENTIFIER_MIN_PIN_LENGTH => {
-                read_extension2(&e).map(WinExtensionMakeCredentialResponse::MinPinLength)
+                read_extension2(e).map(WinExtensionMakeCredentialResponse::MinPinLength)
             }
             o => {
                 error!("unknown extension: {:?}", o);
@@ -256,7 +256,7 @@ impl TryFrom<&WEBAUTHN_EXTENSION> for WinExtensionGetAssertionResponse {
 
         match id.as_str() {
             WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_BLOB => {
-                read_extension2(&e).map(WinExtensionGetAssertionResponse::CredBlob)
+                read_extension2(e).map(WinExtensionGetAssertionResponse::CredBlob)
             }
             o => {
                 error!("unknown extension: {:?}", o);

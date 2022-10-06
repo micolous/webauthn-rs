@@ -169,7 +169,7 @@ impl Window {
             if hwnd == HWND(0) {
                 let e = unsafe { GetLastError() };
                 error!("window not created, {:?}", e);
-                sender.send(hwnd).unwrap();
+                sender.send(hwnd).ok();
                 return;
             }
 
@@ -196,7 +196,9 @@ impl Window {
             }
 
             // Now we can tell the main thread that the window is ready.
-            sender.send(hwnd).unwrap();
+            if sender.send(hwnd).is_err() {
+                return;
+            }
 
             // Windows event loop
             let mut msg: MSG = Default::default();
@@ -237,9 +239,9 @@ impl Drop for Window {
     }
 }
 
-impl Into<HWND> for &Window {
-    fn into(self) -> HWND {
-        self.hwnd
+impl From<&Window> for HWND {
+    fn from(w: &Window) -> HWND {
+        w.hwnd
     }
 }
 
@@ -257,7 +259,7 @@ fn get_window_rect(hwnd: HWND) -> Option<RECT> {
         )
     }
     .is_ok()
-    .then(|| r)
+    .then_some(r)
 }
 
 /// Returns half the size of the [RECT] as `(width, height)`.

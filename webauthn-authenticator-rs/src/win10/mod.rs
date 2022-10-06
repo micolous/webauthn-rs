@@ -215,8 +215,8 @@ impl AuthenticatorBackend for Win10 {
         let app_id: Option<HSTRING> = options
             .extensions
             .as_ref()
-            .map(|e| e.appid.as_ref().map(|a| a.clone().into()))
-            .flatten();
+            .and_then(|e| e.appid.as_ref())
+            .map(|a| a.clone().into());
         // Used as a *return* value from GetAssertion as to whether the U2F AppId was used,
         // equivalent to [AuthenticationExtensionsClientOutputs::appid].
         //
