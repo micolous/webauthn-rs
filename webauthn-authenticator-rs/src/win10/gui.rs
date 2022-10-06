@@ -127,7 +127,7 @@ pub struct Window {
 
 impl Window {
     /// Creates a new window and spawns an event loop in the background.
-    /// 
+    ///
     /// The window will persist until dropped.
     pub fn new() -> Result<Self, WebauthnCError> {
         let (sender, receiver) = sync_channel::<HWND>(0);

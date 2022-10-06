@@ -20,7 +20,7 @@ impl<'a, T> WinPtr<'a, T> {
     /// `free` function when this struct is dropped.
     ///
     /// Returns `None` if `ptr` is null.
-    /// 
+    ///
     /// Unsafe if `ptr` is unaligned or does not point to `T`.
     pub unsafe fn new(ptr: *const T, free: unsafe fn(*const T) -> ()) -> Option<Self> {
         if ptr.is_null() {

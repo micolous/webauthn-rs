@@ -52,8 +52,10 @@ impl WinWrapper<Vec<PubKeyCredParams>> for WinCoseCredentialParameters {
     type NativeType = WEBAUTHN_COSE_CREDENTIAL_PARAMETERS;
 
     fn new(params: &Vec<PubKeyCredParams>) -> Result<Pin<Box<Self>>, WebauthnCError> {
-        let params: Vec<Pin<Box<WinCoseCredentialParameter>>> =
-            params.iter().map(WinCoseCredentialParameter::from).collect();
+        let params: Vec<Pin<Box<WinCoseCredentialParameter>>> = params
+            .iter()
+            .map(WinCoseCredentialParameter::from)
+            .collect();
         Ok(WinCoseCredentialParameters::from_wrapped(params))
     }
 

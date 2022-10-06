@@ -200,8 +200,9 @@ impl TryFrom<&WEBAUTHN_EXTENSION> for WinExtensionMakeCredentialResponse {
         };
         // let id = &HSTRING::from_wide(unsafe { e.pwszExtensionIdentifier.as_wide() });
         match id.as_str() {
-            WEBAUTHN_EXTENSIONS_IDENTIFIER_HMAC_SECRET => read_extension::<'_, BOOL, _>(e)
-                .map(WinExtensionMakeCredentialResponse::HmacSecret),
+            WEBAUTHN_EXTENSIONS_IDENTIFIER_HMAC_SECRET => {
+                read_extension::<'_, BOOL, _>(e).map(WinExtensionMakeCredentialResponse::HmacSecret)
+            }
             WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_PROTECT => {
                 read_extension2(e).map(WinExtensionMakeCredentialResponse::CredProtect)
             }

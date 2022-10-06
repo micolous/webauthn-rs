@@ -6,7 +6,7 @@ use std::io::{stdin, stdout, Write};
 use webauthn_authenticator_rs::prelude::Url;
 use webauthn_authenticator_rs::softtoken::SoftToken;
 use webauthn_authenticator_rs::AuthenticatorBackend;
-use webauthn_rs_core::proto::{RequestAuthenticationExtensions, CredBlobGet};
+use webauthn_rs_core::proto::{CredBlobGet, RequestAuthenticationExtensions};
 use webauthn_rs_core::WebauthnCore as Webauthn;
 
 fn select_provider() -> Box<dyn AuthenticatorBackend> {

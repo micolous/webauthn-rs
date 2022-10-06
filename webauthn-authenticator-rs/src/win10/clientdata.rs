@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::pin::Pin;
 use webauthn_rs_proto::CollectedClientData;
 
-use crate::{Url, error::WebauthnCError};
 use super::WinWrapper;
+use crate::{error::WebauthnCError, Url};
 
 use windows::{
     core::HSTRING,
@@ -26,7 +26,9 @@ pub struct WinClientData {
 }
 
 impl WinClientData {
-    pub fn client_data_json(&self) -> &String { &self.client_data_json }
+    pub fn client_data_json(&self) -> &String {
+        &self.client_data_json
+    }
 }
 
 impl WinWrapper<CollectedClientData> for WinClientData {
