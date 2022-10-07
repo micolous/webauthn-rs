@@ -15,7 +15,7 @@
 //! There is some prior art in [windows-fido-bridge], but this ended up with
 //! a distinct design that doesn't hard-code work-arounds for single apps.
 //!
-//! **Warning:** This hasn't yet been tested in a Windows GUI applications,
+//! **Warning:** This hasn't yet been tested in a Windows GUI application,
 //! and is subject to change based on user feedback.
 //!
 //! [Window] creates a 1x1 pixel window for Windows WebAuthn API to use:
@@ -222,11 +222,11 @@ impl Window {
             // trace!("background stopped");
         });
 
-        let hwnd = receiver.recv().expect("oops recv");
-        if hwnd == HWND(0) {
-            return Err(WebauthnCError::CannotFindHWND);
+        let hwnd = receiver.recv();
+        match hwnd {
+            Ok(HWND(0)) | Err(_) => Err(WebauthnCError::Internal),
+            Ok(hwnd) => Ok(Self { hwnd }),
         }
-        Ok(Self { hwnd })
     }
 }
 

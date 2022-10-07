@@ -1,3 +1,4 @@
+//! COSE algorithm identifier wrapper.
 use crate::prelude::WebauthnCError;
 use std::pin::Pin;
 use webauthn_rs_proto::PubKeyCredParams;

@@ -1,14 +1,12 @@
+//! Helpers for working with Windows native types.
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::Pin;
 
 use crate::error::WebauthnCError;
 
-/// Smart pointer type to auto-[Drop] bare pointers we got from Windows' API,
-/// establishing a strict lifetime for data that we need to tell Windows to
-/// free.
-///
-/// All fields of this struct are considered private.
+/// Smart pointer type to automatically `free()` bare pointers we got from
+/// Windows' API when dropped.
 pub struct WinPtr<'a, T: 'a> {
     free: unsafe fn(*const T) -> (),
     ptr: *const T,
@@ -16,12 +14,12 @@ pub struct WinPtr<'a, T: 'a> {
 }
 
 impl<'a, T> WinPtr<'a, T> {
-    /// Creates a wrapper around a `*const T` Pointer to automatically call its
-    /// `free` function when this struct is dropped.
+    /// Creates a wrapper around a `*const T` pointer which automatically calls
+    /// the `free` function when dropped.
     ///
     /// Returns `None` if `ptr` is null.
     ///
-    /// Unsafe if `ptr` is unaligned or does not point to `T`.
+    /// Unsafe if `ptr` is unaligned or does not point to a `T`.
     pub unsafe fn new(ptr: *const T, free: unsafe fn(*const T) -> ()) -> Option<Self> {
         if ptr.is_null() {
             None
@@ -50,12 +48,13 @@ impl<'a, T> Drop for WinPtr<'a, T> {
     }
 }
 
-/// Wrapper for native types of data we own (T) which represent some other type in the Win32 API (NativeType).
+/// Wrapper for a `webauthn-authenticator-rs` type (`T`) to convert it to a
+/// Windows WebAuthn API type (`NativeType`).
 pub trait WinWrapper<T> {
-    /// Type in the Win32 API which is being wrapped.
+    /// Windows equivalent type for `T`
     type NativeType;
-    /// Creates a new native structure
-    fn new(rp: &T) -> Result<Pin<Box<Self>>, WebauthnCError>;
-    /// Returns a pointer to the native structure
+    /// Converts a `webauthn-authenticator-rs` type to a Windows type
+    fn new(v: &T) -> Result<Pin<Box<Self>>, WebauthnCError>;
+    /// Returns a pointer to the Windows equivalent type
     fn native_ptr(&self) -> &Self::NativeType;
 }

@@ -1,3 +1,4 @@
+//! Credential wrapper.
 use crate::prelude::WebauthnCError;
 use base64urlsafedata::Base64UrlSafeData;
 use std::pin::Pin;
@@ -17,7 +18,7 @@ use windows::{
 
 // Most constants are `&str`, but APIs expect `HSTRING`... there's no good work-around.
 // https://github.com/microsoft/windows-rs/issues/2049
-/// [WEBAUTHN_CREDENTIAL_TYPE_PUBLIC_KEY]
+/// [windows::Win32::Networking::WindowsWebServices::WEBAUTHN_CREDENTIAL_TYPE_PUBLIC_KEY]
 const CREDENTIAL_TYPE_PUBLIC_KEY: &HSTRING = w!("public-key");
 
 /// Converts an [AuthenticatorTransport] into a value for
@@ -168,13 +169,6 @@ impl<T: CredentialType> WinWrapper<Vec<T>> for WinCredentialList {
         }
 
         // trace!(?boxed.native);
-        // unsafe {
-        //     let pp = (**boxed.native.ppCredentials) as WEBAUTHN_CREDENTIAL_EX;
-        //     trace!("ppCred = {:?}", pp);
-        //     trace!("ppCred.type = {:?}", pp.pwszCredentialType.to_string());
-        //     let v = copy_ptr(pp.cbId, pp.pbId);
-        //     trace!("ppCred.id = {:?}", v);
-        // }
 
         Ok(boxed)
     }

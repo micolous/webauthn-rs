@@ -16,10 +16,10 @@ use windows::{
 };
 // Most constants are `&str`, but APIs expect `HSTRING`... there's no good work-around.
 // https://github.com/microsoft/windows-rs/issues/2049
-/// [WEBAUTHN_HASH_ALGORITHM_SHA_256]
+/// [windows::Win32::Networking::WindowsWebServices::WEBAUTHN_HASH_ALGORITHM_SHA_256]
 const SHA_256: &HSTRING = w!("SHA-256");
 
-// Wrapper for [WEBAUTHN_CLIENT_DATA] to ensure pointer lifetime.
+/// Wrapper for [WEBAUTHN_CLIENT_DATA] to ensure pointer lifetime.
 pub struct WinClientData {
     native: WEBAUTHN_CLIENT_DATA,
     client_data_json: String,
