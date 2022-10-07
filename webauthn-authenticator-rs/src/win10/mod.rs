@@ -23,7 +23,7 @@ use crate::win10::{
     credential::{native_to_transports, WinCredentialList},
     extensions::{
         native_to_assertion_extensions, native_to_registration_extensions,
-        WinExtensionGetAssertionRequest, WinExtensionMakeCredentialRequest, WinExtensionsRequest,
+        WinExtensionMakeCredentialRequest, WinExtensionsRequest,
     },
     gui::Window,
     native::{WinPtr, WinWrapper},
@@ -241,10 +241,10 @@ impl AuthenticatorBackend for Win10 {
         // [chr]: https://chromium.googlesource.com/chromium/src/+/f62b8f341c14be84c6c995133f485d76a58de090/device/fido/win/webauthn_api.cc#520
         // [ffx]: https://github.com/mozilla/gecko-dev/blob/620490a051a1fc72563e1c6bbecfe7346122a6bc/dom/webauthn/WinWebAuthnManager.cpp#L714-L716
         let mut app_id_used: BOOL = false.into();
-        let extensions = match &options.extensions {
-            Some(e) => WinExtensionsRequest::new(e)?,
-            None => Box::pin(WinExtensionsRequest::<WinExtensionGetAssertionRequest>::default()),
-        };
+        // let extensions = match &options.extensions {
+        //     Some(e) => WinExtensionsRequest::new(e)?,
+        //     None => Box::pin(WinExtensionsRequest::<WinExtensionGetAssertionRequest>::default()),
+        // };
 
         let getassertopts = WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS {
             dwVersion: WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS_CURRENT_VERSION,
@@ -254,7 +254,8 @@ impl AuthenticatorBackend for Win10 {
                 cCredentials: 0,
                 pCredentials: [].as_mut_ptr(),
             },
-            Extensions: *extensions.native_ptr(),
+            // Extensions: *extensions.native_ptr(),
+            Extensions: Default::default(),
             dwAuthenticatorAttachment: 0, // Not supported?
             dwUserVerificationRequirement: user_verification_to_native(Some(
                 &options.user_verification,

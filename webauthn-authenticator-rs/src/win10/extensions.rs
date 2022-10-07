@@ -3,8 +3,7 @@ use crate::prelude::WebauthnCError;
 use std::ffi::c_void;
 use std::pin::Pin;
 use webauthn_rs_proto::{
-    AuthenticationExtensionsClientOutputs, CredBlobSet, CredProtect,
-    RegistrationExtensionsClientOutputs, RequestAuthenticationExtensions,
+    AuthenticationExtensionsClientOutputs, CredProtect, RegistrationExtensionsClientOutputs,
     RequestRegistrationExtensions,
 };
 
@@ -15,28 +14,19 @@ use windows::{
     Win32::{Foundation::BOOL, Networking::WindowsWebServices::*},
 };
 
-#[derive(Debug)]
-pub struct WinCredBlobSet {
-    native: WEBAUTHN_CRED_BLOB_EXTENSION,
-    blob: CredBlobSet,
-}
-
 /// Represents a single extension for MakeCredential requests, analogous to a
 /// single [RequestRegistrationExtensions] field.
 #[derive(Debug)]
 pub(crate) enum WinExtensionMakeCredentialRequest {
     HmacSecret(BOOL),
     CredProtect(WEBAUTHN_CRED_PROTECT_EXTENSION_IN),
-    CredBlob(Pin<Box<WinCredBlobSet>>),
     MinPinLength(BOOL),
 }
 
 /// Represents a single extension for GetAssertion requests, analogous to a
 /// single [RequestAuthenticationExtensions] field.
 #[derive(Debug)]
-pub(crate) enum WinExtensionGetAssertionRequest {
-    CredBlob(BOOL),
-}
+pub(crate) enum WinExtensionGetAssertionRequest {}
 
 /// Generic request extension trait, for abstracting between
 /// [WinExtensionMakeCredentialRequest] and [WinExtensionGetAssertionRequest].
@@ -60,7 +50,6 @@ impl WinExtensionRequestType for WinExtensionMakeCredentialRequest {
     fn identifier(&self) -> &str {
         match self {
             Self::HmacSecret(_) => WEBAUTHN_EXTENSIONS_IDENTIFIER_HMAC_SECRET,
-            Self::CredBlob(_) => WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_BLOB,
             Self::CredProtect(_) => WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_PROTECT,
             Self::MinPinLength(_) => WEBAUTHN_EXTENSIONS_IDENTIFIER_MIN_PIN_LENGTH,
         }
@@ -70,7 +59,6 @@ impl WinExtensionRequestType for WinExtensionMakeCredentialRequest {
         (match self {
             Self::HmacSecret(_) => std::mem::size_of::<BOOL>(),
             Self::CredProtect(_) => std::mem::size_of::<WEBAUTHN_CRED_PROTECT_EXTENSION_IN>(),
-            Self::CredBlob(_) => std::mem::size_of::<WEBAUTHN_CRED_BLOB_EXTENSION>(),
             Self::MinPinLength(_) => std::mem::size_of::<BOOL>(),
         }) as u32
     }
@@ -79,7 +67,6 @@ impl WinExtensionRequestType for WinExtensionMakeCredentialRequest {
         match self {
             Self::HmacSecret(v) => v as *mut _ as *mut c_void,
             Self::CredProtect(v) => v as *mut _ as *mut c_void,
-            Self::CredBlob(v) => (&mut v.native) as *mut _ as *mut c_void,
             Self::MinPinLength(v) => v as *mut _ as *mut c_void,
         }
     }
@@ -94,9 +81,6 @@ impl WinExtensionRequestType for WinExtensionMakeCredentialRequest {
         if let Some(h) = &e.hmac_create_secret {
             o.push(Self::HmacSecret(h.into()))
         }
-        if let Some(x) = &e.cred_blob {
-            o.push(Self::CredBlob(WinCredBlobSet::new(x)));
-        }
         if let Some(x) = &e.min_pin_length {
             o.push(Self::MinPinLength(x.into()));
         }
@@ -105,36 +89,29 @@ impl WinExtensionRequestType for WinExtensionMakeCredentialRequest {
     }
 }
 
+/*
 impl WinExtensionRequestType for WinExtensionGetAssertionRequest {
     fn identifier(&self) -> &str {
-        match self {
-            Self::CredBlob(_) => WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_BLOB,
-        }
+        todo!();
     }
 
     fn len(&self) -> u32 {
-        (match self {
-            Self::CredBlob(_) => std::mem::size_of::<BOOL>(),
-        }) as u32
+        todo!();
     }
 
     fn ptr(&mut self) -> *mut c_void {
-        match self {
-            Self::CredBlob(v) => v as *mut _ as *mut c_void,
-        }
+        todo!();
     }
 
     type WrappedType = RequestAuthenticationExtensions;
 
-    fn to_native(e: &Self::WrappedType) -> Vec<Self> {
-        let mut o: Vec<Self> = Vec::new();
-        if let Some(c) = &e.get_cred_blob {
-            o.push(Self::CredBlob(c.0.into()));
-        }
+    fn to_native(_e: &Self::WrappedType) -> Vec<Self> {
+        let o: Vec<Self> = Vec::new();
 
         o
     }
 }
+*/
 
 impl From<&CredProtect> for WinExtensionMakeCredentialRequest {
     /// Converts [CredProtect] into [WEBAUTHN_CRED_PROTECT_EXTENSION_IN].
@@ -146,28 +123,6 @@ impl From<&CredProtect> for WinExtensionMakeCredentialRequest {
                 .unwrap_or(false)
                 .into(),
         })
-    }
-}
-
-impl WinCredBlobSet {
-    fn new(b: &CredBlobSet) -> Pin<Box<Self>> {
-        let res = Self {
-            native: Default::default(),
-            blob: b.clone(),
-        };
-        let mut boxed = Box::pin(res);
-
-        let native = WEBAUTHN_CRED_BLOB_EXTENSION {
-            cbCredBlob: boxed.blob.0 .0.len() as u32,
-            pbCredBlob: boxed.blob.0 .0.as_mut_ptr() as *mut _,
-        };
-
-        unsafe {
-            let mut_ref: Pin<&mut Self> = Pin::as_mut(&mut boxed);
-            Pin::get_unchecked_mut(mut_ref).native = native;
-        }
-
-        boxed
     }
 }
 
@@ -197,7 +152,7 @@ fn read_extension2<'a, T: 'a + Clone>(e: &'a WEBAUTHN_EXTENSION) -> Result<T, We
 enum WinExtensionMakeCredentialResponse {
     HmacSecret(bool),
     CredProtect(u32),
-    CredBlob(bool),
+    CredBlob,
     MinPinLength(u32),
 }
 
@@ -219,9 +174,8 @@ impl TryFrom<&WEBAUTHN_EXTENSION> for WinExtensionMakeCredentialResponse {
             WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_PROTECT => {
                 read_extension2(e).map(WinExtensionMakeCredentialResponse::CredProtect)
             }
-            WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_BLOB => {
-                read_extension::<'_, BOOL, _>(e).map(WinExtensionMakeCredentialResponse::CredBlob)
-            }
+            // Value intentonally ignored
+            WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_BLOB => Ok(Self::CredBlob),
             WEBAUTHN_EXTENSIONS_IDENTIFIER_MIN_PIN_LENGTH => {
                 read_extension2(e).map(WinExtensionMakeCredentialResponse::MinPinLength)
             }
@@ -248,9 +202,7 @@ pub fn native_to_registration_extensions(
             WinExtensionMakeCredentialResponse::CredProtect(v) => {
                 o.cred_protect = (v as u8).try_into().ok();
             }
-            WinExtensionMakeCredentialResponse::CredBlob(v) => {
-                o.cred_blob = Some(v);
-            }
+            WinExtensionMakeCredentialResponse::CredBlob => (),
             WinExtensionMakeCredentialResponse::MinPinLength(v) => {
                 o.min_pin_length = Some(v);
             }
@@ -263,7 +215,7 @@ pub fn native_to_registration_extensions(
 /// Represents a single extension for GetAssertion responses, analogous to a
 /// single [AuthenticationExtensionsClientOutputs] field.
 enum WinExtensionGetAssertionResponse {
-    CredBlob(Vec<u8>),
+    CredBlob,
 }
 
 impl TryFrom<&WEBAUTHN_EXTENSION> for WinExtensionGetAssertionResponse {
@@ -278,9 +230,7 @@ impl TryFrom<&WEBAUTHN_EXTENSION> for WinExtensionGetAssertionResponse {
         };
 
         match id.as_str() {
-            WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_BLOB => {
-                read_extension2(e).map(WinExtensionGetAssertionResponse::CredBlob)
-            }
+            WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_BLOB => Ok(Self::CredBlob),
             o => {
                 error!("unknown extension: {:?}", o);
                 Err(WebauthnCError::Internal)
@@ -294,15 +244,13 @@ impl TryFrom<&WEBAUTHN_EXTENSION> for WinExtensionGetAssertionResponse {
 pub fn native_to_assertion_extensions(
     native: &WEBAUTHN_EXTENSIONS,
 ) -> Result<AuthenticationExtensionsClientOutputs, WebauthnCError> {
-    let mut o = AuthenticationExtensionsClientOutputs::default();
+    let /* mut */ o = AuthenticationExtensionsClientOutputs::default();
 
     for i in 0..(native.cExtensions as usize) {
         let extn = unsafe { &*native.pExtensions.add(i) };
         let win = WinExtensionGetAssertionResponse::try_from(extn)?;
         match win {
-            WinExtensionGetAssertionResponse::CredBlob(b) => {
-                o.cred_blob = Some(b.into());
-            }
+            WinExtensionGetAssertionResponse::CredBlob => (),
         }
     }
 
