@@ -1,11 +1,12 @@
-//! Bindings for Windows 10 Webauthn API.
+//! Bindings for Windows 10 WebAuthn API.
 //!
 //! This API is available in Windows 10 bulid 1903 and later.
 //!
 //! ## API docs
 //!
-//! * [MSDN: WebAuthn](https://learn.microsoft.com/en-us/windows/win32/api/webauthn/)
+//! * [MSDN: WebAuthn API](https://learn.microsoft.com/en-us/windows/win32/api/webauthn/)
 //! * [webauthn.h](github.com/microsoft/webauthn) (describes versions)
+//! * [windows-rs API](https://microsoft.github.io/windows-docs-rs/doc/windows/Win32/Networking/WindowsWebServices/index.html)
 mod clientdata;
 mod cose;
 mod credential;
@@ -16,14 +17,13 @@ mod rp;
 mod user;
 
 use crate::error::WebauthnCError;
-use crate::win10::extensions::native_to_assertion_extensions;
 use crate::win10::{
     clientdata::{creation_to_clientdata, get_to_clientdata, WinClientData},
     cose::WinCoseCredentialParameters,
     credential::{native_to_transports, WinCredentialList},
     extensions::{
-        native_to_registration_extensions, WinExtensionGetAssertionRequest,
-        WinExtensionMakeCredentialRequest, WinExtensionsRequest,
+        native_to_assertion_extensions, native_to_registration_extensions,
+        WinExtensionGetAssertionRequest, WinExtensionMakeCredentialRequest, WinExtensionsRequest,
     },
     gui::Window,
     native::{WinPtr, WinWrapper},
@@ -44,6 +44,9 @@ use windows::{
     Win32::{Foundation::BOOL, Networking::WindowsWebServices::*},
 };
 
+use std::slice::from_raw_parts;
+
+/// Authenticator backend for Windows 10 WebAuthn API.
 pub struct Win10 {}
 
 impl Default for Win10 {
@@ -165,31 +168,32 @@ impl AuthenticatorBackend for Win10 {
         // trace!("got result from WebAuthNAuthenticatorMakeCredential");
         // trace!("{:?}", (*a));
 
-        let cred_id =
-            copy_ptr(a.cbCredentialId, a.pbCredentialId).ok_or(WebauthnCError::Internal)?;
-        let attesation_object = copy_ptr(a.cbAttestationObject, a.pbAttestationObject)
-            .ok_or(WebauthnCError::Internal)?;
-        let type_: String = unsafe {
-            a.pwszFormatType
+        unsafe {
+            let cred_id: Vec<u8> =
+                from_raw_parts(a.pbCredentialId, a.cbCredentialId as usize).into();
+            let attesation_object =
+                from_raw_parts(a.pbAttestationObject, a.cbAttestationObject as usize).into();
+            let type_: String = a
+                .pwszFormatType
                 .to_string()
-                .map_err(|_| WebauthnCError::Internal)?
-        };
+                .map_err(|_| WebauthnCError::Internal)?;
 
-        let id: String = Base64UrlSafeData(cred_id.clone()).to_string();
+            let id: String = Base64UrlSafeData(cred_id.clone()).to_string();
 
-        Ok(RegisterPublicKeyCredential {
-            id,
-            raw_id: Base64UrlSafeData(cred_id),
-            type_,
-            extensions: native_to_registration_extensions(&a.Extensions)?,
-            response: AuthenticatorAttestationResponseRaw {
-                attestation_object: Base64UrlSafeData(attesation_object),
-                client_data_json: Base64UrlSafeData(
-                    clientdata.client_data_json().as_bytes().to_vec(),
-                ),
-                transports: Some(native_to_transports(a.dwUsedTransport)),
-            },
-        })
+            Ok(RegisterPublicKeyCredential {
+                id,
+                raw_id: Base64UrlSafeData(cred_id),
+                type_,
+                extensions: native_to_registration_extensions(&a.Extensions)?,
+                response: AuthenticatorAttestationResponseRaw {
+                    attestation_object: Base64UrlSafeData(attesation_object),
+                    client_data_json: Base64UrlSafeData(
+                        clientdata.client_data_json().as_bytes().to_vec(),
+                    ),
+                    transports: Some(native_to_transports(a.dwUsedTransport)),
+                },
+            })
+        }
     }
 
     /// Perform an authentication action using Windows WebAuth API.
@@ -288,79 +292,63 @@ impl AuthenticatorBackend for Win10 {
         drop(hwnd);
         // trace!("got result from WebAuthNAuthenticatorGetAssertion");
 
-        let user_id = copy_ptr(a.cbUserId, a.pbUserId);
-        let authenticator_data = copy_ptr(a.cbAuthenticatorData, a.pbAuthenticatorData)
-            .ok_or(WebauthnCError::Internal)?;
-        let signature = copy_ptr(a.cbSignature, a.pbSignature).ok_or(WebauthnCError::Internal)?;
+        unsafe {
+            let user_id = from_raw_parts(a.pbUserId, a.cbUserId as usize).into();
+            let authenticator_data =
+                from_raw_parts(a.pbAuthenticatorData, a.cbAuthenticatorData as usize).into();
+            let signature = from_raw_parts(a.pbSignature, a.cbSignature as usize).into();
 
-        let credential_id = Base64UrlSafeData(
-            copy_ptr(a.Credential.cbId, a.Credential.pbId).ok_or(WebauthnCError::Internal)?,
-        );
-        let type_: String = unsafe {
-            a.Credential
+            let credential_id = Base64UrlSafeData(
+                from_raw_parts(a.Credential.pbId, a.Credential.cbId as usize).into(),
+            );
+            let type_ = a
+                .Credential
                 .pwszCredentialType
                 .to_string()
-                .map_err(|_| WebauthnCError::Internal)?
-        };
+                .map_err(|_| WebauthnCError::Internal)?;
 
-        let mut extensions = native_to_assertion_extensions(&a.Extensions)?;
-        extensions.appid = Some(app_id_used.into());
+            let mut extensions = native_to_assertion_extensions(&a.Extensions)?;
+            extensions.appid = Some(app_id_used.into());
 
-        Ok(PublicKeyCredential {
-            id: credential_id.to_string(),
-            raw_id: credential_id,
-            response: AuthenticatorAssertionResponseRaw {
-                authenticator_data: Base64UrlSafeData(authenticator_data),
-                client_data_json: Base64UrlSafeData(
-                    clientdata.client_data_json().as_bytes().to_vec(),
-                ),
-                signature: Base64UrlSafeData(signature),
-                user_handle: user_id.map(Base64UrlSafeData),
-            },
-            type_,
-            extensions,
-        })
+            Ok(PublicKeyCredential {
+                id: credential_id.to_string(),
+                raw_id: credential_id,
+                response: AuthenticatorAssertionResponseRaw {
+                    authenticator_data: Base64UrlSafeData(authenticator_data),
+                    client_data_json: Base64UrlSafeData(
+                        clientdata.client_data_json().as_bytes().to_vec(),
+                    ),
+                    signature: Base64UrlSafeData(signature),
+                    user_handle: Some(Base64UrlSafeData(user_id)),
+                },
+                type_,
+                extensions,
+            })
+        }
     }
 }
 
 /// Converts an [AuthenticatorAttachment] into a value for
 /// [WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS::dwAuthenticatorAttachment]
 fn attachment_to_native(attachment: Option<AuthenticatorAttachment>) -> u32 {
+    use AuthenticatorAttachment::*;
     match attachment {
         None => WEBAUTHN_AUTHENTICATOR_ATTACHMENT_ANY,
-        Some(AuthenticatorAttachment::CrossPlatform) => {
-            WEBAUTHN_AUTHENTICATOR_ATTACHMENT_CROSS_PLATFORM
-        }
-        Some(AuthenticatorAttachment::Platform) => WEBAUTHN_AUTHENTICATOR_ATTACHMENT_PLATFORM,
+        Some(CrossPlatform) => WEBAUTHN_AUTHENTICATOR_ATTACHMENT_CROSS_PLATFORM,
+        Some(Platform) => WEBAUTHN_AUTHENTICATOR_ATTACHMENT_PLATFORM,
     }
 }
 
 /// Converts a [UserVerificationPolicy] into a value for
 /// [WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS::dwUserVerificationRequirement]
 fn user_verification_to_native(policy: Option<&UserVerificationPolicy>) -> u32 {
+    use UserVerificationPolicy::*;
     match policy {
         None => WEBAUTHN_USER_VERIFICATION_REQUIREMENT_ANY,
         Some(p) => match p {
-            UserVerificationPolicy::Required => WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED,
-            UserVerificationPolicy::Preferred => WEBAUTHN_USER_VERIFICATION_REQUIREMENT_PREFERRED,
-            UserVerificationPolicy::Discouraged_DO_NOT_USE => {
-                WEBAUTHN_USER_VERIFICATION_REQUIREMENT_DISCOURAGED
-            }
+            Required => WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED,
+            Preferred => WEBAUTHN_USER_VERIFICATION_REQUIREMENT_PREFERRED,
+            Discouraged_DO_NOT_USE => WEBAUTHN_USER_VERIFICATION_REQUIREMENT_DISCOURAGED,
         },
     }
-}
-
-fn copy_ptr<T>(cb: u32, pb: *const T) -> Option<Vec<T>>
-where
-    T: Clone,
-{
-    if pb.is_null() || cb == 0 {
-        return None;
-    }
-    let mut dst: Vec<T> = Vec::with_capacity(cb as usize);
-    unsafe {
-        std::ptr::copy(pb, dst.as_mut_ptr(), cb as usize);
-        dst.set_len(cb as usize)
-    }
-    Some(dst)
 }

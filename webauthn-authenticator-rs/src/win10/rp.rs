@@ -1,3 +1,4 @@
+//! Wrappers for [RelyingParty].
 use std::pin::Pin;
 
 use webauthn_rs_proto::RelyingParty;

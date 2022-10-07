@@ -1,4 +1,4 @@
-//! Credential wrapper.
+//! Wrappers for [AllowCredentials] and [PublicKeyCredentialDescriptor].
 use crate::prelude::WebauthnCError;
 use base64urlsafedata::Base64UrlSafeData;
 use std::pin::Pin;

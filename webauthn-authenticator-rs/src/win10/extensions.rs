@@ -1,3 +1,4 @@
+//! Wrappers for extensions.
 use crate::prelude::WebauthnCError;
 use std::ffi::c_void;
 use std::pin::Pin;
@@ -14,15 +15,14 @@ use windows::{
     Win32::{Foundation::BOOL, Networking::WindowsWebServices::*},
 };
 
-// const WEBAUTHN_EXTENSIONS_IDENTIFIER_HMAC_SECRET: &HSTRING = w!("hmac-secret");
-// const WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_PROTECT: &HSTRING = w!("credProtect");
-
 #[derive(Debug)]
 pub struct WinCredBlobSet {
     native: WEBAUTHN_CRED_BLOB_EXTENSION,
     blob: CredBlobSet,
 }
 
+/// Represents a single extension for MakeCredential requests, analogous to a
+/// single [RequestRegistrationExtensions] field.
 #[derive(Debug)]
 pub(crate) enum WinExtensionMakeCredentialRequest {
     HmacSecret(BOOL),
@@ -31,19 +31,28 @@ pub(crate) enum WinExtensionMakeCredentialRequest {
     MinPinLength(BOOL),
 }
 
+/// Represents a single extension for GetAssertion requests, analogous to a
+/// single [RequestAuthenticationExtensions] field.
 #[derive(Debug)]
 pub(crate) enum WinExtensionGetAssertionRequest {
     CredBlob(BOOL),
 }
 
+/// Generic request extension trait, for abstracting between
+/// [WinExtensionMakeCredentialRequest] and [WinExtensionGetAssertionRequest].
 pub(crate) trait WinExtensionRequestType
 where
     Self: Sized,
 {
+    /// Extension identier, as string.
     fn identifier(&self) -> &str;
+    /// Length of the native data structure, in bytes.
     fn len(&self) -> u32;
+    /// Pointer to the native data structure.
     fn ptr(&mut self) -> *mut c_void;
+    /// The `webauthn-authenticator-rs` type which this wraps.
     type WrappedType;
+    /// Converts the [Self::WrappedType] to a [Vec] of Windows API types.
     fn to_native(e: &Self::WrappedType) -> Vec<Self>;
 }
 
@@ -128,6 +137,7 @@ impl WinExtensionRequestType for WinExtensionGetAssertionRequest {
 }
 
 impl From<&CredProtect> for WinExtensionMakeCredentialRequest {
+    /// Converts [CredProtect] into [WEBAUTHN_CRED_PROTECT_EXTENSION_IN].
     fn from(c: &CredProtect) -> Self {
         Self::CredProtect(WEBAUTHN_CRED_PROTECT_EXTENSION_IN {
             dwCredProtect: c.credential_protection_policy as u32,
@@ -161,17 +171,8 @@ impl WinCredBlobSet {
     }
 }
 
-enum WinExtensionMakeCredentialResponse {
-    HmacSecret(bool),
-    CredProtect(u32),
-    CredBlob(bool),
-    MinPinLength(u32),
-}
-
-enum WinExtensionGetAssertionResponse {
-    CredBlob(Vec<u8>),
-}
-
+/// Reads a [WEBAUTHN_EXTENSION] containing a Windows-specific primitive type,
+/// converting it into a Rust datatype.
 fn read_extension<'a, T: 'a, U: From<&'a T>>(
     e: &'a WEBAUTHN_EXTENSION,
 ) -> Result<U, WebauthnCError> {
@@ -182,6 +183,7 @@ fn read_extension<'a, T: 'a, U: From<&'a T>>(
     Ok(v.into())
 }
 
+/// Reads and copies a [WEBAUTHN_EXTENSION] containing a primitive type.
 fn read_extension2<'a, T: 'a + Clone>(e: &'a WEBAUTHN_EXTENSION) -> Result<T, WebauthnCError> {
     if (e.cbExtension as usize) < std::mem::size_of::<T>() {
         return Err(WebauthnCError::Internal);
@@ -190,8 +192,19 @@ fn read_extension2<'a, T: 'a + Clone>(e: &'a WEBAUTHN_EXTENSION) -> Result<T, We
     Ok(v.clone())
 }
 
+/// Represents a single extension for MakeCredential responses, analogous to a
+/// single [RegistrationExtensionsClientOutputs] field.
+enum WinExtensionMakeCredentialResponse {
+    HmacSecret(bool),
+    CredProtect(u32),
+    CredBlob(bool),
+    MinPinLength(u32),
+}
+
 impl TryFrom<&WEBAUTHN_EXTENSION> for WinExtensionMakeCredentialResponse {
     type Error = WebauthnCError;
+
+    /// Reads a [WEBAUTHN_EXTENSION] for a response to a MakeCredential call.
     fn try_from(e: &WEBAUTHN_EXTENSION) -> Result<Self, WebauthnCError> {
         let id = unsafe {
             e.pwszExtensionIdentifier
@@ -220,6 +233,8 @@ impl TryFrom<&WEBAUTHN_EXTENSION> for WinExtensionMakeCredentialResponse {
     }
 }
 
+/// Converts [WEBAUTHN_EXTENSIONS] for a response to MakeCredential call into
+/// a `webauthn-authenticator-rs` [RegistrationExtensionsClientOutputs] type.
 pub fn native_to_registration_extensions(
     native: &WEBAUTHN_EXTENSIONS,
 ) -> Result<RegistrationExtensionsClientOutputs, WebauthnCError> {
@@ -245,9 +260,16 @@ pub fn native_to_registration_extensions(
     Ok(o)
 }
 
+/// Represents a single extension for GetAssertion responses, analogous to a
+/// single [AuthenticationExtensionsClientOutputs] field.
+enum WinExtensionGetAssertionResponse {
+    CredBlob(Vec<u8>),
+}
+
 impl TryFrom<&WEBAUTHN_EXTENSION> for WinExtensionGetAssertionResponse {
     type Error = WebauthnCError;
 
+    /// Reads a [WEBAUTHN_EXTENSION] for a response to a GetAssertion call.
     fn try_from(e: &WEBAUTHN_EXTENSION) -> Result<Self, Self::Error> {
         let id = unsafe {
             e.pwszExtensionIdentifier
@@ -267,6 +289,8 @@ impl TryFrom<&WEBAUTHN_EXTENSION> for WinExtensionGetAssertionResponse {
     }
 }
 
+/// Converts [WEBAUTHN_EXTENSIONS] for a response to GetAssertion call into
+/// a `webauthn-authenticator-rs` [AuthenticationExtensionsClientOutputs] type.
 pub fn native_to_assertion_extensions(
     native: &WEBAUTHN_EXTENSIONS,
 ) -> Result<AuthenticationExtensionsClientOutputs, WebauthnCError> {
