@@ -1,6 +1,7 @@
 use crate::error::WebauthnCError;
 use crate::AuthenticatorBackend;
 use crate::Url;
+use crate::util::compute_sha256;
 use openssl::x509::{
     extension::{AuthorityKeyIdentifier, BasicConstraints, KeyUsage, SubjectKeyIdentifier},
     X509NameBuilder, X509Ref, X509ReqBuilder, X509,
@@ -11,8 +12,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::iter;
 
-use openssl::sha;
-
 use base64urlsafedata::Base64UrlSafeData;
 
 use webauthn_rs_proto::{
@@ -21,12 +20,6 @@ use webauthn_rs_proto::{
     PublicKeyCredential, PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
     RegisterPublicKeyCredential, RegistrationExtensionsClientOutputs, UserVerificationPolicy,
 };
-
-fn compute_sha256(data: &[u8]) -> [u8; 32] {
-    let mut hasher = sha::Sha256::new();
-    hasher.update(data);
-    hasher.finish()
-}
 
 // This is 0fb9bcbc-a0d4-4042-bbb0-559bc1631e28
 pub const AAGUID: [u8; 16] = [
