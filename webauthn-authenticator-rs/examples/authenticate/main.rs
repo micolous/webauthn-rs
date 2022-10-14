@@ -3,11 +3,12 @@ extern crate tracing;
 
 use std::io::{stdin, stdout, Write};
 
-use webauthn_authenticator_rs::ui::{UiCallback, Cli};
+use base64urlsafedata::Base64UrlSafeData;
 use webauthn_authenticator_rs::prelude::Url;
 use webauthn_authenticator_rs::softtoken::SoftToken;
 use webauthn_authenticator_rs::transport::ctap21pre::Ctap21PreAuthenticator;
 use webauthn_authenticator_rs::transport::*;
+use webauthn_authenticator_rs::ui::{Cli, UiCallback};
 use webauthn_authenticator_rs::AuthenticatorBackend;
 use webauthn_rs_core::proto::RequestAuthenticationExtensions;
 use webauthn_rs_core::WebauthnCore as Webauthn;
@@ -122,33 +123,40 @@ fn main() {
     let cred = wan.register_credential(&r, &reg_state, None).unwrap();
 
     trace!(?cred);
+    
 
-    let (chal, auth_state) = wan
-        .generate_challenge_authenticate(
-            vec![cred],
-            Some(RequestAuthenticationExtensions {
-                appid: Some("example.app.id".to_string()),
-                uvm: None,
-            }),
-        )
-        .unwrap();
+    loop {
+        let (chal, auth_state) = wan
+            .generate_challenge_authenticate(
+                vec![cred.clone()],
+                Some(RequestAuthenticationExtensions {
+                    appid: Some("example.app.id".to_string()),
+                    uvm: None,
+                }),
+            )
+            .unwrap();
 
-    let r = u
-        .perform_auth(
-            Url::parse("https://localhost:8080").unwrap(),
-            chal.public_key,
-            60_000,
-        )
-        .map_err(|e| {
-            error!("Error -> {:x?}", e);
-            e
-        })
-        .expect("Failed to auth");
-    trace!(?r);
+        let r = u
+            .perform_auth(
+                Url::parse("https://localhost:8080").unwrap(),
+                chal.public_key,
+                60_000,
+            )
+            .map_err(|e| {
+                error!("Error -> {:x?}", e);
+                e
+            })
+            .expect("Failed to auth");
+        trace!(?r);
 
-    let auth_res = wan
-        .authenticate_credential(&r, &auth_state)
-        .expect("webauth authentication denied");
+        let auth_res = wan
+            .authenticate_credential(&r, &auth_state)
+            .expect("webauth authentication denied");
 
-    info!("auth_res -> {:x?}", auth_res);
+        info!("auth_res -> {:x?}", auth_res);
+        let mut buf = String::new();
+        println!("Press ENTER to try again, or Ctrl-C to abort");
+        stdout().flush().ok();
+        stdin().read_line(&mut buf).expect("Cannot read stdin");
+    }
 }
