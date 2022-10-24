@@ -181,7 +181,7 @@ crate::deserialize_cbor!(MakeCredentialResponse);
 
 #[cfg(test)]
 mod test {
-    use std::num::ParseIntError;
+    use std::{num::ParseIntError, slice::Chunks};
 
     use crate::cbor::make_credential::*;
     use base64urlsafedata::Base64UrlSafeData;
@@ -193,6 +193,49 @@ mod test {
             .step_by(2)
             .map(|i| u8::from_str_radix(&s[i..i + 2], 16))
             .collect()
+    }
+
+    #[test]
+    fn qr_code() {
+        let _ = tracing_subscriber::fmt().try_init();
+        // FIDO:/...
+        let b = "162870791865632382552704231438327900152302540348097243854039966655366469794954476199158014113179232779520163209900691930075274801398564434658077048963842109321447142660";
+        info!("FIDO:/{}", b);
+        let b: Result<Vec<u64>, _> = (0..b.len())
+            .step_by(17)
+            .map(|i| {
+                let p = &b[i..usize::min(i + 17, b.len())];
+                let o = u64::from_str_radix(p, 10);
+                // if p.len() == 17 {
+                //     return o;
+                // }
+                // let r = match p.len() {
+                //     3 => 1,
+                //     5 => 2,
+                //     8 => 3,
+                //     10 => 4,
+                //     13 => 5,
+                //     15 => 6,
+                //     _ => panic!("unexpected length")
+                // }
+                o
+            })
+            .collect();
+        // let b = decode_hex(b).expect("bad");
+        info!("QR code = {:08x?}", b);
+
+        // reshuffle
+        let b = b.unwrap();
+        let mut o = Vec::new();
+        for v in &b {
+            // 7 bytes in an integer
+            assert_eq!(0, v.to_le_bytes()[7]);
+            o.extend_from_slice(&v.to_le_bytes()[..7]);
+        }
+
+        info!("bytes = {:02x?}", o);
+        let v: Value = from_slice(&o[..o.len()-1]).expect("cbor decode bad");
+        info!("CBOR data = {:?}", v);
     }
 
     #[test]
