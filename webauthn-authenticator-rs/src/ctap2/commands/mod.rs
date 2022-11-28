@@ -167,7 +167,7 @@ fn value_to_vec_u32(v: Value, loc: &str) -> Option<Vec<u32>> {
     }
 }
 
-fn value_to_u32(v: &Value, loc: &str) -> Option<u32> {
+pub(crate) fn value_to_u32(v: &Value, loc: &str) -> Option<u32> {
     if let Value::Integer(i) = v {
         u32::try_from(*i)
             .map_err(|_| error!("Invalid value inside {}: {:?}", loc, i))
@@ -178,8 +178,19 @@ fn value_to_u32(v: &Value, loc: &str) -> Option<u32> {
     }
 }
 
+pub(crate) fn value_to_u64(v: &Value, loc: &str) -> Option<u64> {
+    if let Value::Integer(i) = v {
+        u64::try_from(*i)
+            .map_err(|_| error!("Invalid value inside {}: {:?}", loc, i))
+            .ok()
+    } else {
+        error!("Invalid type for {}: {:?}", loc, v);
+        None
+    }
+}
+
 /// Converts a [Value::Bool] into [Option<bool>]. Returns `None` for other [Value] types.
-fn value_to_bool(v: &Value, loc: &str) -> Option<bool> {
+pub(crate) fn value_to_bool(v: &Value, loc: &str) -> Option<bool> {
     if let Value::Bool(b) = v {
         Some(*b)
     } else {
@@ -189,7 +200,7 @@ fn value_to_bool(v: &Value, loc: &str) -> Option<bool> {
 }
 
 /// Converts a [Value::Bytes] into [Option<Vec<u8>>]. Returns `None` for other [Value] types.
-fn value_to_vec_u8(v: Value, loc: &str) -> Option<Vec<u8>> {
+pub(crate) fn value_to_vec_u8(v: Value, loc: &str) -> Option<Vec<u8>> {
     if let Value::Bytes(b) = v {
         Some(b)
     } else {
@@ -198,7 +209,7 @@ fn value_to_vec_u8(v: Value, loc: &str) -> Option<Vec<u8>> {
     }
 }
 
-fn value_to_string(v: Value, loc: &str) -> Option<String> {
+pub(crate) fn value_to_string(v: Value, loc: &str) -> Option<String> {
     if let Value::Text(s) = v {
         Some(s)
     } else {

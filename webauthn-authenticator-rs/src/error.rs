@@ -53,6 +53,8 @@ pub enum WebauthnCError {
     Checksum,
     /// The card reported as a PC/SC storage card, rather than a smart card.
     StorageCard,
+    InvalidCableUrl,
+    Base10(crate::cable::DecodeError),
 }
 
 #[cfg(feature = "nfc")]
@@ -88,6 +90,12 @@ impl From<Error> for WebauthnCError {
 impl From<openssl::error::ErrorStack> for WebauthnCError {
     fn from(v: openssl::error::ErrorStack) -> Self {
         Self::OpenSSL(v.to_string())
+    }
+}
+
+impl From<crate::cable::DecodeError> for WebauthnCError {
+    fn from(v: crate::cable::DecodeError) -> Self {
+        Self::Base10(v)
     }
 }
 

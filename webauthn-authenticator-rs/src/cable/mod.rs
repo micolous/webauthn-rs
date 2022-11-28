@@ -6,3 +6,6 @@
 
 mod base10;
 mod tunnel;
+mod handshake;
+
+pub use base10::DecodeError;

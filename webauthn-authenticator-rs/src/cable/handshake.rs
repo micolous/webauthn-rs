@@ -1,0 +1,244 @@
+use openssl::{
+    bn::BigNumContext,
+    ec::{EcGroup, EcKey, EcKeyRef, EcPoint, PointConversionForm},
+    nid::Nid,
+    pkey::Public,
+};
+use serde::Serialize;
+use serde_cbor::Value;
+use std::{
+    collections::BTreeMap,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use crate::{
+    cable::base10,
+    ctap2::commands::{
+        value_to_bool, value_to_u64, value_to_string, value_to_u32, value_to_vec_u8,
+    },
+    error::WebauthnCError,
+};
+
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub enum CableRequestType {
+    #[default]
+    GetAssertion,
+    MakeCredential,
+    DiscoverableMakeCredential,
+}
+
+impl ToString for CableRequestType {
+    fn to_string(&self) -> String {
+        use CableRequestType::*;
+        match self {
+            GetAssertion => String::from("ga"),
+            DiscoverableMakeCredential => String::from("mc"),
+            MakeCredential => String::from("mc"),
+        }
+    }
+}
+
+impl CableRequestType {
+    pub fn from_string(val: &str, supports_non_discoverable_make_credential: bool) -> Option<Self> {
+        use CableRequestType::*;
+        match val {
+            "ga" => Some(GetAssertion),
+            "mc" => Some(if supports_non_discoverable_make_credential {
+                MakeCredential
+            } else {
+                DiscoverableMakeCredential
+            }),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Serialize, Debug, Clone)]
+#[serde(into = "BTreeMap<u32, Value>", try_from = "BTreeMap<u32, Value>")]
+pub struct HandshakeV2 {
+    public_key: EcKey<Public>,
+    qr_key: Vec<u8>,
+    known_domains_count: u32,
+    timestamp: SystemTime,
+    supports_linking_info: bool,
+    request_type: CableRequestType,
+    supports_non_discoverable_make_credential: bool,
+}
+
+impl From<HandshakeV2> for BTreeMap<u32, Value> {
+    fn from(value: HandshakeV2) -> Self {
+        let HandshakeV2 {
+            public_key,
+            qr_key,
+            known_domains_count,
+            timestamp,
+            supports_linking_info,
+            request_type,
+            supports_non_discoverable_make_credential,
+        } = value;
+
+        let mut o = BTreeMap::from([
+            (1, Value::Bytes(qr_key)),
+            (2, Value::Integer(known_domains_count.into())),
+            (
+                3,
+                Value::Integer(
+                    timestamp
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs()
+                        .into(),
+                ),
+            ),
+            (5, Value::Text(request_type.to_string())),
+        ]);
+
+        if let Ok(v) = compress_public_key(public_key.as_ref()) {
+            o.insert(0, Value::Bytes(v));
+        }
+
+        if supports_linking_info {
+            o.insert(4, Value::Bool(true));
+        }
+        if supports_non_discoverable_make_credential
+            && request_type == CableRequestType::MakeCredential
+        {
+            o.insert(6, Value::Bool(true));
+        }
+
+        o
+    }
+}
+
+impl TryFrom<BTreeMap<u32, Value>> for HandshakeV2 {
+    type Error = WebauthnCError;
+
+    fn try_from(mut raw: BTreeMap<u32, Value>) -> Result<Self, Self::Error> {
+        let public_key = raw
+            .remove(&0)
+            .and_then(|v| value_to_vec_u8(v, "0x00"))
+            .ok_or(WebauthnCError::MissingRequiredField)?;
+
+        let public_key = decompress_public_key(&public_key)?;
+
+        let qr_key = raw
+            .remove(&1)
+            .and_then(|v| value_to_vec_u8(v, "0x01"))
+            .ok_or(WebauthnCError::MissingRequiredField)?;
+
+        let known_domains_count = raw
+            .remove(&2)
+            .and_then(|v| value_to_u32(&v, "0x02"))
+            .unwrap_or_default();
+
+        let timestamp = raw
+            .remove(&3)
+            .and_then(|v| value_to_u64(&v, "0x03"))
+            .unwrap_or_default();
+        let timestamp = UNIX_EPOCH + Duration::from_secs(timestamp);
+
+        let supports_linking_info = raw
+            .remove(&4)
+            .and_then(|v| value_to_bool(&v, "0x04"))
+            .unwrap_or_default();
+
+        let supports_non_discoverable_make_credential = raw
+            .remove(&6)
+            .and_then(|v| value_to_bool(&v, "0x06"))
+            .unwrap_or_default();
+
+        let request_type = raw
+            .remove(&5)
+            .and_then(|v| value_to_string(v, "0x05"))
+            .and_then(|v| {
+                CableRequestType::from_string(v.as_str(), supports_non_discoverable_make_credential)
+            })
+            .unwrap_or_default();
+
+        Ok(Self {
+            public_key,
+            qr_key,
+            known_domains_count,
+            timestamp,
+            supports_linking_info,
+            request_type,
+            supports_non_discoverable_make_credential,
+        })
+    }
+}
+
+fn compress_public_key(key: &EcKeyRef<Public>) -> Result<Vec<u8>, WebauthnCError> {
+    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
+    let mut ctx = BigNumContext::new()?;
+    Ok(key
+        .public_key()
+        .to_bytes(&group, PointConversionForm::COMPRESSED, &mut ctx)?)
+}
+
+fn decompress_public_key(bytes: &[u8]) -> Result<EcKey<Public>, WebauthnCError> {
+    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
+    let mut ctx = BigNumContext::new()?;
+    let point = EcPoint::from_bytes(&group, &bytes, &mut ctx)?;
+    Ok(EcKey::from_public_key(&group, &point)?)
+}
+
+const URL_PREFIX: &str = "FIDO:/";
+
+impl HandshakeV2 {
+    /// Encodes a [HandshakeV2] into a `FIDO:/` QR code.
+    pub fn to_qr_url(&self) -> Result<String, WebauthnCError> {
+        let payload: Vec<u8> = serde_cbor::to_vec(self).map_err(|_| WebauthnCError::Cbor)?;
+        Ok(format!("{}{}", URL_PREFIX, base10::encode(&payload)))
+    }
+
+    /// Decodes a `FIDO:/` QR code into a [HandshakeV2].
+    pub fn from_qr_url(url: &str) -> Result<Self, WebauthnCError> {
+        let url = url.to_ascii_uppercase();
+        if !url.starts_with(URL_PREFIX) || url.len() <= URL_PREFIX.len() {
+            return Err(WebauthnCError::InvalidCableUrl);
+        }
+
+        let (_, payload) = url.split_at(URL_PREFIX.len());
+        let payload = base10::decode(payload)?;
+        let v: BTreeMap<u32, Value> =
+            serde_cbor::from_slice(&payload).map_err(|_| WebauthnCError::Cbor)?;
+
+        Ok(Self::try_from(v)?)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn invalid_urls() {
+        use WebauthnCError::*;
+        use base10::DecodeError::*;
+        const URLS: [(&str, WebauthnCError); 7] = [
+            ("http://example.com", InvalidCableUrl),
+            ("fido:/", InvalidCableUrl),
+            ("FIDO:/", InvalidCableUrl),
+            ("FIDO://", Base10(ContainsNonDigitChars)),
+            ("FIDO:/0", Base10(InvalidLength)),
+            ("FIDO:/999", Base10(OutOfRange)),
+            ("FIDO:/000", Cbor),
+        ];
+
+        for (u, e) in URLS {
+            assert_eq!(Some(e), HandshakeV2::from_qr_url(u).err(), "url = {:?}", u);
+        }
+    }
+
+    #[test]
+    fn decode() {
+        // URL generated by Chrome
+        let u = "FIDO:/162870791865632382552704231438327900152302540348097243854039966655366469794954476199158014113179232779520163209900691930075274801398564434658077048963842109321447142660";
+
+        let h = HandshakeV2::from_qr_url(u).unwrap();
+        println!("{:?}", h);
+
+        // Can we round-trip the handshake?
+        let e = h.to_qr_url().unwrap();
+        assert_eq!(e.as_str(), u);
+    }
+}
