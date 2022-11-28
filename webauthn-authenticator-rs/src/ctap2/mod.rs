@@ -194,6 +194,7 @@ pub use self::commands::EnrollSampleStatus;
 use self::commands::GetInfoRequest;
 pub use self::commands::{CBORCommand, CBORResponse};
 pub use self::{ctap20::Ctap20Authenticator, ctap21::Ctap21Authenticator};
+pub(crate) use self::pin_uv::{hkdf_sha_256, regenerate, decrypt, encrypt};
 
 /// Abstraction for different versions of the CTAP2 protocol.
 ///

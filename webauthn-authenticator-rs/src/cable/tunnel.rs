@@ -61,6 +61,9 @@ mod test {
         );
 
         assert_eq!(get_domain(255), None);
+
+        // 🦀 = \u{1f980}
+        assert_eq!(get_domain(0xf980), Some(String::from("cable.my4kstlhndi4c.net")))
     }
 
     #[test]

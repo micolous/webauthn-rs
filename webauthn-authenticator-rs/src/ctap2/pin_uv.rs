@@ -234,7 +234,7 @@ impl PinUvPlatformInterface {
 /// Encrypts some data using AES-256-CBC, with no padding.
 ///
 /// `plaintext.len()` must be a multiple of the cipher's blocksize.
-fn encrypt(key: &[u8], iv: Option<&[u8]>, plaintext: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
+pub fn encrypt(key: &[u8], iv: Option<&[u8]>, plaintext: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
     let cipher = symm::Cipher::aes_256_cbc();
     let mut ct = vec![0; plaintext.len() + cipher.block_size()];
     let mut c = symm::Crypter::new(cipher, symm::Mode::Encrypt, key, iv)?;
@@ -245,7 +245,7 @@ fn encrypt(key: &[u8], iv: Option<&[u8]>, plaintext: &[u8]) -> Result<Vec<u8>, W
     Ok(ct)
 }
 
-fn decrypt(key: &[u8], iv: Option<&[u8]>, ciphertext: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
+pub fn decrypt(key: &[u8], iv: Option<&[u8]>, ciphertext: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
     let cipher = openssl::symm::Cipher::aes_256_cbc();
     if ciphertext.len() % cipher.block_size() != 0 {
         error!(
@@ -405,7 +405,7 @@ impl PinUvPlatformInterfaceProtocol for PinUvPlatformInterfaceProtocolTwo {
     }
 }
 
-fn hkdf_sha_256(
+pub fn hkdf_sha_256(
     salt: &[u8],
     ikm: &[u8],
     info: &[u8],
@@ -459,7 +459,7 @@ fn ecdh(
 }
 
 /// Generate a fresh, random P-256 private key, x, and compute the associated public point.
-fn regenerate() -> Result<EcKey<Private>, openssl::error::ErrorStack> {
+pub fn regenerate() -> Result<EcKey<Private>, openssl::error::ErrorStack> {
     // Create a new key.
     let ecgroup = ec::EcGroup::from_curve_name(nid::Nid::X9_62_PRIME256V1)?;
     let eckey = ec::EcKey::generate(&ecgroup)?;

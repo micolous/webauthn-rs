@@ -3,6 +3,7 @@ use openssl::{
     ec::{EcGroup, EcKey, EcKeyRef, EcPoint, PointConversionForm},
     nid::Nid,
     pkey::Public,
+    rand::rand_bytes, pkey_ctx::PkeyCtx,
 };
 use serde::Serialize;
 use serde_cbor::Value;
@@ -14,7 +15,7 @@ use std::{
 use crate::{
     cable::base10,
     ctap2::commands::{
-        value_to_bool, value_to_u64, value_to_string, value_to_u32, value_to_vec_u8,
+        value_to_bool, value_to_string, value_to_u32, value_to_u64, value_to_vec_u8,
     },
     error::WebauthnCError,
 };
@@ -56,8 +57,8 @@ impl CableRequestType {
 #[derive(Serialize, Debug, Clone)]
 #[serde(into = "BTreeMap<u32, Value>", try_from = "BTreeMap<u32, Value>")]
 pub struct HandshakeV2 {
-    public_key: EcKey<Public>,
-    qr_key: Vec<u8>,
+    peer_identity: EcKey<Public>,
+    secret: [u8; 16],
     known_domains_count: u32,
     timestamp: SystemTime,
     supports_linking_info: bool,
@@ -68,8 +69,8 @@ pub struct HandshakeV2 {
 impl From<HandshakeV2> for BTreeMap<u32, Value> {
     fn from(value: HandshakeV2) -> Self {
         let HandshakeV2 {
-            public_key,
-            qr_key,
+            peer_identity,
+            secret,
             known_domains_count,
             timestamp,
             supports_linking_info,
@@ -78,7 +79,7 @@ impl From<HandshakeV2> for BTreeMap<u32, Value> {
         } = value;
 
         let mut o = BTreeMap::from([
-            (1, Value::Bytes(qr_key)),
+            (1, Value::Bytes(secret.to_vec())),
             (2, Value::Integer(known_domains_count.into())),
             (
                 3,
@@ -93,7 +94,7 @@ impl From<HandshakeV2> for BTreeMap<u32, Value> {
             (5, Value::Text(request_type.to_string())),
         ]);
 
-        if let Ok(v) = compress_public_key(public_key.as_ref()) {
+        if let Ok(v) = compress_public_key(peer_identity.as_ref()) {
             o.insert(0, Value::Bytes(v));
         }
 
@@ -119,12 +120,20 @@ impl TryFrom<BTreeMap<u32, Value>> for HandshakeV2 {
             .and_then(|v| value_to_vec_u8(v, "0x00"))
             .ok_or(WebauthnCError::MissingRequiredField)?;
 
-        let public_key = decompress_public_key(&public_key)?;
+        let public_key = decompress_public_key(
+            public_key
+                .try_into()
+                // TODO: better error
+                .map_err(|_| WebauthnCError::Internal)?,
+        )?;
 
         let qr_key = raw
             .remove(&1)
             .and_then(|v| value_to_vec_u8(v, "0x01"))
-            .ok_or(WebauthnCError::MissingRequiredField)?;
+            .ok_or(WebauthnCError::MissingRequiredField)?
+            .try_into()
+            // TODO: better error
+            .map_err(|_| WebauthnCError::InvalidAlgorithm)?;
 
         let known_domains_count = raw
             .remove(&2)
@@ -156,8 +165,8 @@ impl TryFrom<BTreeMap<u32, Value>> for HandshakeV2 {
             .unwrap_or_default();
 
         Ok(Self {
-            public_key,
-            qr_key,
+            peer_identity: public_key,
+            secret: qr_key,
             known_domains_count,
             timestamp,
             supports_linking_info,
@@ -175,7 +184,7 @@ fn compress_public_key(key: &EcKeyRef<Public>) -> Result<Vec<u8>, WebauthnCError
         .to_bytes(&group, PointConversionForm::COMPRESSED, &mut ctx)?)
 }
 
-fn decompress_public_key(bytes: &[u8]) -> Result<EcKey<Public>, WebauthnCError> {
+fn decompress_public_key(bytes: [u8; 33]) -> Result<EcKey<Public>, WebauthnCError> {
     let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
     let mut ctx = BigNumContext::new()?;
     let point = EcPoint::from_bytes(&group, &bytes, &mut ctx)?;
@@ -185,6 +194,19 @@ fn decompress_public_key(bytes: &[u8]) -> Result<EcKey<Public>, WebauthnCError> 
 const URL_PREFIX: &str = "FIDO:/";
 
 impl HandshakeV2 {
+    pub fn new(request_type: CableRequestType, public_key: EcKey<Public>, qr_key: [u8; 16]) -> Result<Self, WebauthnCError> {
+        Ok(Self {
+            peer_identity: public_key,
+            secret: qr_key,
+            // TODO: set to the real number
+            known_domains_count: 2,
+            timestamp: SystemTime::now(),
+            supports_linking_info: false,
+            request_type,
+            supports_non_discoverable_make_credential: false,
+        })
+    }
+
     /// Encodes a [HandshakeV2] into a `FIDO:/` QR code.
     pub fn to_qr_url(&self) -> Result<String, WebauthnCError> {
         let payload: Vec<u8> = serde_cbor::to_vec(self).map_err(|_| WebauthnCError::Cbor)?;
@@ -212,8 +234,8 @@ mod test {
     use super::*;
     #[test]
     fn invalid_urls() {
-        use WebauthnCError::*;
         use base10::DecodeError::*;
+        use WebauthnCError::*;
         const URLS: [(&str, WebauthnCError); 7] = [
             ("http://example.com", InvalidCableUrl),
             ("fido:/", InvalidCableUrl),
@@ -241,4 +263,24 @@ mod test {
         let e = h.to_qr_url().unwrap();
         assert_eq!(e.as_str(), u);
     }
+    // #[test]
+    // fn new() {
+    //     use qrcode::render::unicode;
+    //     let k = HandshakeV2::new(CableRequestType::DiscoverableMakeCredential).unwrap();
+    //     println!("handshake: {:?}", k);
+    //     let url = k.to_qr_url().unwrap();
+    //     println!("url: {}", url);
+    //     let qr = qrcode::QrCode::new(url).unwrap();
+
+    //     let code = qr
+    //         .render::<unicode::Dense1x2>()
+    //         .dark_color(unicode::Dense1x2::Light)
+    //         .light_color(unicode::Dense1x2::Dark)
+    //         .build();
+    //     println!("{}", code);
+
+    //     // FIDO:/4787604395760042106536043794938323598327797147779146960611161750662522396426829068078002995108866343660518517380208956200713956672233682060445840162168341668112901
+    //     // ServiceDataAdvertisement: PeripheralId(xxxx), {0000fff9-0000-1000-8000-00805f9b34fb: [30, 138, 234, 166, 182, 229, 66, 202, 62, 60, 202, 84, 115, 151, 207, 203, 17, 168, 61, 116]}
+
+    // }
 }
