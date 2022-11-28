@@ -43,6 +43,9 @@ pub mod transport;
 pub mod ui;
 mod util;
 
+// TODO: feature
+pub mod cable;
+
 #[cfg(feature = "nfc")]
 pub mod nfc;
 
