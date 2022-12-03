@@ -35,6 +35,18 @@ pub trait Transport<'b>: Sized + fmt::Debug + Send {
             .filter_map(|token| block_on(CtapAuthenticator::new(token, ui)))
             .collect())
     }
+
+    fn connect_one<'a, U: UiCallback>(
+        &mut self,
+        ui: &'a U,
+    ) -> Result<CtapAuthenticator<'a, Self::Token, U>, WebauthnCError> {
+        self
+            .tokens()?
+            .drain(..)
+            .filter_map(|token| block_on(CtapAuthenticator::new(token, ui)))
+            .next()
+            .ok_or(WebauthnCError::NoSelectedToken)
+    }
 }
 
 /// Represents a connection to a single FIDO token over a [Transport].

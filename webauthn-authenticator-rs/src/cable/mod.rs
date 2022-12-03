@@ -5,6 +5,7 @@
 //! [crcable]: https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/
 
 mod base10;
+mod btle;
 mod handshake;
 mod tunnel;
 
@@ -22,7 +23,7 @@ use openssl::{
     sign::Signer,
 };
 
-use self::handshake::*;
+use self::{handshake::*, btle::*};
 use crate::{
     ctap2::{decrypt, encrypt, hkdf_sha_256, regenerate},
     error::WebauthnCError,
@@ -233,10 +234,29 @@ impl Discovery {
     pub(self) fn get_private_key_for_testing(&self) -> Result<Vec<u8>, WebauthnCError> {
         Ok(self.local_identity.private_key_to_pem()?)
     }
+
+    pub async fn wait_for_matching_response(&self, scanner: &Scanner) -> Result<Option<Eid>, WebauthnCError> {
+        let mut rx = scanner.scan().await?;
+        while let Some(a) = rx.recv().await {
+            trace!("advert: {:?}", a);
+            if a.len() != size_of::<BleAdvert>() {
+                continue;
+            }
+            let mut advert: BleAdvert = [0; size_of::<BleAdvert>()];
+            advert.copy_from_slice(a.as_ref());
+            if let Some(eid) = self.decrypt_advert(advert)? {
+                return Ok(Some(Eid::from_bytes(eid)))
+            }
+        }
+
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
 mod test {
+    use futures::executor::block_on;
+
     use super::*;
 
     #[test]
@@ -268,28 +288,36 @@ mod test {
         assert!(decrypted.is_none());
     }
 
+    #[tokio::test]
     // #[test]
-    // fn new() {
-    //     let _ = tracing_subscriber::fmt::try_init();
-    //     let disco = Discovery::new(CableRequestType::DiscoverableMakeCredential).unwrap();
-    //     trace!(?disco);
-    //     let private_key = String::from_utf8(disco.get_private_key_for_testing().unwrap()).unwrap();
-    //     trace!("private key:\n{}", private_key);
+    async fn new() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let disco = Discovery::new(CableRequestType::DiscoverableMakeCredential).unwrap();
+        trace!(?disco);
+        let private_key = String::from_utf8(disco.get_private_key_for_testing().unwrap()).unwrap();
+        trace!("private key:\n{}", private_key);
 
-    //     let handshake = disco.make_handshake().unwrap();
-    //     trace!(?handshake);
+        let handshake = disco.make_handshake().unwrap();
+        trace!(?handshake);
 
-    //     let url = handshake.to_qr_url().unwrap();
-    //     trace!(?url);
-    //     let qr = qrcode::QrCode::new(url).unwrap();
+        let url = handshake.to_qr_url().unwrap();
+        trace!(?url);
+        let qr = qrcode::QrCode::new(url).unwrap();
 
-    //     let code = qr
-    //         .render::<qrcode::render::unicode::Dense1x2>()
-    //         .dark_color(qrcode::render::unicode::Dense1x2::Light)
-    //         .light_color(qrcode::render::unicode::Dense1x2::Dark)
-    //         .build();
-    //     trace!("\n{}", code);
-    // }
+        let code = qr
+            .render::<qrcode::render::unicode::Dense1x2>()
+            .dark_color(qrcode::render::unicode::Dense1x2::Light)
+            .light_color(qrcode::render::unicode::Dense1x2::Dark)
+            .build();
+        trace!("\n{}", code);
+
+        trace!("Opening BTLE");
+        let scanner = Scanner::new().await.unwrap();
+        trace!("Waiting for beacon...");
+        let r = disco.wait_for_matching_response(&scanner).await;
+        trace!(?r);
+
+    }
 
     #[test]
     fn decrypt_known() {

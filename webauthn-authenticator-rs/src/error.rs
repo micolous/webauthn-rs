@@ -55,6 +55,7 @@ pub enum WebauthnCError {
     StorageCard,
     InvalidCableUrl,
     Base10(crate::cable::DecodeError),
+    BluetoothError(String),
 }
 
 #[cfg(feature = "nfc")]
@@ -96,6 +97,12 @@ impl From<openssl::error::ErrorStack> for WebauthnCError {
 impl From<crate::cable::DecodeError> for WebauthnCError {
     fn from(v: crate::cable::DecodeError) -> Self {
         Self::Base10(v)
+    }
+}
+
+impl From<btleplug::Error> for WebauthnCError {
+    fn from(v: btleplug::Error) -> Self {
+        Self::BluetoothError(v.to_string())
     }
 }
 
