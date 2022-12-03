@@ -37,6 +37,7 @@ type QrSecret = [u8; 16];
 type EidKey = [u8; 32 + 32];
 type CableEid = [u8; 16];
 
+#[derive(Debug)]
 pub struct Discovery {
     request_type: CableRequestType,
     local_identity: EcKey<Private>,
@@ -104,8 +105,8 @@ impl Eid {
 }
 
 fn derive(
-    salt: &[u8],
     ikm: &[u8],
+    salt: &[u8],
     typ: DerivedValueType,
     output: &mut [u8],
 ) -> Result<(), WebauthnCError> {
@@ -151,7 +152,10 @@ fn decrypt_advert(advert: BleAdvert, key: &EidKey) -> Result<Option<CableEid>, W
 
             Some(plaintext)
         }
-        None => None,
+        None => {
+            warn!("decrypt fail");
+            None
+        }
     })
 }
 
@@ -217,6 +221,18 @@ impl Discovery {
     pub fn encrypt_advert(&self, eid: CableEid) -> Result<BleAdvert, WebauthnCError> {
         encrypt_advert(eid, &self.eid_key)
     }
+
+    pub fn make_handshake(&self) -> Result<HandshakeV2, WebauthnCError> {
+        let public_key = EcKey::from_public_key(
+            self.local_identity.group(),
+            self.local_identity.public_key(),
+        )?;
+        HandshakeV2::new(self.request_type, public_key, self.qr_secret)
+    }
+
+    pub(self) fn get_private_key_for_testing(&self) -> Result<Vec<u8>, WebauthnCError> {
+        Ok(self.local_identity.private_key_to_pem()?)
+    }
 }
 
 #[cfg(test)]
@@ -225,7 +241,7 @@ mod test {
 
     #[test]
     fn encrypt_decrypt() {
-        tracing_subscriber::fmt::init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let d = Discovery::new(CableRequestType::MakeCredential).unwrap();
         let c = Eid {
@@ -250,5 +266,87 @@ mod test {
         advert[0] ^= 1;
         let decrypted = d.decrypt_advert(advert).unwrap();
         assert!(decrypted.is_none());
+    }
+
+    // #[test]
+    // fn new() {
+    //     let _ = tracing_subscriber::fmt::try_init();
+    //     let disco = Discovery::new(CableRequestType::DiscoverableMakeCredential).unwrap();
+    //     trace!(?disco);
+    //     let private_key = String::from_utf8(disco.get_private_key_for_testing().unwrap()).unwrap();
+    //     trace!("private key:\n{}", private_key);
+
+    //     let handshake = disco.make_handshake().unwrap();
+    //     trace!(?handshake);
+
+    //     let url = handshake.to_qr_url().unwrap();
+    //     trace!(?url);
+    //     let qr = qrcode::QrCode::new(url).unwrap();
+
+    //     let code = qr
+    //         .render::<qrcode::render::unicode::Dense1x2>()
+    //         .dark_color(qrcode::render::unicode::Dense1x2::Light)
+    //         .light_color(qrcode::render::unicode::Dense1x2::Dark)
+    //         .build();
+    //     trace!("\n{}", code);
+    // }
+
+    #[test]
+    fn decrypt_known() {
+        let _ = tracing_subscriber::fmt::try_init();
+        // let test_key = [
+        //     45, 45, 45, 45, 45, 66, 69, 71, 73, 78, 32, 69, 67, 32, 80, 82, 73, 86, 65, 84, 69, 32,
+        //     75, 69, 89, 45, 45, 45, 45, 45, 10, 77, 72, 99, 67, 65, 81, 69, 69, 73, 80, 114, 54,
+        //     76, 105, 83, 120, 81, 73, 82, 55, 69, 51, 72, 81, 90, 98, 78, 114, 57, 80, 78, 66, 114,
+        //     105, 50, 110, 56, 83, 66, 99, 89, 67, 65, 73, 56, 89, 69, 89, 57, 85, 113, 68, 111, 65,
+        //     111, 71, 67, 67, 113, 71, 83, 77, 52, 57, 10, 65, 119, 69, 72, 111, 85, 81, 68, 81,
+        //     103, 65, 69, 90, 68, 103, 112, 55, 66, 76, 82, 82, 47, 79, 100, 116, 89, 104, 118, 83,
+        //     43, 109, 88, 65, 51, 82, 87, 121, 51, 85, 65, 86, 112, 48, 49, 115, 52, 73, 111, 83,
+        //     78, 56, 47, 65, 114, 68, 77, 57, 56, 73, 88, 57, 104, 88, 102, 10, 70, 116, 47, 119,
+        //     65, 109, 68, 79, 119, 78, 78, 55, 66, 100, 84, 57, 84, 48, 86, 109, 110, 70, 73, 99,
+        //     55, 84, 49, 116, 106, 97, 105, 84, 68, 103, 61, 61, 10, 45, 45, 45, 45, 45, 69, 78, 68,
+        //     32, 69, 67, 32, 80, 82, 73, 86, 65, 84, 69, 32, 75, 69, 89, 45, 45, 45, 45, 45, 10,
+        // ];
+        // Discovery { request_type: DiscoverableMakeCredential, local_identity: EcKey,
+        //  qr_secret: [1, 254, 166, 247, 196, 128, 116, 147, 220, 37, 111, 158, 172, 247, 86, 201],
+        //  eid_key: [71, 198, 63, 179, 47, 46, 248, 209, 45, 152, 14, 113, 249, 195, 83, 240, 190, 43, 150, 219, 184, 209, 141, 199, 120, 65, 118, 178, 1, 231, 76, 120, 59, 145, 227, 9, 254, 71, 60, 47, 0, 15, 75, 80, 23, 69, 155, 106, 127, 123, 2, 165, 97, 86, 51, 86, 70, 70, 198, 20, 167, 240, 247, 240]
+        // }
+        // Private key: [45, 45, 45, 45, 45, 66, 69, 71, 73, 78, 32, 69, 67, 32, 80, 82, 73, 86, 65, 84, 69, 32, 75, 69, 89, 45, 45, 45, 45, 45, 10, 77, 72, 99, 67, 65, 81, 69, 69, 73, 80, 114, 54, 76, 105, 83, 120, 81, 73, 82, 55, 69, 51, 72, 81, 90, 98, 78, 114, 57, 80, 78, 66, 114, 105, 50, 110, 56, 83, 66, 99, 89, 67, 65, 73, 56, 89, 69, 89, 57, 85, 113, 68, 111, 65, 111, 71, 67, 67, 113, 71, 83, 77, 52, 57, 10, 65, 119, 69, 72, 111, 85, 81, 68, 81, 103, 65, 69, 90, 68, 103, 112, 55, 66, 76, 82, 82, 47, 79, 100, 116, 89, 104, 118, 83, 43, 109, 88, 65, 51, 82, 87, 121, 51, 85, 65, 86, 112, 48, 49, 115, 52, 73, 111, 83, 78, 56, 47, 65, 114, 68, 77, 57, 56, 73, 88, 57, 104, 88, 102, 10, 70, 116, 47, 119, 65, 109, 68, 79, 119, 78, 78, 55, 66, 100, 84, 57, 84, 48, 86, 109, 110, 70, 73, 99, 55, 84, 49, 116, 106, 97, 105, 84, 68, 103, 61, 61, 10, 45, 45, 45, 45, 45, 69, 78, 68, 32, 69, 67, 32, 80, 82, 73, 86, 65, 84, 69, 32, 75, 69, 89, 45, 45, 45, 45, 45, 10]
+        // Handshake: HandshakeV2 { peer_identity: EcKey, secret: [1, 254, 166, 247, 196, 128, 116, 147, 220, 37, 111, 158, 172, 247, 86, 201], known_domains_count: 2, timestamp: SystemTime { intervals: 133145064076516439 }, supports_linking_info: false, request_type: DiscoverableMakeCredential, supports_non_discoverable_make_credential: false }
+        // URL: FIDO:/1587255900792438944459061119478825010114531789068054428613131982194017978424543064885470041277246791701065710001119359100784325313076847471971309904207381668112901
+        // {0000fff9-0000-1000-8000-00805f9b34fb: [2, 125, 132, 237, 96, 118, 181, 94, 36, 124, 131, 15, 130, 149, 94, 77, 18, 110, 127, 67]}
+
+        let advert = [
+            2, 125, 132, 237, 96, 118, 181, 94, 36, 124, 131, 15, 130, 149, 94, 77, 18, 110, 127,
+            67,
+        ];
+        let qr_secret = [
+            1, 254, 166, 247, 196, 128, 116, 147, 220, 37, 111, 158, 172, 247, 86, 201,
+        ];
+        let mut eid_key: EidKey = [0; size_of::<EidKey>()];
+        derive(&qr_secret, &[], DerivedValueType::EIDKey, &mut eid_key).unwrap();
+        trace!("eid_key = {:?}", eid_key);
+
+        // TODO: didn't doesn't decrypt; probably doing eid_key derivation wrong
+        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=242;drc=f7385067f48da7ba86322cbd4eea3631037222fc
+        // states:
+        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/fido_tunnel_device.h;l=79;drc=f7385067f48da7ba86322cbd4eea3631037222fc
+        // matching advert:
+        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/fido_tunnel_device.cc;l=200-223;drc=f7385067f48da7ba86322cbd4eea3631037222fc
+        // eid key:
+        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/fido_tunnel_device.cc;l=162;drc=f7385067f48da7ba86322cbd4eea3631037222fc
+        // ah, salt and key (ikm) were swapped!
+        let r = decrypt_advert(advert, &eid_key).unwrap();
+        trace!("decrypted: {:?}", r);
+        let r = r.unwrap();
+        let r = Eid::from_bytes(r);
+        trace!("eid: {:?}", r);
+
+        let expected = Eid {
+            tunnel_server_id: 0,
+            routing_id: [2, 101, 85],
+            nonce: [139, 181, 197, 201, 164, 77, 145, 58, 94, 178],
+        };
+        assert_eq!(expected, r);
     }
 }
