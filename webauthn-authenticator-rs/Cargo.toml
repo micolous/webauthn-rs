@@ -52,8 +52,10 @@ futures = "0.3.25"
 qrcode = "^0.12.0"
 btleplug = "0.10.4"
 tokio = { version = "1.22.0", features = ["sync", "test-util", "macros"] }
+base64 = "0.13"
+tokio-tungstenite = { version = "0.18.0", features = ["native-tls"] }
+hex = "0.4.3"
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter", "std", "fmt"] }
-base64 = "0.13"
 clap = { version = "^3.2", features = ["derive", "env"] }

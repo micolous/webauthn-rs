@@ -12,6 +12,7 @@ mod tunnel;
 use std::mem::size_of;
 
 pub use base10::DecodeError;
+use nom::HexDisplay;
 use num_traits::ToPrimitive;
 use openssl::{
     bn::{BigNum, BigNumContext},
@@ -22,8 +23,10 @@ use openssl::{
     rand::rand_bytes,
     sign::Signer,
 };
+use tokio_tungstenite::tungstenite::http::Uri;
+use url::Url;
 
-use self::{handshake::*, btle::*};
+use self::{btle::*, handshake::*, tunnel::get_domain};
 use crate::{
     ctap2::{decrypt, encrypt, hkdf_sha_256, regenerate},
     error::WebauthnCError,
@@ -37,6 +40,8 @@ type QrSecret = [u8; 16];
 // type QrKey = [u8; size_of::<QrSecret>() + size_of::<QrSeed>()];
 type EidKey = [u8; 32 + 32];
 type CableEid = [u8; 16];
+type TunnelId = [u8; 16];
+const BASE64URL: base64::Config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
 
 #[derive(Debug)]
 pub struct Discovery {
@@ -102,6 +107,37 @@ impl Eid {
             routing_id,
             tunnel_server_id,
         }
+    }
+
+    fn get_domain(&self) -> Option<String> {
+        get_domain(self.tunnel_server_id)
+    }
+
+    pub fn get_connect_url(&self, tunnel_id: TunnelId) -> Option<Uri> {
+        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=179;drc=de9f16dcca1d5057ba55973fa85a5b27423d414f
+        self.get_domain().and_then(|domain| {
+            let routing_id = hex::encode_upper(&self.routing_id);
+            let tunnel_id = hex::encode_upper(tunnel_id);
+
+            Uri::builder()
+                .scheme("wss")
+                .authority(domain)
+                .path_and_query(format!("/cable/connect/{}/{}", routing_id, tunnel_id))
+                .build()
+                .ok()
+        })
+    }
+
+    pub fn get_contact_url(&self) -> Option<Uri> {
+        self.get_domain().and_then(|domain| {
+            let routing_id = base64::encode_config(&self.routing_id, BASE64URL);
+            Uri::builder()
+                .scheme("wss")
+                .authority(domain)
+                .path_and_query(format!("/cable/contact/{}", routing_id))
+                .build()
+                .ok()
+        })
     }
 }
 
@@ -235,7 +271,10 @@ impl Discovery {
         Ok(self.local_identity.private_key_to_pem()?)
     }
 
-    pub async fn wait_for_matching_response(&self, scanner: &Scanner) -> Result<Option<Eid>, WebauthnCError> {
+    pub async fn wait_for_matching_response(
+        &self,
+        scanner: &Scanner,
+    ) -> Result<Option<Eid>, WebauthnCError> {
         let mut rx = scanner.scan().await?;
         while let Some(a) = rx.recv().await {
             trace!("advert: {:?}", a);
@@ -245,7 +284,7 @@ impl Discovery {
             let mut advert: BleAdvert = [0; size_of::<BleAdvert>()];
             advert.copy_from_slice(a.as_ref());
             if let Some(eid) = self.decrypt_advert(advert)? {
-                return Ok(Some(Eid::from_bytes(eid)))
+                return Ok(Some(Eid::from_bytes(eid)));
             }
         }
 
@@ -256,6 +295,8 @@ impl Discovery {
 #[cfg(test)]
 mod test {
     use futures::executor::block_on;
+
+    use crate::cable::tunnel::Tunnel;
 
     use super::*;
 
@@ -289,7 +330,6 @@ mod test {
     }
 
     #[tokio::test]
-    // #[test]
     async fn new() {
         let _ = tracing_subscriber::fmt::try_init();
         let disco = Discovery::new(CableRequestType::DiscoverableMakeCredential).unwrap();
@@ -314,9 +354,19 @@ mod test {
         trace!("Opening BTLE");
         let scanner = Scanner::new().await.unwrap();
         trace!("Waiting for beacon...");
-        let r = disco.wait_for_matching_response(&scanner).await;
+        let r = disco
+            .wait_for_matching_response(&scanner)
+            .await
+            .unwrap()
+            .unwrap();
         trace!(?r);
 
+        let mut tunnel_id: TunnelId = [0; size_of::<TunnelId>()];
+        derive(&disco.qr_secret, &[], DerivedValueType::TunnelID, &mut tunnel_id).unwrap();
+        let connect_url = r.get_connect_url(tunnel_id).unwrap();
+        trace!(?connect_url);
+
+        let tun = Tunnel::connect(&connect_url).await.unwrap();
     }
 
     #[test]
@@ -376,57 +426,58 @@ mod test {
             nonce: [139, 181, 197, 201, 164, 77, 145, 58, 94, 178],
         };
         assert_eq!(expected, r);
+        trace!("url: {:?}", r.get_contact_url());
     }
 
     /*
-Apple:
-TRACE webauthn_authenticator_rs::cable::test: disco=Discovery { request_type: DiscoverableMakeCredential, local_identity: EcKey, qr_secret: [2, 164, 38, 70, 252, 116, 18, 55, 28, 11, 186, 14, 82, 68, 97, 181], eid_key: [48, 110, 164, 59, 84, 219, 104, 197, 65, 215, 206, 40, 249, 91, 45, 83, 58, 54, 61, 136, 206, 139, 231, 105, 189, 12, 211, 190, 63, 173, 17, 227, 144, 28, 61, 153, 255, 224, 214, 143, 233, 185, 225, 207, 140, 217, 239, 164, 53, 205, 254, 207, 114, 20, 130, 255, 78, 3, 69, 97, 82, 90, 94, 180] }
-TRACE webauthn_authenticator_rs::cable::test: private key:
------BEGIN EC PRIVATE KEY-----
-MHcCAQEEIGuC17W0YFDQsBzJEPJT6WAx9VUB4wofABtikTPbny3WoAoGCCqGSM49
-AwEHoUQDQgAEG/uQgbosFbITdGzc6hMI3XYa7p//a9lyucfAcIr4Vg8sZ9niz2Z2
-dviW2pxCfxI7M/CVPXQx23Y6zQVbisjBaQ==
------END EC PRIVATE KEY-----
+    Apple:
+    TRACE webauthn_authenticator_rs::cable::test: disco=Discovery { request_type: DiscoverableMakeCredential, local_identity: EcKey, qr_secret: [2, 164, 38, 70, 252, 116, 18, 55, 28, 11, 186, 14, 82, 68, 97, 181], eid_key: [48, 110, 164, 59, 84, 219, 104, 197, 65, 215, 206, 40, 249, 91, 45, 83, 58, 54, 61, 136, 206, 139, 231, 105, 189, 12, 211, 190, 63, 173, 17, 227, 144, 28, 61, 153, 255, 224, 214, 143, 233, 185, 225, 207, 140, 217, 239, 164, 53, 205, 254, 207, 114, 20, 130, 255, 78, 3, 69, 97, 82, 90, 94, 180] }
+    TRACE webauthn_authenticator_rs::cable::test: private key:
+    -----BEGIN EC PRIVATE KEY-----
+    MHcCAQEEIGuC17W0YFDQsBzJEPJT6WAx9VUB4wofABtikTPbny3WoAoGCCqGSM49
+    AwEHoUQDQgAEG/uQgbosFbITdGzc6hMI3XYa7p//a9lyucfAcIr4Vg8sZ9niz2Z2
+    dviW2pxCfxI7M/CVPXQx23Y6zQVbisjBaQ==
+    -----END EC PRIVATE KEY-----
 
-TRACE webauthn_authenticator_rs::cable::test: handshake=HandshakeV2 { peer_identity: EcKey, secret: [2, 164, 38, 70, 252, 116, 18, 55, 28, 11, 186, 14, 82, 68, 97, 181], known_domains_count: 2, timestamp: SystemTime { tv_sec: 1670053563, tv_nsec: 523972000 }, supports_linking_info: false, request_type: DiscoverableMakeCredential, supports_non_discoverable_make_credential: false }
-TRACE webauthn_authenticator_rs::cable::test: url="FIDO:/7067991941264195705543828571980176622148514907700366119881559022655069958011099527538108763789541415260312724760225287000762379316104890529156909664837141668112901"
-TRACE webauthn_authenticator_rs::cable::test: 
-█████████████████████████████████████████████
-█████████████████████████████████████████████
-████ ▄▄▄▄▄ █▄▄ ▄▄ ▄▀▄ ▀▄ ▀█  ▀▀ ██ ▄▄▄▄▄ ████
-████ █   █ █▄█▄ ██▀▀▄▀▀▄ ▄█▄▄█ ▀▀█ █   █ ████
-████ █▄▄▄█ █▀█  ▀▄▀▄▀▀  ▄▀ ▀ ▀▀█▀█ █▄▄▄█ ████
-████▄▄▄▄▄▄▄█▄▀ ▀▄█ ▀ ▀▄█▄█▄▀ ▀▄█▄█▄▄▄▄▄▄▄████
-████▄▀▄█▀▀▄ ▀ ▄▄█ ▀██ █▄ █  ▀▄▄█▄▀▀ ██ █▄████
-████▄▄▀▀▀▀▄ ▄█   █▄▄█▀ ▀ █▄▀▄██ █  ▄▄█▀██████
-████▄▀ ▄▄▄▄▄▀ █▀█▄ ▄ ████ ▄ █ █ ▄▄▄▀▀███ ████
-████▀█▄█▀▀▄█▀ ▀ ▀▄███▄ ███ ▄▀███▄▀ █▄▀▀▀█████
-█████▀ ██▀▄▄███ █▄▀▄ ▄ ▄▄▀▄ █▀███▄▄█▄█▀▀▄████
-█████▄ ▀▄█▄▄█ ██▄█▄▀ ▀ ▄█▄ ▀ ▄█▄ ▄█▀ ▄█▀ ████
-████ █▀▄ ▀▄▀ █▀▀▀▄▀▀▀ █  ▀▄▀███▀▄▀ █▀▄▀▄█████
-████▀▀▄▀▄█▄▀█▄ ▄▀▄▄▀▄▀█▀█ ▄█▀█▄▀█ ▄▄▄▀ █▀████
-████▄▄█▀██▄ █ ▀ ▄█▄▄█ █▀▄█▄▄ █▀ ██ ▀█▄▄█ ████
-████▄▄▀ ▀▄▄▀▄██ ▀▄▄▄█▄▄ ▄██  ▄▄▀▄█▀▄▄▀█  ████
-████▄▄█▄▄▄▄█ ▀█ █▀   ▄█▄██ ▀█ █▄ ▄▄▄  █  ████
-████ ▄▄▄▄▄ █▄  █ ▄▀▀ ▄ █▄▀█  █▄▀ █▄█ ▄ ▄▀████
-████ █   █ ██▀ ██▄██ ▄ ▄▀ █▄ ▄██▄ ▄  ▄█▄█████
-████ █▄▄▄█ █▄ █▄▄ ▄▀ ▀█▀▄█▀ █▀█▄█▄▀ ▀  ▄ ████
-████▄▄▄▄▄▄▄█▄███▄████▄█████▄█▄▄█▄▄▄▄▄▄█▄▄████
-█████████████████████████████████████████████
-▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-TRACE webauthn_authenticator_rs::cable::test: Opening BTLE
-TRACE webauthn_authenticator_rs::cable::test: Waiting for beacon...
-TRACE btleplug::corebluetooth::internal: Authorization status AllowedAlways    
-DEBUG btleplug::corebluetooth::adapter: Waiting on adapter connect    
-TRACE btleplug::corebluetooth::central_delegate::CentralDelegate: delegate_class    
-TRACE btleplug::corebluetooth::central_delegate::CentralDelegate: delegate_init    
-TRACE btleplug::corebluetooth::central_delegate::CentralDelegate: Storing off ivars!    
-TRACE btleplug::corebluetooth::central_delegate::CentralDelegate: delegate_centralmanagerdidupdatestate    
-DEBUG btleplug::corebluetooth::adapter: Adapter connected    
-TRACE btleplug::corebluetooth::internal: Adapter message!    
-TRACE btleplug::corebluetooth::internal: BluetoothAdapter::start_discovery    
-TRACE btleplug::corebluetooth::internal: Got service data advertisement! {0000fde2-0000-1000-8000-00805f9b34fb: [177, 140, 190, 144, 131, 154, 165, 118, 246, 215, 118, 5, 40, 147, 26, 30, 54, 95, 85, 34]}    
-TRACE webauthn_authenticator_rs::cable: advert: [177, 140, 190, 144, 131, 154, 165, 118, 246, 215, 118, 5, 40, 147, 26, 30, 54, 95, 85, 34]
-TRACE webauthn_authenticator_rs::cable::test: r=Ok(Some(Eid { tunnel_server_id: 1, routing_id: [77, 228, 203], nonce: [120, 156, 18, 36, 92, 175, 175, 136, 191, 84] }))
-     */
+    TRACE webauthn_authenticator_rs::cable::test: handshake=HandshakeV2 { peer_identity: EcKey, secret: [2, 164, 38, 70, 252, 116, 18, 55, 28, 11, 186, 14, 82, 68, 97, 181], known_domains_count: 2, timestamp: SystemTime { tv_sec: 1670053563, tv_nsec: 523972000 }, supports_linking_info: false, request_type: DiscoverableMakeCredential, supports_non_discoverable_make_credential: false }
+    TRACE webauthn_authenticator_rs::cable::test: url="FIDO:/7067991941264195705543828571980176622148514907700366119881559022655069958011099527538108763789541415260312724760225287000762379316104890529156909664837141668112901"
+    TRACE webauthn_authenticator_rs::cable::test:
+    █████████████████████████████████████████████
+    █████████████████████████████████████████████
+    ████ ▄▄▄▄▄ █▄▄ ▄▄ ▄▀▄ ▀▄ ▀█  ▀▀ ██ ▄▄▄▄▄ ████
+    ████ █   █ █▄█▄ ██▀▀▄▀▀▄ ▄█▄▄█ ▀▀█ █   █ ████
+    ████ █▄▄▄█ █▀█  ▀▄▀▄▀▀  ▄▀ ▀ ▀▀█▀█ █▄▄▄█ ████
+    ████▄▄▄▄▄▄▄█▄▀ ▀▄█ ▀ ▀▄█▄█▄▀ ▀▄█▄█▄▄▄▄▄▄▄████
+    ████▄▀▄█▀▀▄ ▀ ▄▄█ ▀██ █▄ █  ▀▄▄█▄▀▀ ██ █▄████
+    ████▄▄▀▀▀▀▄ ▄█   █▄▄█▀ ▀ █▄▀▄██ █  ▄▄█▀██████
+    ████▄▀ ▄▄▄▄▄▀ █▀█▄ ▄ ████ ▄ █ █ ▄▄▄▀▀███ ████
+    ████▀█▄█▀▀▄█▀ ▀ ▀▄███▄ ███ ▄▀███▄▀ █▄▀▀▀█████
+    █████▀ ██▀▄▄███ █▄▀▄ ▄ ▄▄▀▄ █▀███▄▄█▄█▀▀▄████
+    █████▄ ▀▄█▄▄█ ██▄█▄▀ ▀ ▄█▄ ▀ ▄█▄ ▄█▀ ▄█▀ ████
+    ████ █▀▄ ▀▄▀ █▀▀▀▄▀▀▀ █  ▀▄▀███▀▄▀ █▀▄▀▄█████
+    ████▀▀▄▀▄█▄▀█▄ ▄▀▄▄▀▄▀█▀█ ▄█▀█▄▀█ ▄▄▄▀ █▀████
+    ████▄▄█▀██▄ █ ▀ ▄█▄▄█ █▀▄█▄▄ █▀ ██ ▀█▄▄█ ████
+    ████▄▄▀ ▀▄▄▀▄██ ▀▄▄▄█▄▄ ▄██  ▄▄▀▄█▀▄▄▀█  ████
+    ████▄▄█▄▄▄▄█ ▀█ █▀   ▄█▄██ ▀█ █▄ ▄▄▄  █  ████
+    ████ ▄▄▄▄▄ █▄  █ ▄▀▀ ▄ █▄▀█  █▄▀ █▄█ ▄ ▄▀████
+    ████ █   █ ██▀ ██▄██ ▄ ▄▀ █▄ ▄██▄ ▄  ▄█▄█████
+    ████ █▄▄▄█ █▄ █▄▄ ▄▀ ▀█▀▄█▀ █▀█▄█▄▀ ▀  ▄ ████
+    ████▄▄▄▄▄▄▄█▄███▄████▄█████▄█▄▄█▄▄▄▄▄▄█▄▄████
+    █████████████████████████████████████████████
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+    TRACE webauthn_authenticator_rs::cable::test: Opening BTLE
+    TRACE webauthn_authenticator_rs::cable::test: Waiting for beacon...
+    TRACE btleplug::corebluetooth::internal: Authorization status AllowedAlways
+    DEBUG btleplug::corebluetooth::adapter: Waiting on adapter connect
+    TRACE btleplug::corebluetooth::central_delegate::CentralDelegate: delegate_class
+    TRACE btleplug::corebluetooth::central_delegate::CentralDelegate: delegate_init
+    TRACE btleplug::corebluetooth::central_delegate::CentralDelegate: Storing off ivars!
+    TRACE btleplug::corebluetooth::central_delegate::CentralDelegate: delegate_centralmanagerdidupdatestate
+    DEBUG btleplug::corebluetooth::adapter: Adapter connected
+    TRACE btleplug::corebluetooth::internal: Adapter message!
+    TRACE btleplug::corebluetooth::internal: BluetoothAdapter::start_discovery
+    TRACE btleplug::corebluetooth::internal: Got service data advertisement! {0000fde2-0000-1000-8000-00805f9b34fb: [177, 140, 190, 144, 131, 154, 165, 118, 246, 215, 118, 5, 40, 147, 26, 30, 54, 95, 85, 34]}
+    TRACE webauthn_authenticator_rs::cable: advert: [177, 140, 190, 144, 131, 154, 165, 118, 246, 215, 118, 5, 40, 147, 26, 30, 54, 95, 85, 34]
+    TRACE webauthn_authenticator_rs::cable::test: r=Ok(Some(Eid { tunnel_server_id: 1, routing_id: [77, 228, 203], nonce: [120, 156, 18, 36, 92, 175, 175, 136, 191, 84] }))
+         */
 }

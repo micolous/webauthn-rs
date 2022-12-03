@@ -229,6 +229,13 @@ impl HandshakeV2 {
     }
 }
 
+// https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/fido_tunnel_device.cc;l=152-159;drc=de9f16dcca1d5057ba55973fa85a5b27423d414f
+// #[derive(Serialize, Debug, Clone)]
+// #[serde(into = "BTreeMap<u32, Value>", try_from = "BTreeMap<u32, Value>")]
+// pub struct ClientPayload {
+
+// }
+
 #[cfg(test)]
 mod test {
     use super::*;

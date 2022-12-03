@@ -1,6 +1,8 @@
 //! Tunnel functions
 
-use crate::util::compute_sha256;
+use tokio_tungstenite::{connect_async, tungstenite::{http::{Request, Uri, HeaderValue}, client::IntoClientRequest}};
+
+use crate::{util::compute_sha256, prelude::WebauthnCError};
 
 /// Well-known domains.
 ///
@@ -45,6 +47,31 @@ pub fn get_domain(domain_id: u16) -> Option<String> {
     o.push_str(tld);
 
     Some(o)
+}
+
+pub struct Tunnel {
+}
+
+impl Tunnel {
+    pub async fn connect(uri: &Uri) -> Result<Self, WebauthnCError> {
+        let mut request = IntoClientRequest::into_client_request(uri).unwrap();
+
+        let headers = request.headers_mut();
+        headers.insert("Sec-WebSocket-Protocol", HeaderValue::from_static("fido.cable"));
+        let origin = format!("wss://{}", uri.host().unwrap_or_default());
+        headers.insert("Origin", HeaderValue::from_str(&origin).unwrap());
+
+        trace!(?request);
+        let (stream, response) = connect_async(request).await.map_err(|e| {
+            error!("websocket error: {:?}", e);
+            WebauthnCError::Internal
+        })?;
+        trace!(?response);
+
+        // TODO: build initial handshake message
+        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=880;drc=de9f16dcca1d5057ba55973fa85a5b27423d414f
+        todo!()
+    }
 }
 
 #[cfg(test)]

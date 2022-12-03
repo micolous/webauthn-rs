@@ -57,6 +57,7 @@ impl Scanner {
                 }
             }
 
+            adapter.stop_scan().await.ok();
         });
 
         Ok(rx)
