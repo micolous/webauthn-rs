@@ -7,11 +7,15 @@ use uuid::{uuid, Uuid};
 
 use crate::error::WebauthnCError;
 
+const GOOGLE_CABLE_SERVICE: Uuid = uuid!("0000fde2-0000-1000-8000-00805f9b34fb");
 const FIDO_CABLE_SERVICE: Uuid = uuid!("0000fff9-0000-1000-8000-00805f9b34fb");
 
 fn get_scan_filter() -> ScanFilter {
     ScanFilter {
-        services: vec![FIDO_CABLE_SERVICE],
+        services: vec![
+            FIDO_CABLE_SERVICE,
+            GOOGLE_CABLE_SERVICE,
+        ],
     }
 }
 
@@ -44,6 +48,12 @@ impl Scanner {
                             return;
                         }
                     }
+
+                    if let Some(d) = service_data.remove(&GOOGLE_CABLE_SERVICE) {
+                        if let Err(_) = tx.send(d).await {
+                            return;
+                        }
+                    }                    
                 }
             }
 
