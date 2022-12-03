@@ -115,19 +115,19 @@ impl TryFrom<BTreeMap<u32, Value>> for HandshakeV2 {
     type Error = WebauthnCError;
 
     fn try_from(mut raw: BTreeMap<u32, Value>) -> Result<Self, Self::Error> {
-        let public_key = raw
+        let peer_identity = raw
             .remove(&0)
             .and_then(|v| value_to_vec_u8(v, "0x00"))
             .ok_or(WebauthnCError::MissingRequiredField)?;
 
-        let public_key = decompress_public_key(
-            public_key
+        let peer_identity = decompress_public_key(
+            peer_identity
                 .try_into()
                 // TODO: better error
                 .map_err(|_| WebauthnCError::Internal)?,
         )?;
 
-        let qr_key = raw
+        let secret = raw
             .remove(&1)
             .and_then(|v| value_to_vec_u8(v, "0x01"))
             .ok_or(WebauthnCError::MissingRequiredField)?
@@ -165,8 +165,8 @@ impl TryFrom<BTreeMap<u32, Value>> for HandshakeV2 {
             .unwrap_or_default();
 
         Ok(Self {
-            peer_identity: public_key,
-            secret: qr_key,
+            peer_identity,
+            secret,
             known_domains_count,
             timestamp,
             supports_linking_info,
