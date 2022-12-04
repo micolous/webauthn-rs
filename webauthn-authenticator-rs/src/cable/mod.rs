@@ -59,6 +59,7 @@
 mod base10;
 mod btle;
 mod handshake;
+mod noise;
 mod tunnel;
 
 use std::mem::size_of;
@@ -93,6 +94,7 @@ type QrSecret = [u8; 16];
 type EidKey = [u8; 32 + 32];
 type CableEid = [u8; 16];
 type TunnelId = [u8; 16];
+type Psk = [u8; 32];
 const BASE64URL: base64::Config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
 
 #[derive(Debug)]
@@ -413,6 +415,7 @@ mod test {
             .unwrap();
         trace!(?r);
 
+        // TODO: move to library proper
         let mut tunnel_id: TunnelId = [0; size_of::<TunnelId>()];
         derive(
             &disco.qr_secret,
@@ -421,10 +424,19 @@ mod test {
             &mut tunnel_id,
         )
         .unwrap();
+        let mut psk: Psk = [0; size_of::<Psk>()];
+        derive(
+            &disco.qr_secret,
+            &r.to_bytes(),
+            DerivedValueType::PSK,
+            &mut psk,
+        ).unwrap();
+
         let connect_url = r.get_connect_url(tunnel_id).unwrap();
         trace!(?connect_url);
 
-        let tun = Tunnel::connect(&connect_url).await.unwrap();
+        let tun = Tunnel::connect(&connect_url, psk, &disco.local_identity.as_ref()).await.unwrap();
+        todo!()
     }
 
     #[test]
