@@ -2,7 +2,59 @@
 //!
 //! In absence of a publicly-published spec, this is based on [Chromium's implementation][crcable].
 //!
+//! ## Warning
+//!
+//! **This implementation is incomplete, and has not been reviewed from a
+//! cryptography standpoint.**
+//!
+//! **There is no publicly-published spec from this protocol, aside from
+//! Chromium's C++ implementation.**
+//!
+//! This implementation is a *very* rough port to "make things work" based on
+//! what Chromium does -- there will probably be errors compared to whatever
+//! the final spec is (FIDO v2.2?)
+//!
+//! There are two major versions of caBLE, and this only implements caBLE v2.
+//! There are also several minor versions of caBLE v2, which aren't fully
+//! explained (or implemented here).
+//!
+//! caBLE v1 is significantly different, and is not implemented here.
+//!
+//! This should work with Android devices with a current version of Google
+//! Play Services, and with iOS devices on a current version of iOS. The
+//! computer running this library will need a Bluetooth Low Energy adaptor.
+//!
+//! This does not implement the AOA (Android Open Accessory) Hybrid
+//! authenticator protocol.
+//!
+//! This does not implement "contact lists" ("remember this computer").
+//!
+//! ## Protocol overview
+//!
+//! The platform generates a CBOR message ([HandshakeV2]) containing a shared
+//! secret and some protocol version information. This gets encoded as
+//! [base10] and turned into a `FIDO:/` URL, and is then displayed as a QR
+//! code.
+//!
+//! The authenticator scans this QR code, and establishes a tunnel to a
+//! well-known WebSocket tunnel server of its choosing ([get_domain]). Once
+//! established, it then broadcasts an encrypted [Eid] message over Bluetooth
+//! Low Energy service advertisements to be discovered by the platform.
+//!
+//! The platform scans for BTLE advertisements and tries to decrypt them. On
+//! success, it can then find which tunnel server to connect to, and the
+//! tunnel ID.
+//!
+//! The platform and the authenticator then perform another handshake using the
+//! [Noise protocol]. Chromium doesn't seem to have a complete implementation
+//! of Noise, and its not yet clear whether that is different in some way.
+//!
+//! Then ???
+//!
+//! Then we can talk normal CTAP2 protocol? That's where I'm up to with this.
+//!
 //! [crcable]: https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/
+//! [Noise protocol]: http://noiseprotocol.org/noise.html
 
 mod base10;
 mod btle;
@@ -362,7 +414,13 @@ mod test {
         trace!(?r);
 
         let mut tunnel_id: TunnelId = [0; size_of::<TunnelId>()];
-        derive(&disco.qr_secret, &[], DerivedValueType::TunnelID, &mut tunnel_id).unwrap();
+        derive(
+            &disco.qr_secret,
+            &[],
+            DerivedValueType::TunnelID,
+            &mut tunnel_id,
+        )
+        .unwrap();
         let connect_url = r.get_connect_url(tunnel_id).unwrap();
         trace!(?connect_url);
 
