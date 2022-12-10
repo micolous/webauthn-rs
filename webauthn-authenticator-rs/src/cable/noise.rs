@@ -123,6 +123,14 @@ impl Dh for DhP256 {
     }
 
     fn dh(&self, pubkey: &[u8], out: &mut [u8]) -> Result<(), snow::Error> {
+        // Key derivation is whacky
+        // out = shared_key_ee, then shared_key_se
+        // Noise states pubkey and out are both DHLEN bytes:
+        // https://noiseprotocol.org/noise.html#dh-functions
+        // However caBLE wants pubkey = 65 bytes, out = 32 bytes
+        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=945-950;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
+
+        trace!("dh: pubkey({} bytes), out({} bytes)", pubkey.len(), out.len());
         // TODO: error handling
         let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
         let mut ctx = BigNumContext::new().unwrap();
@@ -135,7 +143,8 @@ impl Dh for DhP256 {
         ctx.derive_init().unwrap();
         ctx.derive_set_peer(&pubkey).unwrap();
         let len = ctx.derive(Some(out)).unwrap();
-        assert_eq!(self.pub_len(), len);
+        trace!("derived key length: {}", len);
+        //assert_eq!(self.pub_len(), len);
         // This is greater than MAXDHLEN in snow so doesn't work
         Ok(())
     }
