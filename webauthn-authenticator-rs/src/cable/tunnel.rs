@@ -1,8 +1,7 @@
 //! Tunnel functions
 
 use futures::{SinkExt, StreamExt};
-use openssl::ec::{EcKeyRef, EcPointRef, PointConversionForm};
-use snow::{Builder, HandshakeState};
+use openssl::{ec::{EcKeyRef, EcPointRef, PointConversionForm, EcPoint}, pkey_ctx::PkeyCtx};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -18,7 +17,7 @@ use tokio_tungstenite::{
 };
 
 use crate::{
-    cable::noise::{get_params, get_resolver},
+    cable::noise::{CableNoise, HandshakeType, get_public_key_bytes},
     prelude::WebauthnCError,
     util::compute_sha256,
 };
@@ -39,8 +38,6 @@ const TUNNEL_SERVER_SALT: &[u8] = "caBLEv2 tunnel server domain\0\0\0".as_bytes(
 const TUNNEL_SERVER_ID_OFFSET: usize = TUNNEL_SERVER_SALT.len() - 3;
 const TUNNEL_SERVER_TLDS: [&str; 4] = [".com", ".org", ".net", ".info"];
 const BASE32_CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
-const NOISE_KN_PROTOCOL: &str = "Noise_KNpsk0_P256_AESGCM_SHA256";
-const NOISE_NK_PROTOCOL: &str = "Noise_NKpsk0_P256_AESGCM_SHA256";
 
 /// Decodes a `domain_id` into an actual domain name.
 ///
@@ -76,7 +73,8 @@ pub struct Tunnel<'a> {
     psk: Psk,
     stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
     local_identity: &'a EcKeyRef<Private>,
-    noise: HandshakeState,
+    noise: CableNoise,
+    ephemeral_key: EcKey<Private>,
 }
 
 impl<'a> Tunnel<'a> {
@@ -102,20 +100,43 @@ impl<'a> Tunnel<'a> {
         })?;
         trace!(?response);
 
-        let mut noise = Builder::with_resolver(get_params(), get_resolver())
-            .prologue(&[1])
-            .local_private_key(&local_identity.private_key_to_der()?)
-            .psk(0, &psk)
-            .build_initiator()
-            .unwrap();
+        // BuildInitialMessage
+        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=880;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
+        let mut noise = CableNoise::new(HandshakeType::KNpsk0);
+        let prologue = [1];
+        noise.mix_hash(&prologue);
+        noise.mix_hash_point(&local_identity.public_key())?;
+        noise.mix_key_and_hash(&psk)?;
 
-        let mut msg = [0; 65535];
-        let len = noise.write_message(&[], &mut msg).unwrap();
+        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
+        let ephemeral_key = EcKey::generate(&group)?;
 
-        trace!(">>> {:02x?}", &msg[..len]);
+        let ephemeral_key_public_bytes = get_public_key_bytes(&ephemeral_key.as_ref());
+        assert_eq!(ephemeral_key_public_bytes.len(), 65);
+
+        noise.mix_hash(&ephemeral_key_public_bytes);
+        noise.mix_key(&ephemeral_key_public_bytes)?;
+
+        let ct = noise.encrypt_and_hash(&[])?;
+
+        let mut handshake_message = Vec::with_capacity(ephemeral_key_public_bytes.len() + ct.len());
+        handshake_message.extend_from_slice(&ephemeral_key_public_bytes);
+        handshake_message.extend_from_slice(&ct);
+
+        // let mut noise = Builder::with_resolver(get_params(), get_resolver())
+        //     .prologue(&[1])
+        //     .local_private_key(&local_identity.private_key_to_der()?)
+        //     .psk(0, &psk)
+        //     .build_initiator()
+        //     .unwrap();
+
+        // let mut msg = [0; 65535];
+        // let len = noise.write_message(&[], &mut msg).unwrap();
+
+        trace!(">>> {:02x?}", &handshake_message);
         //let s = stream.get_mut();
         stream
-            .send(Message::Binary((&msg[..len]).to_vec()))
+            .send(Message::Binary(handshake_message))
             .await
             .unwrap();
 
@@ -126,20 +147,42 @@ impl<'a> Tunnel<'a> {
         trace!("<<< {:?}", resp);
         if let Message::Binary(v) = resp {
             if v.len() < 65 {
-                warn!("too short response? got {} bytes", len);
+                warn!("too short response? got {} bytes", v.len());
             }
             // this is 81 bytes
 
-            let mut payload = [0; 65535];
-            let len = noise.read_message(&v, &mut payload).unwrap();
-            if len != 0 {
+            // ProcessResponse
+            let peer_point_bytes = &v[..65];
+            let ct = &v[65..];
+
+            let peer_key = bytes_to_public_key(peer_point_bytes)?;
+            let mut shared_key_ee = [0; 32];
+            ecdh(&ephemeral_key, &peer_key, &mut shared_key_ee)?;
+            noise.mix_hash(peer_point_bytes);
+            noise.mix_key(peer_point_bytes)?;
+            noise.mix_key(&shared_key_ee)?;
+
+            // TODO: local identity
+            let pt = noise.decrypt_and_hash(ct)?;
+
+            // let mut payload = [0; 65535];
+            // let len = noise.read_message(&v, &mut payload).unwrap();
+            if pt.len() != 0 {
                 panic!(
                     "expected handshake to be empty, got {} bytes: {:02x?}",
-                    len,
-                    &payload[..len]
+                    pt.len(),
+                    &pt
                 );
             }
+        } else {
+            error!("Unexpected websocket response type");
+            return Err(WebauthnCError::Unknown);
         }
+
+        let (write_key, read_key) = noise.traffic_keys()?;
+
+        trace!(?write_key);
+        trace!(?read_key);
         // Waiting for post-handshake message
 
         let t = Self {
@@ -147,6 +190,7 @@ impl<'a> Tunnel<'a> {
             stream,
             local_identity,
             noise,
+            ephemeral_key,
         };
 
         Ok(t)
@@ -157,6 +201,27 @@ fn point_to_bytes(point: &EcPointRef) -> Result<Vec<u8>, WebauthnCError> {
     let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
     let mut ctx = BigNumContext::new()?;
     Ok(point.to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?)
+}
+
+fn bytes_to_public_key(buf: &[u8]) -> Result<EcKey<Public>, WebauthnCError> {
+    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
+    let mut ctx = BigNumContext::new()?;
+    let point = EcPoint::from_bytes(&group, &buf, &mut ctx)?;
+    Ok(EcKey::from_public_key(&group, &point)?)
+}
+
+fn ecdh(
+    private_key: &EcKeyRef<Private>,
+    peer_key: &EcKeyRef<Public>,
+    output: &mut [u8],
+) -> Result<(), WebauthnCError> {
+    let peer_key = PKey::from_ec_key(peer_key.to_owned())?;
+    let pkey = PKey::from_ec_key(private_key.to_owned())?;
+    let mut ctx = PkeyCtx::new(&pkey)?;
+    ctx.derive_init()?;
+    ctx.derive_set_peer(&peer_key)?;
+    ctx.derive(Some(output))?;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -394,8 +394,8 @@ impl PinUvPlatformInterfaceProtocol for PinUvPlatformInterfaceProtocolTwo {
         // (see [RFC5869] for the definition of HKDF).
         let mut o: Vec<u8> = vec![0; 64];
         let zero: [u8; 32] = [0; 32];
-        hkdf_sha_256(&zero, z, b"CTAP2 HMAC key", &mut o[0..32])?;
-        hkdf_sha_256(&zero, z, b"CTAP2 AES key", &mut o[32..64])?;
+        hkdf_sha_256(&zero, z, Some(b"CTAP2 HMAC key"), &mut o[0..32])?;
+        hkdf_sha_256(&zero, z, Some(b"CTAP2 AES key"), &mut o[32..64])?;
 
         Ok(o)
     }
@@ -408,7 +408,7 @@ impl PinUvPlatformInterfaceProtocol for PinUvPlatformInterfaceProtocolTwo {
 pub fn hkdf_sha_256(
     salt: &[u8],
     ikm: &[u8],
-    info: &[u8],
+    info: Option<&[u8]>,
     output: &mut [u8],
 ) -> Result<(), openssl::error::ErrorStack> {
     let mut ctx = PkeyCtx::new_id(openssl::pkey::Id::HKDF)?;
@@ -416,7 +416,9 @@ pub fn hkdf_sha_256(
     ctx.set_hkdf_md(Md::sha256())?;
     ctx.set_hkdf_salt(salt)?;
     ctx.set_hkdf_key(ikm)?;
-    ctx.add_hkdf_info(info)?;
+    if let Some(info) = info {
+        ctx.add_hkdf_info(info)?;
+    }
     ctx.derive(Some(output))?;
     Ok(())
 }
@@ -508,7 +510,7 @@ mod tests {
 
         let mut output: [u8; 42] = [0; 42];
 
-        hkdf_sha_256(salt.as_slice(), &ikm, info.as_slice(), &mut output)
+        hkdf_sha_256(salt.as_slice(), &ikm, Some(info.as_slice()), &mut output)
             .expect("hkdf_sha_256 fail");
         assert_eq!(expected, output);
     }

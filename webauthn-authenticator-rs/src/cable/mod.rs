@@ -58,6 +58,7 @@
 
 mod base10;
 mod btle;
+mod crypter;
 mod handshake;
 mod noise;
 mod tunnel;
@@ -202,7 +203,7 @@ fn derive(
     output: &mut [u8],
 ) -> Result<(), WebauthnCError> {
     let typ = typ.to_u32().ok_or(WebauthnCError::Internal)?.to_le_bytes();
-    Ok(hkdf_sha_256(salt, ikm, &typ, output)?)
+    Ok(hkdf_sha_256(salt, ikm, Some(&typ), output)?)
 }
 
 fn decrypt_advert(advert: BleAdvert, key: &EidKey) -> Result<Option<CableEid>, WebauthnCError> {

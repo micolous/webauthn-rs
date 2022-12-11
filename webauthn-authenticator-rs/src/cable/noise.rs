@@ -1,176 +1,138 @@
+use std::mem::size_of;
+
 use openssl::{
-    ec::{EcGroup, EcKey, PointConversionForm, EcKeyRef, EcPoint},
+    ec::{EcGroup, EcKey, PointConversionForm, EcKeyRef, EcPoint, EcPointRef},
     nid::Nid,
-    pkey::{Private, PKey}, bn::{BigNumContext, BigNum}, pkey_ctx::PkeyCtx,
-};
-use snow::{
-    params::{
-        CipherChoice, DHChoice, HandshakeChoice, HandshakeModifier, HandshakeModifierList,
-        HandshakePattern, HashChoice, NoiseParams,
-    },
-    resolvers::{BoxedCryptoResolver, CryptoResolver, DefaultResolver, FallbackResolver},
-    types::Dh,
+    pkey::{Private, PKey}, bn::{BigNumContext, BigNum}, pkey_ctx::PkeyCtx, symm::{Cipher, encrypt_aead, decrypt_aead}, envelope::Seal,
 };
 
-use crate::ctap2::regenerate;
+use crate::{ctap2::{hkdf_sha_256}, util::compute_sha256_2, prelude::WebauthnCError};
 
-pub fn get_params() -> NoiseParams {
-    NoiseParams {
-        // P256 is not Noise spec compliant?
-        name: String::from("Noise_KNpsk0_P256_AESGCM_SHA256"),
-        base: snow::params::BaseChoice::Noise,
-        handshake: HandshakeChoice {
-            pattern: HandshakePattern::KN,
-            modifiers: HandshakeModifierList {
-                list: vec![HandshakeModifier::Psk(0)],
-            },
-        },
-        // FAKE
-        dh: DHChoice::Curve25519,
-        cipher: CipherChoice::AESGCM,
-        hash: HashChoice::SHA256,
-    }
-}
-
-pub fn get_resolver() -> BoxedCryptoResolver {
-    Box::new(FallbackResolver::new(
-        Box::new(CableNoiseResolver),
-        Box::new(DefaultResolver::default()),
-    ))
-}
-
-#[derive(Default)]
-pub struct CableNoiseResolver;
-
-impl CryptoResolver for CableNoiseResolver {
-    fn resolve_rng(&self) -> Option<Box<dyn snow::types::Random>> {
-        None
-    }
-
-    fn resolve_dh(&self, _choice: &DHChoice) -> Option<Box<dyn snow::types::Dh>> {
-        Some(Box::new(DhP256::default()))
-    }
-
-    fn resolve_hash(
-        &self,
-        _choice: &snow::params::HashChoice,
-    ) -> Option<Box<dyn snow::types::Hash>> {
-        None
-    }
-
-    fn resolve_cipher(
-        &self,
-        _choice: &snow::params::CipherChoice,
-    ) -> Option<Box<dyn snow::types::Cipher>> {
-        None
-    }
-}
-
-struct DhP256 {
-    private_key: EcKey<Private>,
-    public_key_bytes: Vec<u8>,
-    private_key_der: Vec<u8>,
-}
-
-impl Default for DhP256 {
-    fn default() -> Self {
-        let private_key = regenerate().unwrap();
-        Self {
-            public_key_bytes: get_public_key_bytes(&private_key),
-            private_key_der: private_key.private_key_to_der().unwrap(),
-            private_key,
-        }
-    }
-}
-
-fn get_public_key_bytes(private_key: &EcKeyRef<Private>) -> Vec<u8> {
+pub fn get_public_key_bytes(private_key: &EcKeyRef<Private>) -> Vec<u8> {
     let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
     let mut ctx = BigNumContext::new().unwrap();
     private_key.public_key().to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx).unwrap()
 }
 
-impl Dh for DhP256 {
-    fn name(&self) -> &'static str {
-        "P256"
+// implementing Cable's version of noise from scratch
+const NOISE_KN_PROTOCOL: &[u8; 32] = b"Noise_KNpsk0_P256_AESGCM_SHA256\0";
+const NOISE_NK_PROTOCOL: &[u8; 32] = b"Noise_NKpsk0_P256_AESGCM_SHA256\0";
+
+pub enum HandshakeType {
+    KNpsk0,
+    NKpsk0,
+}
+
+#[derive(Default)]
+pub struct CableNoise {
+    chaining_key: [u8; 32],
+    h: [u8; 32],
+    symmetric_key: [u8; 32],
+    symmetric_nonce: u32,
+}
+
+impl CableNoise {
+    pub fn new(handshake_type: HandshakeType) -> Self {
+        let chaining_key = match handshake_type {
+            HandshakeType::KNpsk0 => *NOISE_KN_PROTOCOL,
+            HandshakeType::NKpsk0 => *NOISE_NK_PROTOCOL,
+        };
+
+        Self {
+            chaining_key,
+            h: chaining_key,
+            ..Default::default()
+        }
     }
 
-    fn pub_len(&self) -> usize {
-        1 + 32 + 32
+    pub fn mix_hash(&mut self, i: &[u8]) {
+        self.h = compute_sha256_2(&self.h, i);
     }
 
-    fn priv_len(&self) -> usize {
-        121
-    }
-
-    fn set(&mut self, privkey: &[u8]) {
-        self.private_key = EcKey::private_key_from_der(privkey).unwrap();
-        self.public_key_bytes = get_public_key_bytes(&self.private_key.as_ref());
-        self.private_key_der = self.private_key.private_key_to_der().unwrap();
-    }
-
-    fn generate(&mut self, _rng: &mut dyn snow::types::Random) {
-        self.private_key = regenerate().unwrap();
-        self.public_key_bytes = get_public_key_bytes(&self.private_key.as_ref());
-        self.private_key_der = self.private_key.private_key_to_der().unwrap();
-    }
-
-    fn pubkey(&self) -> &[u8] {
-        &self.public_key_bytes
-    }
-
-    fn privkey(&self) -> &[u8] {
-        &self.private_key_der
-    }
-
-    fn dh(&self, pubkey: &[u8], out: &mut [u8]) -> Result<(), snow::Error> {
-        // Key derivation is whacky
-        // out = shared_key_ee, then shared_key_se
-        // Noise states pubkey and out are both DHLEN bytes:
-        // https://noiseprotocol.org/noise.html#dh-functions
-        // However caBLE wants pubkey = 65 bytes, out = 32 bytes
-        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=945-950;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
-
-        trace!("dh: pubkey({} bytes), out({} bytes)", pubkey.len(), out.len());
-        // TODO: error handling
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
-        let mut ctx = BigNumContext::new().unwrap();
-        let point = EcPoint::from_bytes(&group, pubkey, &mut ctx).unwrap();
-        let pubkey = EcKey::from_public_key(&group, &point).unwrap();
-        let pubkey = PKey::from_ec_key(pubkey).unwrap();
-        let pkey = PKey::from_ec_key(self.private_key.to_owned()).unwrap();
-
-        let mut ctx = PkeyCtx::new(&pkey).unwrap();
-        ctx.derive_init().unwrap();
-        ctx.derive_set_peer(&pubkey).unwrap();
-        let len = ctx.derive(Some(out)).unwrap();
-        trace!("derived key length: {}", len);
-        //assert_eq!(self.pub_len(), len);
-        // This is greater than MAXDHLEN in snow so doesn't work
+    pub fn mix_hash_point(&mut self, point: &EcPointRef) -> Result<(), WebauthnCError> {
+        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
+        let mut ctx = BigNumContext::new()?;
+        let point = point.to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?;
+        self.mix_hash(&point);
         Ok(())
+    }
+
+    pub fn mix_key(&mut self, ikm: &[u8]) -> Result<(), WebauthnCError> {
+        let mut o = [0; 64];
+        hkdf_sha_256(&self.chaining_key, ikm, None, &mut o)?;
+        self.chaining_key.copy_from_slice(&o[..32]);
+        self.init_key(&o[32..]);
+        Ok(())
+    }
+
+    pub fn mix_key_and_hash(&mut self, ikm: &[u8]) -> Result<(), WebauthnCError> {
+        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/noise.cc;l=90;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
+        let mut o = [0; 32 * 3];
+        hkdf_sha_256(&self.chaining_key, ikm, None, &mut o)?;
+        self.chaining_key.copy_from_slice(&o[..32]);
+        self.mix_hash(&o[32..64]);
+        self.init_key(&o[64..]);
+        Ok(())
+    }
+
+    pub fn encrypt_and_hash(&mut self, pt: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
+        let mut nonce = [0; 12];
+        nonce[..size_of::<u32>()].copy_from_slice(&self.symmetric_nonce.to_be_bytes());
+        self.symmetric_nonce += 1;
+
+        let cipher = Cipher::aes_256_gcm();
+        let mut tag = [0; 16];
+        let mut encrypted = encrypt_aead(cipher, &self.symmetric_key, Some(&nonce), &self.h[..], pt, &mut tag)?;
+        encrypted.extend_from_slice(&tag);
+        self.mix_hash(&encrypted);
+        Ok(encrypted)
+    }
+
+    pub fn decrypt_and_hash(&mut self, ct: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
+        let mut nonce = [0; 12];
+        nonce[..size_of::<u32>()].copy_from_slice(&self.symmetric_nonce.to_be_bytes());
+        self.symmetric_nonce += 1;
+        let msg_len = ct.len() - 16;
+        trace!("decrypt_and_hash(ct={:?}, tag={:?}, nonce={:?})", &ct[..msg_len], &ct[msg_len..], &nonce);
+        // TODO: remove this hack
+        if msg_len == 0 {
+            warn!("TODO: no message payload, skipping decryption, this implementation is probably wrong");
+            return Ok(vec![]);
+        }
+
+        let cipher = Cipher::aes_256_gcm();
+        let decrypted = decrypt_aead(cipher, &self.symmetric_key, Some(&nonce), &self.h[..], &ct[..msg_len], &ct[msg_len..]).unwrap();
+        trace!("decrypted: {:?}", decrypted);
+        if !decrypted.is_empty() {
+            self.mix_hash(ct);
+        }
+        Ok(decrypted)
+    }
+
+    /// `write_key, read_key`
+    pub fn traffic_keys(&self) -> Result<([u8; 32], [u8; 32]), WebauthnCError> {
+        let mut o = [0; 64];
+        hkdf_sha_256(&self.chaining_key, &[], None, &mut o)?;
+
+        let mut a = [0; 32];
+        let mut b = [0; 32];
+        a.copy_from_slice(&o[..32]);
+        b.copy_from_slice(&o[32..]);
+        Ok((a, b))
+    }
+
+    fn init_key(&mut self, key: &[u8]) {
+        assert_eq!(key.len(), 32);
+        self.symmetric_key.copy_from_slice(key);
+        self.symmetric_nonce = 0;
     }
 }
 
 #[cfg(test)]
 mod test {
-    use snow::Builder;
-
     use super::*;
     #[test]
     fn a() {
         let _ = tracing_subscriber::fmt::try_init();
-        let builder = Builder::with_resolver(get_params(), get_resolver());
-        let static_key = builder.generate_keypair().unwrap().private;
-
-        let mut noise = builder
-            .prologue(&[1])
-            .local_private_key(&static_key)
-            .psk(0, &[0; 32])
-            .build_initiator()
-            .unwrap();
-
-        let mut message = [0; 65535];
-        let len = noise.write_message(&[], &mut message).unwrap();
-
-        trace!(">>> {:02x?}", &message[..len])
     }
 }
