@@ -94,12 +94,6 @@ impl CableNoise {
         self.symmetric_nonce += 1;
         let msg_len = ct.len() - 16;
         trace!("decrypt_and_hash(ct={:?}, tag={:?}, nonce={:?})", &ct[..msg_len], &ct[msg_len..], &nonce);
-        // TODO: remove this hack
-        if msg_len == 0 {
-            warn!("TODO: no message payload, skipping decryption, this implementation is probably wrong");
-            return Ok(vec![]);
-        }
-
         let cipher = Cipher::aes_256_gcm();
         let decrypted = decrypt_aead(cipher, &self.symmetric_key, Some(&nonce), &self.h[..], &ct[..msg_len], &ct[msg_len..]).unwrap();
         trace!("decrypted: {:?}", decrypted);

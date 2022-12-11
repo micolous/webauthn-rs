@@ -17,7 +17,7 @@ use tokio_tungstenite::{
 };
 
 use crate::{
-    cable::noise::{CableNoise, HandshakeType, get_public_key_bytes},
+    cable::{noise::{CableNoise, HandshakeType, get_public_key_bytes}, crypter::Crypter},
     prelude::WebauthnCError,
     util::compute_sha256,
 };
@@ -75,6 +75,7 @@ pub struct Tunnel<'a> {
     local_identity: &'a EcKeyRef<Private>,
     noise: CableNoise,
     ephemeral_key: EcKey<Private>,
+    crypter: Crypter,
 }
 
 impl<'a> Tunnel<'a> {
@@ -106,6 +107,7 @@ impl<'a> Tunnel<'a> {
         let prologue = [1];
         noise.mix_hash(&prologue);
         noise.mix_hash_point(&local_identity.public_key())?;
+
         noise.mix_key_and_hash(&psk)?;
 
         let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
@@ -162,7 +164,12 @@ impl<'a> Tunnel<'a> {
             noise.mix_key(peer_point_bytes)?;
             noise.mix_key(&shared_key_ee)?;
 
-            // TODO: local identity
+            // local identity
+            let mut shared_key_se = [0; 32];
+            ecdh(&local_identity, &peer_key, &mut shared_key_se)?;
+            noise.mix_key(&shared_key_se)?;
+
+
             let pt = noise.decrypt_and_hash(ct)?;
 
             // let mut payload = [0; 65535];
@@ -183,7 +190,23 @@ impl<'a> Tunnel<'a> {
 
         trace!(?write_key);
         trace!(?read_key);
+        let mut crypter = Crypter::new(read_key, write_key);
+
         // Waiting for post-handshake message
+        trace!("Waiting for post-handshake message...");
+        let resp = stream.next().await.unwrap().unwrap();
+        trace!("Post-handshake message:");
+        trace!("<<< {:?}", resp);
+        let v = if let Message::Binary(v) = resp {
+            v
+        } else {
+            error!("Unexpected websocket response type");
+            return Err(WebauthnCError::Unknown);
+        };
+        
+        trace!("decrypted:");
+        let decrypted = crypter.decrypt(&v)?;
+        trace!("<<< {:?}", decrypted);
 
         let t = Self {
             psk,
@@ -191,6 +214,7 @@ impl<'a> Tunnel<'a> {
             local_identity,
             noise,
             ephemeral_key,
+            crypter,
         };
 
         Ok(t)
