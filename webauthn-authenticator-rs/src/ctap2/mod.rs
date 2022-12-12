@@ -329,8 +329,8 @@ impl<'a, T: Token, U: UiCallback> AuthenticatorBackend for CtapAuthenticator<'a,
 /// This only works on NFC authenticators and CTAP 2.1 (not "2.1 PRE")
 /// authenticators.
 pub async fn select_one_token<'a, T: Token + 'a, U: UiCallback + 'a>(
-    tokens: impl Iterator<Item = &'a CtapAuthenticator<'a, T, U>>,
-) -> Option<&'a CtapAuthenticator<'a, T, U>> {
+    tokens: impl Iterator<Item = &'a mut CtapAuthenticator<'a, T, U>>,
+) -> Option<&'a mut CtapAuthenticator<'a, T, U>> {
     let mut tasks: FuturesUnordered<_> = tokens
         .map(|token| async move {
             if !token.token.has_button() {

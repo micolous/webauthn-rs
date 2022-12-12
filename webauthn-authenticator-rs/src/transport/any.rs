@@ -68,7 +68,7 @@ impl<'b> Transport<'b> for AnyTransport {
 #[allow(clippy::unimplemented)]
 impl Token for AnyToken {
     #[allow(unused_variables)]
-    async fn transmit_raw<C, U>(&self, cmd: C, ui: &U) -> Result<Vec<u8>, WebauthnCError>
+    async fn transmit_raw<C, U>(&mut self, cmd: C, ui: &U) -> Result<Vec<u8>, WebauthnCError>
     where
         C: CBORCommand,
         U: UiCallback,

@@ -1,6 +1,6 @@
 //! Tunnel functions
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Mutex};
 use std::fmt::Debug;
 
 use async_trait::async_trait;
@@ -28,12 +28,14 @@ use webauthn_rs_proto::AuthenticatorTransport;
 use crate::{
     cable::{
         crypter::Crypter,
-        framing::CableFrame,
+        framing::{CableCommand, CableFrame, MessageType},
         noise::{get_public_key_bytes, CableNoise, HandshakeType},
     },
-    ctap2::{commands::GetInfoResponse, CBORResponse, CBORCommand, CtapAuthenticator},
+    ctap2::{commands::GetInfoResponse, CBORCommand, CBORResponse, CtapAuthenticator},
     prelude::WebauthnCError,
-    util::compute_sha256, transport::Token, ui::UiCallback,
+    transport::Token,
+    ui::UiCallback,
+    util::compute_sha256,
 };
 
 use super::*;
@@ -226,8 +228,7 @@ impl Tunnel {
 
         let frame = CableFrame::try_from(v)?;
 
-        let info =
-            <GetInfoResponse as CBORResponse>::try_from(frame.payload.as_slice())?;
+        let info = <GetInfoResponse as CBORResponse>::try_from(frame.payload.as_slice())?;
 
         let t = Self {
             psk,
@@ -243,11 +244,39 @@ impl Tunnel {
 
     /// Establishes a [CtapAuthenticator] connection for communicating with a
     /// caBLE authenticator using CTAP 2.x.
-    /// 
+    ///
     /// See [CtapAuthenticator::new] for further detail.
-    pub fn get_authenticator<'a, U: UiCallback>(self, ui_callback: &'a U) -> Option<CtapAuthenticator<'a, Self, U>>
-    {
+    pub fn get_authenticator<'a, U: UiCallback>(
+        self,
+        ui_callback: &'a U,
+    ) -> Option<CtapAuthenticator<'a, Self, U>> {
         CtapAuthenticator::new_with_info(self.info.to_owned(), self, ui_callback)
+    }
+
+    async fn send(&mut self, cmd: CableCommand) -> Result<(), WebauthnCError> {
+        let cmd = cmd.to_bytes();
+        let encrypted = self.crypter.encrypt(&cmd)?;
+
+        self.stream.send(Message::Binary(encrypted)).await.unwrap();
+
+        Ok(())
+    }
+
+    async fn recv(&mut self) -> Result<CableCommand, WebauthnCError> {
+        let resp = self.stream.next().await.unwrap().unwrap();
+
+        let resp = if let Message::Binary(v) = resp { v  } else {
+            error!("Incorrect message type");
+            return Err(WebauthnCError::Unknown);
+        };
+
+        let decrypted = self.crypter.decrypt(&resp)?;
+        // TODO: protocol version
+        let frame = CableCommand::from_bytes(1, &decrypted);
+        // TODO: shutdown, update events
+        assert_eq!(frame.message_type, MessageType::Ctap);
+
+        Ok(frame)
     }
 }
 
@@ -265,14 +294,23 @@ impl Token for Tunnel {
         AuthenticatorTransport::Hybrid
     }
 
-    async fn transmit_raw<C, U>(&self, cmd: C, ui: &U) -> Result<Vec<u8>, WebauthnCError>
+    async fn transmit_raw<C, U>(&mut self, cmd: C, ui: &U) -> Result<Vec<u8>, WebauthnCError>
     where
         C: CBORCommand,
-        U: UiCallback {
-        todo!()
+        U: UiCallback,
+    {
+        let f = CableCommand {
+            // TODO: handle protocol versions
+            protocol_version: 1,
+            message_type: MessageType::Ctap,
+            data: cmd.cbor().map_err(|_| WebauthnCError::Cbor)?,
+        };
+        self.send(f).await?;
+        let resp = self.recv().await?;
+        Ok(resp.data)
     }
 
-    fn cancel(&self) -> Result<(),WebauthnCError>  {
+    fn cancel(&self) -> Result<(), WebauthnCError> {
         todo!()
     }
 
@@ -280,8 +318,7 @@ impl Token for Tunnel {
         Ok(())
     }
 
-
-    fn close(&self) -> Result<(),WebauthnCError>  {
+    fn close(&self) -> Result<(), WebauthnCError> {
         todo!()
     }
 }

@@ -15,6 +15,66 @@ use serde::Serialize;
 use serde_cbor::Value;
 use std::collections::BTreeMap;
 
+/// Prefix byte for messages sent to the authenticator
+///
+/// Not used for protocol version 0
+#[repr(u8)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MessageType {
+    Shutdown = 0,
+    Ctap = 1,
+    Update = 2,
+    Unknown,
+}
+
+impl From<u8> for MessageType {
+    fn from(v: u8) -> Self {
+        use MessageType::*;
+        match v {
+            0 => Shutdown,
+            1 => Ctap,
+            2 => Update,
+            _ => Unknown,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct CableCommand {
+    pub protocol_version: u32,
+    pub message_type: MessageType,
+    pub data: Vec<u8>,
+}
+
+
+impl CableCommand {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        if self.protocol_version == 0 {
+            return self.data.to_owned();
+        }
+
+        let mut o = self.data.to_owned();
+        o.insert(0, self.message_type as u8);
+        o
+    }
+
+    pub fn from_bytes(protocol_version: u32, i: &[u8]) -> Self {
+        let message_type: MessageType = if protocol_version == 0 {
+            i[0].into()
+        } else {
+            MessageType::Ctap
+        };
+
+        let data = if protocol_version == 0 {
+            i
+        } else {
+            &i[1..]
+        }.to_vec();
+
+        Self { protocol_version, message_type, data }
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(try_from = "BTreeMap<u32, Value>")]
 pub struct CableFrame {
