@@ -194,6 +194,19 @@ impl Eid {
                 .ok()
         })
     }
+
+    pub fn get_new_tunnel_url(&self, tunnel_id: TunnelId) -> Option<Uri> {
+        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=170;drc=de9f16dcca1d5057ba55973fa85a5b27423d414f
+        self.get_domain().and_then(|domain| {
+            let tunnel_id = hex::encode_upper(tunnel_id);
+            Uri::builder()
+                .scheme("wss")
+                .authority(domain)
+                .path_and_query(format!("/cable/new/{}", tunnel_id))
+                .build()
+                .ok()
+        })
+    }
 }
 
 fn derive(
@@ -396,8 +409,6 @@ pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(request_type: C
 
 #[cfg(test)]
 mod test {
-    use futures::executor::block_on;
-
     use crate::cable::tunnel::Tunnel;
 
     use super::*;

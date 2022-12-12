@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, collections::BTreeMap};
 
 use crate::{
     ctap2::{commands::*, pin_uv::*},
@@ -371,6 +371,13 @@ impl<'a, T: Token, U: UiCallback> AuthenticatorBackend for Ctap20Authenticator<'
             false,
         ))?;
 
+        // HACK for cable
+        let reqopts = if pin_uv_auth_proto == None && self.get_info().get_option("uv") == Some(true) {
+            Some(BTreeMap::from([(String::from("uv"), true)]))
+        } else {
+            None
+        };
+
         let mc = MakeCredentialRequest {
             client_data_hash,
             rp: options.rp,
@@ -378,7 +385,7 @@ impl<'a, T: Token, U: UiCallback> AuthenticatorBackend for Ctap20Authenticator<'
             pub_key_cred_params: options.pub_key_cred_params,
             exclude_list: options.exclude_credentials.unwrap_or_default(),
 
-            options: None,
+            options: reqopts,
             pin_uv_auth_param,
             pin_uv_auth_proto,
             enterprise_attest: None,
@@ -441,11 +448,18 @@ impl<'a, T: Token, U: UiCallback> AuthenticatorBackend for Ctap20Authenticator<'
             false,
         ))?;
 
+        // HACK for cable
+        let reqopts = if pin_uv_auth_proto == None && self.get_info().get_option("uv") == Some(true) {
+            Some(BTreeMap::from([(String::from("uv"), true)]))
+        } else {
+            None
+        };
+
         let ga = GetAssertionRequest {
             rp_id: options.rp_id,
             client_data_hash,
             allow_list: options.allow_credentials,
-            options: None, // TODO
+            options: reqopts,
             pin_uv_auth_param,
             pin_uv_auth_proto,
         };

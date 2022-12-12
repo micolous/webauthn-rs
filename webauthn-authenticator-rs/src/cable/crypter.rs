@@ -36,6 +36,8 @@ impl Crypter {
         let mut padded = vec![0; padded_len];
         padded[..msg.len()].copy_from_slice(&msg);
         padded[padded_len - 1] = zeros as u8;
+        trace!("padded: {:02x?}", padded);
+        assert_eq!(padded.len() % PADDING_MUL, 0);
 
         let nonce = self.construct_nonce(self.write_seq);
         self.write_seq += 1;
@@ -65,11 +67,6 @@ impl Crypter {
 
         let msg_len = ct.len() - 16;
         trace!("decrypt(ct={:?}, tag={:?}, nonce={:?})", &ct[..msg_len], &ct[msg_len..], &nonce);
-        // TODO: remove this hack
-        if msg_len == 0 {
-            warn!("TODO: no message payload, skipping decryption, this implementation is probably wrong");
-            return Ok(vec![]);
-        }
 
         let decrypted = decrypt_aead(cipher, &self.read_key, Some(&nonce), aad, &ct[..msg_len], &ct[msg_len..]);
         trace!("decrypted: {:?}", decrypted);
@@ -115,7 +112,7 @@ impl Crypter {
         } else {
             nonce[..size_of::<u32>()].copy_from_slice(&counter.to_le_bytes());
         }
-        trace!(?nonce);
+        trace!("new_constuction: {:?}, nonce: {:?}", self.new_construction, nonce);
         nonce
     }
 }
@@ -141,9 +138,38 @@ mod test {
             let decrypted = bob.decrypt(&crypted).unwrap();
 
             assert_eq!(msg, decrypted);
+            assert!(!bob.new_construction);
             if l > 0 {
                 crypted[(l * 3) % l] ^= 0x01;
             }
+            corrupted.read_seq = bob.read_seq;
+            assert!(corrupted.decrypt(&crypted).is_err());
+        }
+    }
+
+    #[test]
+    fn encrypt_decrypt_new() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let key0 = [123; 32];
+        let key1 = [231; 32];
+
+        let mut alice = Crypter::new(key0, key1);
+        alice.new_construction = true;
+        let mut bob = Crypter::new(key1, key0);
+        let mut corrupted = Crypter::new(key1, key0);
+
+        for l in 1..5 {
+            let msg = vec![0xff; l];
+            let mut crypted = alice.encrypt(&msg).unwrap();
+            let decrypted = bob.decrypt(&crypted).unwrap();
+
+            assert!(bob.new_construction);
+            assert_eq!(msg, decrypted);
+            if l > 0 {
+                crypted[(l * 3) % l] ^= 0x01;
+            }
+            corrupted.new_construction = bob.new_construction;
             corrupted.read_seq = bob.read_seq;
             assert!(corrupted.decrypt(&crypted).is_err());
         }

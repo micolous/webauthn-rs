@@ -97,9 +97,9 @@ fn main() {
 
     // WARNING: don't use this as an example of how to use the library!
     let wan = Webauthn::new_unsafe_experts_only(
-        "https://localhost:8080/auth",
-        "localhost",
-        vec![url::Url::parse("https://localhost:8080").unwrap()],
+        "webauthn.firstyear.id.au",
+        "webauthn.firstyear.id.au",
+        vec![url::Url::parse("https://webauthn.firstyear.id.au").unwrap()],
         Some(1),
         None,
         None,
@@ -118,7 +118,7 @@ fn main() {
 
     let r = u
         .perform_register(
-            Url::parse("https://localhost:8080").unwrap(),
+            Url::parse("https://webauthn.firstyear.id.au").unwrap(),
             chal.public_key,
             60_000,
         )
@@ -142,7 +142,7 @@ fn main() {
 
         let r = u
             .perform_auth(
-                Url::parse("https://localhost:8080").unwrap(),
+                Url::parse("https://webauthn.firstyear.id.au").unwrap(),
                 chal.public_key,
                 60_000,
             )

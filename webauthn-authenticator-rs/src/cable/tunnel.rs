@@ -28,7 +28,7 @@ use webauthn_rs_proto::AuthenticatorTransport;
 use crate::{
     cable::{
         crypter::Crypter,
-        framing::{CableCommand, CableFrame, MessageType},
+        framing::{CableCommand, CablePostHandshake, MessageType},
         noise::{get_public_key_bytes, CableNoise, HandshakeType},
     },
     ctap2::{commands::GetInfoResponse, CBORCommand, CBORResponse, CtapAuthenticator},
@@ -201,6 +201,10 @@ impl Tunnel {
             return Err(WebauthnCError::Unknown);
         }
 
+        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=982;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
+        // TODO: write_key here may be wrong
+        // suspect the only way to debug this is to implement RespondToHandshake for a test
+        // read_key is correct
         let (write_key, read_key) = noise.traffic_keys()?;
 
         trace!(?write_key);
@@ -223,12 +227,16 @@ impl Tunnel {
         let decrypted = crypter.decrypt(&v)?;
         trace!("<<< {:?}", decrypted);
 
+        // TODO: android sends us a v0 handshake with extra padded CBOR and linking info
+        // for some reason, serde_cbor is happy to decode this, so it doesn't error
+        // Because supports_linking = false, then it is a v0 handshake
         let v: BTreeMap<u32, Value> =
             serde_cbor::from_slice(&decrypted).map_err(|_| WebauthnCError::Cbor)?;
 
-        let frame = CableFrame::try_from(v)?;
+        let frame = CablePostHandshake::try_from(v)?;
+        trace!(?frame);
 
-        let info = <GetInfoResponse as CBORResponse>::try_from(frame.payload.as_slice())?;
+        let info = frame.info;
 
         let t = Self {
             psk,
@@ -251,14 +259,18 @@ impl Tunnel {
         ui_callback: &'a U,
     ) -> Option<CtapAuthenticator<'a, Self, U>> {
         CtapAuthenticator::new_with_info(self.info.to_owned(), self, ui_callback)
+
+        // Sending GetInfo here means we get an explicit close message
     }
 
     async fn send(&mut self, cmd: CableCommand) -> Result<(), WebauthnCError> {
+        trace!("send: flushing before send");
+        self.stream.flush().await.unwrap();
         let cmd = cmd.to_bytes();
+        trace!(">>> {:02x?}", cmd);
         let encrypted = self.crypter.encrypt(&cmd)?;
-
+        trace!("ENC {:02x?}", encrypted);
         self.stream.send(Message::Binary(encrypted)).await.unwrap();
-
         Ok(())
     }
 
@@ -354,6 +366,34 @@ fn ecdh(
 mod test {
     use super::*;
 
+
+/*
+Chrome
+
+FIDO: DEBUG: fido_tunnel_device.cc:429 Linking information was not received from caBLE device
+FIDO: DEBUG: fido_tunnel_device.cc:433 tunnel-7CE0C968AA83BB21: established v2.1
+FIDO: DEBUG: device_response_converter.cc:265 -> {1: ["FIDO_2_0"], 3: h'REDACTED', 4: {"rk": true, "uv": true}}
+FIDO: DEBUG: fido_device.cc:80 The device supports the CTAP2 protocol.
+
+
+FIDO: DEBUG: ctap2_device_operation.h:87 <- 1 
+{1: h'66569EFC827249E894E662CA9C78401C128D9053685052E42395DC69B972611B', 
+ 2: {"id": "webauthn.firstyear.id.au", "name": "webauthn.firstyear.id.au"},
+ 3: {"id": h'3BC33B00624F4D45912DC4E2EB75A289', "name": "a", "displayName": "a"},
+ 4: [{"alg": -7, "type": "public-key"}, {"alg": -257, "type": "public-key"}],
+ 5: [{"id": h'00010203', "type": "public-key"}],   // excludelist
+ 7: {"uv": true}}
+
+
+We send:
+
+CBOR: cmd=1, cbor=Ok(Map({
+  Integer(1): Bytes( [246, 134, 212, 222, 63, 120, 188, 83, 162, 239, 197, 129, 146, 115, 255, 101, 140, 102, 137, 129, 161, 162, 25, 206, 163, 3, 22, 222, 112, 135, 101, 51]),
+  Integer(2): Map({Text("id"): Text("webauthn.firstyear.id.au"), Text("name"): Text("webauthn.firstyear.id.au")}),
+  Integer(3): Map({Text("id"): Bytes([158, 170, 228, 89, 68, 28, 73, 194, 134, 19, 227, 153, 107, 220, 150, 238]), Text("name"): Text("william"), Text("displayName"): Text("william")}),
+  Integer(4): Array([Map({Text("alg"): Integer(-7), Text("type"): Text("public-key")}), Map({Text("alg"): Integer(-257), Text("type"): Text("public-key")})]),
+  Integer(7): Map({Text("uv"): Bool(true)})}))
+*/
     #[test]
     fn check_known_tunnel_server_domains() {
         assert_eq!(get_domain(0), Some(String::from("cable.ua5v.com")));

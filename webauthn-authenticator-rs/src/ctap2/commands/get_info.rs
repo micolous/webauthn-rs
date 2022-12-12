@@ -24,8 +24,8 @@ impl CBORCommand for GetInfoRequest {
 /// `authenticatorGetInfo` response type.
 ///
 /// Reference: <https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#authenticatorGetInfo>
-#[derive(Deserialize, Debug, Clone)]
-#[serde(try_from = "BTreeMap<u32, Value>")]
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(try_from = "BTreeMap<u32, Value>", into = "BTreeMap<u32, Value>")]
 pub struct GetInfoResponse {
     /// All CTAP protocol versions which the token supports.
     pub versions: BTreeSet<String>,
@@ -219,6 +219,92 @@ impl TryFrom<BTreeMap<u32, Value>> for GetInfoResponse {
             vendor_prototype_config_cmds,
             */
         })
+    }
+}
+
+impl From<GetInfoResponse> for BTreeMap<u32, Value> {
+    fn from(value: GetInfoResponse) -> Self {
+        let GetInfoResponse {
+            versions,
+            extensions,
+            aaguid,
+            options,
+            max_msg_size,
+            pin_protocols,
+            max_cred_count_in_list,
+            max_cred_id_len,
+            transports,
+            algorithms,
+            min_pin_length,
+        } = value;
+
+        let mut o = BTreeMap::from([
+            (
+                0x01,
+                Value::Array(versions.into_iter().map(|v| Value::Text(v)).collect()),
+            ),
+            (0x03, Value::Bytes(aaguid)),
+        ]);
+
+        if let Some(extensions) = extensions {
+            o.insert(
+                0x02,
+                Value::Array(extensions.into_iter().map(|v| Value::Text(v)).collect()),
+            );
+        }
+
+        if let Some(options) = options {
+            o.insert(
+                0x04,
+                Value::Map(
+                    options
+                        .into_iter()
+                        .map(|(k, v)| (Value::Text(k), Value::Bool(v)))
+                        .collect(),
+                ),
+            );
+        }
+
+        if let Some(max_msg_size) = max_msg_size {
+            o.insert(0x05, Value::Integer(max_msg_size.into()));
+        }
+
+        if let Some(pin_protocols) = pin_protocols {
+            o.insert(
+                0x06,
+                Value::Array(
+                    pin_protocols
+                        .into_iter()
+                        .map(|v| Value::Integer(v.into()))
+                        .collect(),
+                ),
+            );
+        }
+
+        if let Some(max_cred_count_in_list) = max_cred_count_in_list {
+            o.insert(0x07, Value::Integer(max_cred_count_in_list.into()));
+        }
+
+        if let Some(max_cred_id_len) = max_cred_id_len {
+            o.insert(0x08, Value::Integer(max_cred_id_len.into()));
+        }
+
+        if let Some(transports) = transports {
+            o.insert(
+                0x09,
+                Value::Array(transports.into_iter().map(|v| Value::Text(v)).collect()),
+            );
+        }
+
+        if let Some(algorithms) = algorithms {
+            o.insert(0x0a, algorithms);
+        }
+
+        if let Some(min_pin_length) = min_pin_length {
+            o.insert(0x0d, Value::Integer((min_pin_length as u32).into()));
+        }
+
+        o
     }
 }
 

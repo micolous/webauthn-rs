@@ -128,6 +128,9 @@ pub enum AuthenticatorTransport {
     Hybrid,
     /// Test transport; used for Windows 10.
     Test,
+    // TODO: Android reports "internal" + "cable" + "hybrid" over caBLE
+    // TODO: https://github.com/WebKit/WebKit/pull/2207 https://bugs.webkit.org/show_bug.cgi?id=242365
+    // Safari's CCID transport is labelled "smart-card" for some reason, even though it's NFC
 }
 
 impl FromStr for AuthenticatorTransport {

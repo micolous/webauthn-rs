@@ -97,9 +97,7 @@ impl CableNoise {
         let cipher = Cipher::aes_256_gcm();
         let decrypted = decrypt_aead(cipher, &self.symmetric_key, Some(&nonce), &self.h[..], &ct[..msg_len], &ct[msg_len..]).unwrap();
         trace!("decrypted: {:?}", decrypted);
-        if !decrypted.is_empty() {
-            self.mix_hash(ct);
-        }
+        self.mix_hash(ct);
         Ok(decrypted)
     }
 
