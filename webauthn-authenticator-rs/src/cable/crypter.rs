@@ -53,7 +53,7 @@ impl Crypter {
         let decrypted = decrypt_aead(cipher, &self.read_key, Some(&nonce), aad, &ct[..msg_len], &ct[msg_len..]);
         trace!("decrypted: {:?}", decrypted);
 
-        let decrypted = match decrypted {
+        let mut decrypted = match decrypted {
             Err(e) => {
                 if !self.new_construction && self.read_seq == 0 {
                     // Switch to new construction mode
@@ -70,10 +70,21 @@ impl Crypter {
         };
         
         self.read_seq += 1;
-        trace!("decrypted value: {:?}", decrypted);
-        // TODO: handle padding
 
-        todo!()
+        if decrypted.is_empty() {
+            error!("Invalid caBLE message (empty)");
+            return Err(WebauthnCError::Internal);
+        }
+
+        // Handle padding
+        let padding_len = (decrypted.last().map(|l| *l).unwrap_or_default() as usize) + 1;
+        if padding_len > decrypted.len() {
+            error!("Invalid caBLE message (padding length {} > message length {})", padding_len, decrypted.len());
+            return Err(WebauthnCError::Internal);
+        }
+
+        decrypted.truncate(decrypted.len() - padding_len);
+        Ok(decrypted)
     }
 
     fn construct_nonce(&self, counter: u32) -> [u8; 12] {

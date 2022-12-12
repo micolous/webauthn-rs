@@ -235,7 +235,7 @@ macro_rules! deserialize_cbor {
         impl $crate::ctap2::commands::CBORResponse for $name {
             fn try_from(i: &[u8]) -> Result<Self, $crate::error::WebauthnCError> {
                 if i.is_empty() {
-                    TryFrom::try_from(BTreeMap::new()).map_err(|e| {
+                    TryFrom::try_from(std::collections::BTreeMap::new()).map_err(|e| {
                         error!("Tried to deserialise empty input, got error: {:?}", e);
                         $crate::error::WebauthnCError::Cbor
                     })

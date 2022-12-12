@@ -4,6 +4,7 @@ extern crate tracing;
 use std::io::{stdin, stdout, Write};
 
 use futures::executor::block_on;
+use webauthn_authenticator_rs::cable::{connect_cable_authenticator, CableRequestType};
 use webauthn_authenticator_rs::ctap2::CtapAuthenticator;
 use webauthn_authenticator_rs::prelude::Url;
 use webauthn_authenticator_rs::softtoken::SoftToken;
@@ -34,11 +35,19 @@ fn select_transport<'a, U: UiCallback>(ui: &'a U) -> impl AuthenticatorBackend +
     panic!("No tokens available!");
 }
 
+#[tokio::main]
+async fn connect_cable<'a, U: UiCallback>(ui: &'a U) -> impl AuthenticatorBackend + 'a {
+    connect_cable_authenticator(CableRequestType::DiscoverableMakeCredential, ui)
+        .await
+        .unwrap()
+}
+
 fn select_provider<'a>(ui: &'a Cli) -> Box<dyn AuthenticatorBackend + 'a> {
     let mut providers: Vec<(&str, fn(&'a Cli) -> Box<dyn AuthenticatorBackend>)> = Vec::new();
 
     providers.push(("SoftToken", |_| Box::new(SoftToken::new().unwrap().0)));
     providers.push(("CTAP", |ui| Box::new(select_transport(ui))));
+    providers.push(("caBLE", |ui| Box::new(connect_cable(ui))));
 
     #[cfg(feature = "u2fhid")]
     providers.push(("Mozilla", |_| {

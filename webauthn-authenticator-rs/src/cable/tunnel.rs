@@ -1,7 +1,15 @@
 //! Tunnel functions
 
+use std::collections::BTreeMap;
+use std::fmt::Debug;
+
+use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
-use openssl::{ec::{EcKeyRef, EcPointRef, PointConversionForm, EcPoint}, pkey_ctx::PkeyCtx};
+use openssl::{
+    ec::{EcKeyRef, EcPoint, EcPointRef, PointConversionForm},
+    pkey_ctx::PkeyCtx,
+};
+use serde_cbor::Value;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -15,11 +23,17 @@ use tokio_tungstenite::{
     },
     MaybeTlsStream, WebSocketStream,
 };
+use webauthn_rs_proto::AuthenticatorTransport;
 
 use crate::{
-    cable::{noise::{CableNoise, HandshakeType, get_public_key_bytes}, crypter::Crypter},
+    cable::{
+        crypter::Crypter,
+        framing::CableFrame,
+        noise::{get_public_key_bytes, CableNoise, HandshakeType},
+    },
+    ctap2::{commands::GetInfoResponse, CBORResponse, CBORCommand, CtapAuthenticator},
     prelude::WebauthnCError,
-    util::compute_sha256,
+    util::compute_sha256, transport::Token, ui::UiCallback,
 };
 
 use super::*;
@@ -69,21 +83,21 @@ pub fn get_domain(domain_id: u16) -> Option<String> {
     Some(o)
 }
 
-pub struct Tunnel<'a> {
+pub struct Tunnel {
     psk: Psk,
     stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
-    local_identity: &'a EcKeyRef<Private>,
     noise: CableNoise,
     ephemeral_key: EcKey<Private>,
     crypter: Crypter,
+    info: GetInfoResponse,
 }
 
-impl<'a> Tunnel<'a> {
+impl Tunnel {
     pub async fn connect(
         uri: &Uri,
         psk: Psk,
-        local_identity: &'a EcKeyRef<Private>,
-    ) -> Result<Tunnel<'a>, WebauthnCError> {
+        local_identity: &EcKeyRef<Private>,
+    ) -> Result<Tunnel, WebauthnCError> {
         let mut request = IntoClientRequest::into_client_request(uri).unwrap();
 
         let headers = request.headers_mut();
@@ -169,7 +183,6 @@ impl<'a> Tunnel<'a> {
             ecdh(&local_identity, &peer_key, &mut shared_key_se)?;
             noise.mix_key(&shared_key_se)?;
 
-
             let pt = noise.decrypt_and_hash(ct)?;
 
             // let mut payload = [0; 65535];
@@ -203,21 +216,73 @@ impl<'a> Tunnel<'a> {
             error!("Unexpected websocket response type");
             return Err(WebauthnCError::Unknown);
         };
-        
+
         trace!("decrypted:");
         let decrypted = crypter.decrypt(&v)?;
         trace!("<<< {:?}", decrypted);
 
+        let v: BTreeMap<u32, Value> =
+            serde_cbor::from_slice(&decrypted).map_err(|_| WebauthnCError::Cbor)?;
+
+        let frame = CableFrame::try_from(v)?;
+
+        let info =
+            <GetInfoResponse as CBORResponse>::try_from(frame.payload.as_slice())?;
+
         let t = Self {
             psk,
             stream,
-            local_identity,
             noise,
             ephemeral_key,
             crypter,
+            info,
         };
 
         Ok(t)
+    }
+
+    /// Establishes a [CtapAuthenticator] connection for communicating with a
+    /// caBLE authenticator using CTAP 2.x.
+    /// 
+    /// See [CtapAuthenticator::new] for further detail.
+    pub fn get_authenticator<'a, U: UiCallback>(self, ui_callback: &'a U) -> Option<CtapAuthenticator<'a, Self, U>>
+    {
+        CtapAuthenticator::new_with_info(self.info.to_owned(), self, ui_callback)
+    }
+}
+
+impl Debug for Tunnel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tunnel")
+            .field("stream", &self.stream)
+            .finish()
+    }
+}
+
+#[async_trait]
+impl Token for Tunnel {
+    fn get_transport(&self) -> AuthenticatorTransport {
+        AuthenticatorTransport::Hybrid
+    }
+
+    async fn transmit_raw<C, U>(&self, cmd: C, ui: &U) -> Result<Vec<u8>, WebauthnCError>
+    where
+        C: CBORCommand,
+        U: UiCallback {
+        todo!()
+    }
+
+    fn cancel(&self) -> Result<(),WebauthnCError>  {
+        todo!()
+    }
+
+    async fn init(&mut self) -> Result<(), WebauthnCError> {
+        Ok(())
+    }
+
+
+    fn close(&self) -> Result<(),WebauthnCError>  {
+        todo!()
     }
 }
 

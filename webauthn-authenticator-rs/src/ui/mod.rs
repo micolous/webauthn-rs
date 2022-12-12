@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 use std::io::{stderr, Write};
+use qrcode::{QrCode, render::unicode::Dense1x2};
 
 use crate::ctap2::EnrollSampleStatus;
 
@@ -21,6 +22,23 @@ pub trait UiCallback: Sync + Send + Debug {
         remaining_samples: u32,
         feedback: Option<EnrollSampleStatus>,
     );
+
+    /// Prompt the user to scan a QR code with their mobile device to start the
+    /// caBLE linking process.
+    /// 
+    /// This method will be called synchronously, and must not block.
+    fn cable_qr_code(
+        &self,
+        url: String,
+    );
+
+    /// Dismiss a displayed QR code from the screen.
+    /// 
+    /// This method will be called synchronously, and must not block.
+    fn dismiss_qr_code(
+        &self,
+    );
+
 }
 
 /// Basic CLI [UiCallback] implementation.
@@ -51,5 +69,26 @@ impl UiCallback for Cli {
         if let Some(feedback) = feedback {
             writeln!(stderr, "Last impression was {:?}", feedback).ok();
         }
+    }
+
+    fn cable_qr_code(
+        &self,
+        url: String,
+    ) {
+        let qr = QrCode::new(url).unwrap();
+
+        let code = qr
+            .render::<Dense1x2>()
+            .dark_color(Dense1x2::Light)
+            .light_color(Dense1x2::Dark)
+            .build();
+        println!("Scan the QR code with your mobile device to use caBLE:");
+        println!("{}", code);
+    }
+
+    fn dismiss_qr_code(
+        &self,
+    ) {
+        println!("caBLE authenticator detected, connecting...");
     }
 }

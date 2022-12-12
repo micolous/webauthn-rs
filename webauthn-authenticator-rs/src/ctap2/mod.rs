@@ -192,7 +192,7 @@ use crate::AuthenticatorBackend;
 
 pub use self::commands::EnrollSampleStatus;
 use self::commands::GetInfoRequest;
-pub use self::commands::{CBORCommand, CBORResponse};
+pub use self::commands::{CBORCommand, CBORResponse, GetInfoResponse};
 pub use self::{ctap20::Ctap20Authenticator, ctap21::Ctap21Authenticator};
 pub(crate) use self::pin_uv::{hkdf_sha_256, regenerate, decrypt, encrypt};
 
@@ -219,6 +219,29 @@ impl<'a, T: Token, U: UiCallback> CtapAuthenticator<'a, T, U> {
         token.init().await.ok()?;
         let info = token.transmit(GetInfoRequest {}, ui_callback).await.ok()?;
 
+        if info.versions.contains(FIDO_2_1) {
+            Some(Self::Fido21(Ctap21Authenticator::new(
+                info,
+                token,
+                ui_callback,
+            )))
+        } else if info.versions.contains(FIDO_2_0) || info.versions.contains(FIDO_2_1_PRE) {
+            // TODO: Implement FIDO 2.1-PRE properly (prototype authenticatorBioEnrollment, prototype authenticatorCredentialManagement)
+            // 2.1-PRE intentionally falls back to v2.0, because 2.1-PRE doesn't support all v2.1 commands.
+            Some(Self::Fido20(Ctap20Authenticator::new(
+                info,
+                token,
+                ui_callback,
+            )))
+        } else {
+            None
+        }
+    }
+
+    /// Creates a connection to an already-initialized token, and gets a reference to the highest supported FIDO version.
+    ///
+    /// Returns `None` if we don't support any version of CTAP which the token supports.
+    pub(crate) fn new_with_info(info: GetInfoResponse, token: T, ui_callback: &'a U) -> Option<CtapAuthenticator<'a, T, U>> {
         if info.versions.contains(FIDO_2_1) {
             Some(Self::Fido21(Ctap21Authenticator::new(
                 info,

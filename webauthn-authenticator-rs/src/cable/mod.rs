@@ -61,12 +61,12 @@ mod btle;
 mod crypter;
 mod handshake;
 mod noise;
+mod framing;
 mod tunnel;
 
 use std::mem::size_of;
 
 pub use base10::DecodeError;
-use nom::HexDisplay;
 use num_traits::ToPrimitive;
 use openssl::{
     bn::{BigNum, BigNumContext},
@@ -78,12 +78,12 @@ use openssl::{
     sign::Signer,
 };
 use tokio_tungstenite::tungstenite::http::Uri;
-use url::Url;
 
-use self::{btle::*, handshake::*, tunnel::get_domain};
+use self::{btle::*, handshake::*, tunnel::{get_domain, Tunnel}};
+pub use self::handshake::CableRequestType;
 use crate::{
-    ctap2::{decrypt, encrypt, hkdf_sha_256, regenerate},
-    error::WebauthnCError,
+    ctap2::{decrypt, encrypt, hkdf_sha_256, regenerate, CtapAuthenticator},
+    error::WebauthnCError, ui::UiCallback,
 };
 
 type BleAdvert = [u8; 16 + 4];
@@ -345,6 +345,53 @@ impl Discovery {
 
         Ok(None)
     }
+}
+
+pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(request_type: CableRequestType, ui_callback: &'a U) -> Result<CtapAuthenticator<'a, Tunnel, U>, WebauthnCError> {
+    trace!("Creating discovery QR code...");
+    let disco = Discovery::new(request_type)?;
+    let handshake = disco.make_handshake()?;
+    let url = handshake.to_qr_url()?;
+    ui_callback.cable_qr_code(url);
+
+    trace!("Opening BTLE...");
+    let scanner = Scanner::new().await?;
+    trace!("Waiting for beacon...");
+    let eid = disco
+        .wait_for_matching_response(&scanner)
+        .await?
+        .ok_or_else(|| {
+            error!("No caBLE EID received!");
+            WebauthnCError::NoSelectedToken
+        })?;
+    ui_callback.dismiss_qr_code();
+
+    // TODO: move to library proper
+    let mut tunnel_id: TunnelId = [0; size_of::<TunnelId>()];
+    derive(
+        &disco.qr_secret,
+        &[],
+        DerivedValueType::TunnelID,
+        &mut tunnel_id,
+    )?;
+    let mut psk: Psk = [0; size_of::<Psk>()];
+    derive(
+        &disco.qr_secret,
+        &eid.to_bytes(),
+        DerivedValueType::PSK,
+        &mut psk,
+    )?;
+
+    let connect_url = eid.get_connect_url(tunnel_id).ok_or_else(|| {
+        error!("Unknown WebSocket tunnel URL for {:?}", eid);
+        WebauthnCError::NotSupported
+    })?;
+    let tun = Tunnel::connect(&connect_url, psk, &disco.local_identity.as_ref()).await?;
+
+    tun.get_authenticator(ui_callback).ok_or_else(|| {
+        error!("no supported protocol versions!");
+        WebauthnCError::NotSupported
+    })
 }
 
 #[cfg(test)]

@@ -24,7 +24,7 @@ impl CBORCommand for GetInfoRequest {
 /// `authenticatorGetInfo` response type.
 ///
 /// Reference: <https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#authenticatorGetInfo>
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(try_from = "BTreeMap<u32, Value>")]
 pub struct GetInfoResponse {
     /// All CTAP protocol versions which the token supports.
