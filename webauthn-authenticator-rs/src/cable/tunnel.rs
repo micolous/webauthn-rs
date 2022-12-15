@@ -1,7 +1,7 @@
 //! Tunnel functions
 
-use std::{collections::BTreeMap, sync::Mutex};
 use std::fmt::Debug;
+use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
@@ -10,28 +10,26 @@ use openssl::{
     pkey_ctx::PkeyCtx,
 };
 use serde_cbor::Value;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
-};
+use tokio::net::TcpStream;
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{
         client::IntoClientRequest,
-        http::{HeaderValue, Request, Uri},
+        http::{HeaderValue, Uri},
         Message,
     },
     MaybeTlsStream, WebSocketStream,
 };
 use webauthn_rs_proto::AuthenticatorTransport;
 
+use crate::error::CtapError;
 use crate::{
     cable::{
         crypter::Crypter,
         framing::{CableCommand, CablePostHandshake, MessageType},
         noise::{get_public_key_bytes, CableNoise, HandshakeType},
     },
-    ctap2::{commands::GetInfoResponse, CBORCommand, CBORResponse, CtapAuthenticator},
+    ctap2::{commands::GetInfoResponse, CBORCommand, CtapAuthenticator},
     prelude::WebauthnCError,
     transport::Token,
     ui::UiCallback,
@@ -277,7 +275,9 @@ impl Tunnel {
     async fn recv(&mut self) -> Result<CableCommand, WebauthnCError> {
         let resp = self.stream.next().await.unwrap().unwrap();
 
-        let resp = if let Message::Binary(v) = resp { v  } else {
+        let resp = if let Message::Binary(v) = resp {
+            v
+        } else {
             error!("Incorrect message type");
             return Err(WebauthnCError::Unknown);
         };
@@ -319,7 +319,13 @@ impl Token for Tunnel {
         };
         self.send(f).await?;
         let resp = self.recv().await?;
-        Ok(resp.data)
+        let mut data = resp.data;
+
+        let err = CtapError::from(data.remove(0));
+        if !err.is_ok() {
+            return Err(err.into());
+        }
+        Ok(data)
     }
 
     fn cancel(&self) -> Result<(), WebauthnCError> {
@@ -366,34 +372,33 @@ fn ecdh(
 mod test {
     use super::*;
 
+    /*
+    Chrome
 
-/*
-Chrome
-
-FIDO: DEBUG: fido_tunnel_device.cc:429 Linking information was not received from caBLE device
-FIDO: DEBUG: fido_tunnel_device.cc:433 tunnel-7CE0C968AA83BB21: established v2.1
-FIDO: DEBUG: device_response_converter.cc:265 -> {1: ["FIDO_2_0"], 3: h'REDACTED', 4: {"rk": true, "uv": true}}
-FIDO: DEBUG: fido_device.cc:80 The device supports the CTAP2 protocol.
-
-
-FIDO: DEBUG: ctap2_device_operation.h:87 <- 1 
-{1: h'66569EFC827249E894E662CA9C78401C128D9053685052E42395DC69B972611B', 
- 2: {"id": "webauthn.firstyear.id.au", "name": "webauthn.firstyear.id.au"},
- 3: {"id": h'3BC33B00624F4D45912DC4E2EB75A289', "name": "a", "displayName": "a"},
- 4: [{"alg": -7, "type": "public-key"}, {"alg": -257, "type": "public-key"}],
- 5: [{"id": h'00010203', "type": "public-key"}],   // excludelist
- 7: {"uv": true}}
+    FIDO: DEBUG: fido_tunnel_device.cc:429 Linking information was not received from caBLE device
+    FIDO: DEBUG: fido_tunnel_device.cc:433 tunnel-7CE0C968AA83BB21: established v2.1
+    FIDO: DEBUG: device_response_converter.cc:265 -> {1: ["FIDO_2_0"], 3: h'REDACTED', 4: {"rk": true, "uv": true}}
+    FIDO: DEBUG: fido_device.cc:80 The device supports the CTAP2 protocol.
 
 
-We send:
+    FIDO: DEBUG: ctap2_device_operation.h:87 <- 1
+    {1: h'66569EFC827249E894E662CA9C78401C128D9053685052E42395DC69B972611B',
+     2: {"id": "webauthn.firstyear.id.au", "name": "webauthn.firstyear.id.au"},
+     3: {"id": h'3BC33B00624F4D45912DC4E2EB75A289', "name": "a", "displayName": "a"},
+     4: [{"alg": -7, "type": "public-key"}, {"alg": -257, "type": "public-key"}],
+     5: [{"id": h'00010203', "type": "public-key"}],   // excludelist
+     7: {"uv": true}}
 
-CBOR: cmd=1, cbor=Ok(Map({
-  Integer(1): Bytes( [246, 134, 212, 222, 63, 120, 188, 83, 162, 239, 197, 129, 146, 115, 255, 101, 140, 102, 137, 129, 161, 162, 25, 206, 163, 3, 22, 222, 112, 135, 101, 51]),
-  Integer(2): Map({Text("id"): Text("webauthn.firstyear.id.au"), Text("name"): Text("webauthn.firstyear.id.au")}),
-  Integer(3): Map({Text("id"): Bytes([158, 170, 228, 89, 68, 28, 73, 194, 134, 19, 227, 153, 107, 220, 150, 238]), Text("name"): Text("william"), Text("displayName"): Text("william")}),
-  Integer(4): Array([Map({Text("alg"): Integer(-7), Text("type"): Text("public-key")}), Map({Text("alg"): Integer(-257), Text("type"): Text("public-key")})]),
-  Integer(7): Map({Text("uv"): Bool(true)})}))
-*/
+
+    We send:
+
+    CBOR: cmd=1, cbor=Ok(Map({
+      Integer(1): Bytes( [246, 134, 212, 222, 63, 120, 188, 83, 162, 239, 197, 129, 146, 115, 255, 101, 140, 102, 137, 129, 161, 162, 25, 206, 163, 3, 22, 222, 112, 135, 101, 51]),
+      Integer(2): Map({Text("id"): Text("webauthn.firstyear.id.au"), Text("name"): Text("webauthn.firstyear.id.au")}),
+      Integer(3): Map({Text("id"): Bytes([158, 170, 228, 89, 68, 28, 73, 194, 134, 19, 227, 153, 107, 220, 150, 238]), Text("name"): Text("william"), Text("displayName"): Text("william")}),
+      Integer(4): Array([Map({Text("alg"): Integer(-7), Text("type"): Text("public-key")}), Map({Text("alg"): Integer(-257), Text("type"): Text("public-key")})]),
+      Integer(7): Map({Text("uv"): Bool(true)})}))
+    */
     #[test]
     fn check_known_tunnel_server_domains() {
         assert_eq!(get_domain(0), Some(String::from("cable.ua5v.com")));

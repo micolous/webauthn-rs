@@ -35,29 +35,60 @@ fn select_transport<'a, U: UiCallback>(ui: &'a U) -> impl AuthenticatorBackend +
     panic!("No tokens available!");
 }
 
-#[tokio::main]
+enum Provider {
+    SoftToken,
+    CTAP,
+    Cable,
+}
+
+impl Provider {
+    async fn connect_provider<'a, U: UiCallback>(&self, ui: &'a U) -> Box<dyn AuthenticatorBackend + 'a> {
+        match self {
+            Provider::SoftToken => {
+                Box::new(SoftToken::new().unwrap().0)
+            },
+            Provider::CTAP => {
+                Box::new(select_transport(ui))
+            },
+            Provider::Cable => {
+                Box::new(connect_cable(ui).await)
+            }
+        }
+    }
+
+    fn name(&self) -> &str {
+        use Provider::*;
+        match self {
+            SoftToken => "SoftToken",
+            CTAP => "CTAP",
+            Cable => "Cable"
+        }
+    }
+}
+
 async fn connect_cable<'a, U: UiCallback>(ui: &'a U) -> impl AuthenticatorBackend + 'a {
-    connect_cable_authenticator(CableRequestType::DiscoverableMakeCredential, ui)
+    connect_cable_authenticator(CableRequestType::MakeCredential, ui)
         .await
         .unwrap()
 }
 
-fn select_provider<'a>(ui: &'a Cli) -> Box<dyn AuthenticatorBackend + 'a> {
-    let mut providers: Vec<(&str, fn(&'a Cli) -> Box<dyn AuthenticatorBackend>)> = Vec::new();
+async fn select_provider<'a>(ui: &'a Cli) -> Box<dyn AuthenticatorBackend + 'a> {
+    // let mut providers: Vec<(&str, fn(&'a Cli) -> Box<dyn AuthenticatorBackend>)> = Vec::new();
 
-    providers.push(("SoftToken", |_| Box::new(SoftToken::new().unwrap().0)));
-    providers.push(("CTAP", |ui| Box::new(select_transport(ui))));
-    providers.push(("caBLE", |ui| Box::new(connect_cable(ui))));
+    // #[cfg(feature = "u2fhid")]
+    // providers.push(("Mozilla", |_| {
+    //     Box::new(webauthn_authenticator_rs::u2fhid::U2FHid::default())
+    // }));
 
-    #[cfg(feature = "u2fhid")]
-    providers.push(("Mozilla", |_| {
-        Box::new(webauthn_authenticator_rs::u2fhid::U2FHid::default())
-    }));
-
-    #[cfg(feature = "win10")]
-    providers.push(("Windows 10", |_| {
-        Box::new(webauthn_authenticator_rs::win10::Win10::default())
-    }));
+    // #[cfg(feature = "win10")]
+    // providers.push(("Windows 10", |_| {
+    //     Box::new(webauthn_authenticator_rs::win10::Win10::default())
+    // }));
+    let providers = [
+        Provider::SoftToken,
+        Provider::CTAP,
+        Provider::Cable,
+    ];
 
     if providers.is_empty() {
         panic!("oops, no providers available in this build!");
@@ -65,8 +96,8 @@ fn select_provider<'a>(ui: &'a Cli) -> Box<dyn AuthenticatorBackend + 'a> {
 
     loop {
         println!("Select a provider:");
-        for (i, (name, _)) in providers.iter().enumerate() {
-            println!("({}): {}", i + 1, name);
+        for (i, provider) in providers.iter().enumerate() {
+            println!("({}): {}", i + 1, provider.name());
         }
 
         let mut buf = String::new();
@@ -76,12 +107,11 @@ fn select_provider<'a>(ui: &'a Cli) -> Box<dyn AuthenticatorBackend + 'a> {
         let selected: Result<u64, _> = buf.trim().parse();
         match selected {
             Ok(v) => {
-                if v < 1 || (v as usize) > providers.len() {
-                    println!("Input out of range: {}", v);
+                if let Some(provider) = providers.get((v as usize) - 1) {
+                    println!("Using {}...", provider.name());
+                    return provider.connect_provider(ui).await;
                 } else {
-                    let p = providers.remove((v as usize) - 1);
-                    println!("Using {}...", p.0);
-                    return p.1(ui);
+                    println!("Input out of range: {}", v);
                 }
             }
             Err(_) => println!("Input was not a number"),
@@ -90,10 +120,11 @@ fn select_provider<'a>(ui: &'a Cli) -> Box<dyn AuthenticatorBackend + 'a> {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     tracing_subscriber::fmt::init();
     let ui = Cli {};
-    let mut u = select_provider(&ui);
+    let mut u = select_provider(&ui).await;
 
     // WARNING: don't use this as an example of how to use the library!
     let wan = Webauthn::new_unsafe_experts_only(
