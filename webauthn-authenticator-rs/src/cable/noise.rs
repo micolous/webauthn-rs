@@ -1,17 +1,24 @@
 use std::mem::size_of;
 
 use openssl::{
-    ec::{EcGroup, EcKey, PointConversionForm, EcKeyRef, EcPoint, EcPointRef},
+    bn::{BigNum, BigNumContext},
+    ec::{EcGroup, EcKey, EcKeyRef, EcPoint, EcPointRef, PointConversionForm},
+    envelope::Seal,
     nid::Nid,
-    pkey::{Private, PKey}, bn::{BigNumContext, BigNum}, pkey_ctx::PkeyCtx, symm::{Cipher, encrypt_aead, decrypt_aead}, envelope::Seal,
+    pkey::{PKey, Private},
+    pkey_ctx::PkeyCtx,
+    symm::{decrypt_aead, encrypt_aead, Cipher},
 };
 
-use crate::{ctap2::{hkdf_sha_256}, util::compute_sha256_2, prelude::WebauthnCError};
+use crate::{ctap2::hkdf_sha_256, prelude::WebauthnCError, util::compute_sha256_2};
 
 pub fn get_public_key_bytes(private_key: &EcKeyRef<Private>) -> Vec<u8> {
     let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
     let mut ctx = BigNumContext::new().unwrap();
-    private_key.public_key().to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx).unwrap()
+    private_key
+        .public_key()
+        .to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)
+        .unwrap()
 }
 
 // implementing Cable's version of noise from scratch
@@ -82,7 +89,14 @@ impl CableNoise {
 
         let cipher = Cipher::aes_256_gcm();
         let mut tag = [0; 16];
-        let mut encrypted = encrypt_aead(cipher, &self.symmetric_key, Some(&nonce), &self.h[..], pt, &mut tag)?;
+        let mut encrypted = encrypt_aead(
+            cipher,
+            &self.symmetric_key,
+            Some(&nonce),
+            &self.h[..],
+            pt,
+            &mut tag,
+        )?;
         encrypted.extend_from_slice(&tag);
         self.mix_hash(&encrypted);
         Ok(encrypted)
@@ -93,9 +107,22 @@ impl CableNoise {
         nonce[..size_of::<u32>()].copy_from_slice(&self.symmetric_nonce.to_be_bytes());
         self.symmetric_nonce += 1;
         let msg_len = ct.len() - 16;
-        trace!("decrypt_and_hash(ct={:?}, tag={:?}, nonce={:?})", &ct[..msg_len], &ct[msg_len..], &nonce);
+        trace!(
+            "decrypt_and_hash(ct={:?}, tag={:?}, nonce={:?})",
+            &ct[..msg_len],
+            &ct[msg_len..],
+            &nonce
+        );
         let cipher = Cipher::aes_256_gcm();
-        let decrypted = decrypt_aead(cipher, &self.symmetric_key, Some(&nonce), &self.h[..], &ct[..msg_len], &ct[msg_len..]).unwrap();
+        let decrypted = decrypt_aead(
+            cipher,
+            &self.symmetric_key,
+            Some(&nonce),
+            &self.h[..],
+            &ct[..msg_len],
+            &ct[msg_len..],
+        )
+        .unwrap();
         trace!("decrypted: {:?}", decrypted);
         if !decrypted.is_empty() {
             self.mix_hash(ct);
@@ -128,5 +155,21 @@ mod test {
     #[test]
     fn a() {
         let _ = tracing_subscriber::fmt::try_init();
+        let ck = [
+            0x30, 0x7a, 0x70, 0x6e, 0x63, 0x38, 0x2e, 0x8e, 0x9d, 0x46, 0xcc, 0xdb, 0xc, 0xeb,
+            0xed, 0x5c, 0x2b, 0x19, 0x28, 0xc5, 0xae, 0x2d, 0xee, 0x63, 0x52, 0xe1, 0x30, 0xac,
+            0xe1, 0xf7, 0x4f, 0x44,
+        ];
+        let expected = [
+            0x1f, 0xba, 0x3c, 0xce, 0x17, 0x62, 0x2c, 0x68, 0x26, 0x8d, 0x9f, 0x75, 0xb5, 0xa8,
+            0xa3, 0x35, 0x1b, 0x51, 0x7f, 0x9, 0x6f, 0xb5, 0xe2, 0x94, 0x94, 0x1a, 0xf7, 0xe3,
+            0xa6, 0xa8, 0xd6, 0xe1, 0xe3, 0x4f, 0x1a, 0xa3, 0x74, 0x72, 0x38, 0xc0, 0x4d, 0x3b,
+            0xd2, 0x5e, 0x7, 0xef, 0x1b, 0x35, 0xfe, 0xf3, 0x59, 0x0, 0xd, 0x75, 0x56, 0x15, 0xcd,
+            0x85, 0xbe, 0x27, 0xcf, 0xc8, 0x7, 0xd1,
+        ];
+        let mut actual = [0; 64];
+
+        hkdf_sha_256(&ck, &[], None, &mut actual).unwrap();
+        assert_eq!(expected, actual);
     }
 }
