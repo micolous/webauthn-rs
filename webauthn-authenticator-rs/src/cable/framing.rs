@@ -61,7 +61,7 @@ impl CableCommand {
     }
 
     pub fn from_bytes(protocol_version: u32, i: &[u8]) -> Self {
-        let message_type: MessageType = if protocol_version == 0 {
+        let message_type: MessageType = if protocol_version > 0 {
             i[0].into()
         } else {
             MessageType::Ctap

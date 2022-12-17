@@ -92,13 +92,13 @@ impl Token for AnyToken {
         }
     }
 
-    fn close(&self) -> Result<(), WebauthnCError> {
+    async fn close(&mut self) -> Result<(), WebauthnCError> {
         match self {
             AnyToken::Stub => unimplemented!(),
             #[cfg(feature = "nfc")]
-            AnyToken::Nfc(n) => n.close(),
+            AnyToken::Nfc(n) => n.close().await,
             #[cfg(feature = "usb")]
-            AnyToken::Usb(u) => u.close(),
+            AnyToken::Usb(u) => u.close().await,
         }
     }
 

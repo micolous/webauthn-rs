@@ -83,6 +83,13 @@ pub fn get_domain(domain_id: u16) -> Option<String> {
     Some(o)
 }
 
+/// Websocket tunnel to a caBLE authenticator.
+/// 
+/// This implements [Token], but unlike most transports:
+/// 
+/// * this only allows a single command to be executed
+/// * the command must be specified in the [HandshakeV2] QR code
+/// * the remote side "hangs up" after a single command
 pub struct Tunnel {
     psk: Psk,
     stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
@@ -186,6 +193,7 @@ impl Tunnel {
     }
 
     async fn send(&mut self, cmd: CableCommand) -> Result<(), WebauthnCError> {
+        // TODO: handle error
         trace!("send: flushing before send");
         self.stream.flush().await.unwrap();
         let cmd = cmd.to_bytes();
@@ -197,6 +205,7 @@ impl Tunnel {
     }
 
     async fn recv(&mut self) -> Result<CableCommand, WebauthnCError> {
+        // TODO: handle error
         let resp = self.stream.next().await.unwrap().unwrap();
 
         let resp = if let Message::Binary(v) = resp {
@@ -208,11 +217,7 @@ impl Tunnel {
 
         let decrypted = self.crypter.decrypt(&resp)?;
         // TODO: protocol version
-        let frame = CableCommand::from_bytes(1, &decrypted);
-        // TODO: shutdown, update events
-        assert_eq!(frame.message_type, MessageType::Ctap);
-
-        Ok(frame)
+        Ok(CableCommand::from_bytes(1, &decrypted))
     }
 }
 
@@ -242,8 +247,16 @@ impl Token for Tunnel {
             data: cmd.cbor().map_err(|_| WebauthnCError::Cbor)?,
         };
         self.send(f).await?;
-        let resp = self.recv().await?;
-        let mut data = resp.data;
+        let mut data = loop {
+            let resp = self.recv().await?;
+            if resp.message_type == MessageType::Ctap {
+                break resp.data;
+            } else {
+                // TODO: handle these.
+                warn!("unhandled message type: {:?}", resp);
+            }
+        };
+        self.close().await?;
 
         let err = CtapError::from(data.remove(0));
         if !err.is_ok() {
@@ -260,8 +273,15 @@ impl Token for Tunnel {
         Ok(())
     }
 
-    fn close(&self) -> Result<(), WebauthnCError> {
-        todo!()
+    async fn close(&mut self) -> Result<(), WebauthnCError> {
+        // We don't care if this errors
+        self.send(CableCommand {
+            protocol_version: 1,
+            message_type: MessageType::Shutdown,
+            data: vec![],
+        }).await.ok();
+        self.stream.close(None).await.ok();
+        Ok(())
     }
 }
 

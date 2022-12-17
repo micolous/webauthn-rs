@@ -219,23 +219,7 @@ impl<'a, T: Token, U: UiCallback> CtapAuthenticator<'a, T, U> {
         token.init().await.ok()?;
         let info = token.transmit(GetInfoRequest {}, ui_callback).await.ok()?;
 
-        if info.versions.contains(FIDO_2_1) {
-            Some(Self::Fido21(Ctap21Authenticator::new(
-                info,
-                token,
-                ui_callback,
-            )))
-        } else if info.versions.contains(FIDO_2_0) || info.versions.contains(FIDO_2_1_PRE) {
-            // TODO: Implement FIDO 2.1-PRE properly (prototype authenticatorBioEnrollment, prototype authenticatorCredentialManagement)
-            // 2.1-PRE intentionally falls back to v2.0, because 2.1-PRE doesn't support all v2.1 commands.
-            Some(Self::Fido20(Ctap20Authenticator::new(
-                info,
-                token,
-                ui_callback,
-            )))
-        } else {
-            None
-        }
+        Self::new_with_info(info, token, ui_callback)
     }
 
     /// Creates a connection to an already-initialized token, and gets a reference to the highest supported FIDO version.

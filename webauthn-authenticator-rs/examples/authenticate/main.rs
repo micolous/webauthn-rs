@@ -35,6 +35,7 @@ fn select_transport<'a, U: UiCallback>(ui: &'a U) -> impl AuthenticatorBackend +
     panic!("No tokens available!");
 }
 
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 enum Provider {
     SoftToken,
     CTAP,
@@ -42,7 +43,7 @@ enum Provider {
 }
 
 impl Provider {
-    async fn connect_provider<'a, U: UiCallback>(&self, ui: &'a U) -> Box<dyn AuthenticatorBackend + 'a> {
+    async fn connect_provider<'a, U: UiCallback>(&self, request_type: CableRequestType, ui: &'a U) -> Box<dyn AuthenticatorBackend + 'a>{
         match self {
             Provider::SoftToken => {
                 Box::new(SoftToken::new().unwrap().0)
@@ -51,7 +52,7 @@ impl Provider {
                 Box::new(select_transport(ui))
             },
             Provider::Cable => {
-                Box::new(connect_cable(ui).await)
+                Box::new(connect_cable(request_type, ui).await)
             }
         }
     }
@@ -66,13 +67,13 @@ impl Provider {
     }
 }
 
-async fn connect_cable<'a, U: UiCallback>(ui: &'a U) -> impl AuthenticatorBackend + 'a {
-    connect_cable_authenticator(CableRequestType::MakeCredential, ui)
+async fn connect_cable<'a, U: UiCallback>(request_type: CableRequestType, ui: &'a U) -> impl AuthenticatorBackend + 'a {
+    connect_cable_authenticator(request_type, ui)
         .await
         .unwrap()
 }
 
-async fn select_provider<'a>(ui: &'a Cli) -> Box<dyn AuthenticatorBackend + 'a> {
+fn select_provider() -> Provider {
     // let mut providers: Vec<(&str, fn(&'a Cli) -> Box<dyn AuthenticatorBackend>)> = Vec::new();
 
     // #[cfg(feature = "u2fhid")]
@@ -109,7 +110,7 @@ async fn select_provider<'a>(ui: &'a Cli) -> Box<dyn AuthenticatorBackend + 'a> 
             Ok(v) => {
                 if let Some(provider) = providers.get((v as usize) - 1) {
                     println!("Using {}...", provider.name());
-                    return provider.connect_provider(ui).await;
+                    return *provider;
                 } else {
                     println!("Input out of range: {}", v);
                 }
@@ -124,7 +125,8 @@ async fn select_provider<'a>(ui: &'a Cli) -> Box<dyn AuthenticatorBackend + 'a> 
 async fn main() {
     tracing_subscriber::fmt::init();
     let ui = Cli {};
-    let mut u = select_provider(&ui).await;
+    let provider = select_provider();
+    let mut u = provider.connect_provider(CableRequestType::MakeCredential, &ui).await;
 
     // WARNING: don't use this as an example of how to use the library!
     let wan = Webauthn::new_unsafe_experts_only(
@@ -160,6 +162,9 @@ async fn main() {
     trace!(?cred);
 
     loop {
+        if provider == Provider::Cable {
+            u = provider.connect_provider(CableRequestType::GetAssertion, &ui).await;
+        }
         let (chal, auth_state) = wan
             .generate_challenge_authenticate(
                 vec![cred.clone()],
