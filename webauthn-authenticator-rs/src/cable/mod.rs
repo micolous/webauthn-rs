@@ -409,8 +409,6 @@ pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(request_type: C
 
 #[cfg(test)]
 mod test {
-    use crate::cable::tunnel::Tunnel;
-
     use super::*;
 
     #[test]
@@ -440,62 +438,6 @@ mod test {
         advert[0] ^= 1;
         let decrypted = d.decrypt_advert(advert).unwrap();
         assert!(decrypted.is_none());
-    }
-
-    #[tokio::test]
-    async fn new() {
-        let _ = tracing_subscriber::fmt::try_init();
-        let disco = Discovery::new(CableRequestType::DiscoverableMakeCredential).unwrap();
-        trace!(?disco);
-        let private_key = String::from_utf8(disco.get_private_key_for_testing().unwrap()).unwrap();
-        trace!("private key:\n{}", private_key);
-
-        let handshake = disco.make_handshake().unwrap();
-        trace!(?handshake);
-
-        let url = handshake.to_qr_url().unwrap();
-        trace!(?url);
-        let qr = qrcode::QrCode::new(url).unwrap();
-
-        let code = qr
-            .render::<qrcode::render::unicode::Dense1x2>()
-            .dark_color(qrcode::render::unicode::Dense1x2::Light)
-            .light_color(qrcode::render::unicode::Dense1x2::Dark)
-            .build();
-        trace!("\n{}", code);
-
-        trace!("Opening BTLE");
-        let scanner = Scanner::new().await.unwrap();
-        trace!("Waiting for beacon...");
-        let r = disco
-            .wait_for_matching_response(&scanner)
-            .await
-            .unwrap()
-            .unwrap();
-        trace!(?r);
-
-        // TODO: move to library proper
-        let mut tunnel_id: TunnelId = [0; size_of::<TunnelId>()];
-        derive(
-            &disco.qr_secret,
-            &[],
-            DerivedValueType::TunnelID,
-            &mut tunnel_id,
-        )
-        .unwrap();
-        let mut psk: Psk = [0; size_of::<Psk>()];
-        derive(
-            &disco.qr_secret,
-            &r.to_bytes(),
-            DerivedValueType::PSK,
-            &mut psk,
-        ).unwrap();
-
-        let connect_url = r.get_connect_url(tunnel_id).unwrap();
-        trace!(?connect_url);
-
-        let tun = Tunnel::connect(&connect_url, psk, &disco.local_identity.as_ref()).await.unwrap();
-        todo!()
     }
 
     #[test]

@@ -86,8 +86,6 @@ pub fn get_domain(domain_id: u16) -> Option<String> {
 pub struct Tunnel {
     psk: Psk,
     stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
-    noise: CableNoise,
-    ephemeral_key: EcKey<Private>,
     crypter: Crypter,
     info: GetInfoResponse,
 }
@@ -117,38 +115,7 @@ impl Tunnel {
 
         // BuildInitialMessage
         // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=880;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
-        let mut noise = CableNoise::new(HandshakeType::KNpsk0);
-        let prologue = [1];
-        noise.mix_hash(&prologue);
-        noise.mix_hash_point(&local_identity.public_key())?;
-
-        noise.mix_key_and_hash(&psk)?;
-
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
-        let ephemeral_key = EcKey::generate(&group)?;
-
-        let ephemeral_key_public_bytes = get_public_key_bytes(&ephemeral_key.as_ref());
-        assert_eq!(ephemeral_key_public_bytes.len(), 65);
-
-        noise.mix_hash(&ephemeral_key_public_bytes);
-        noise.mix_key(&ephemeral_key_public_bytes)?;
-
-        let ct = noise.encrypt_and_hash(&[])?;
-
-        let mut handshake_message = Vec::with_capacity(ephemeral_key_public_bytes.len() + ct.len());
-        handshake_message.extend_from_slice(&ephemeral_key_public_bytes);
-        handshake_message.extend_from_slice(&ct);
-
-        // let mut noise = Builder::with_resolver(get_params(), get_resolver())
-        //     .prologue(&[1])
-        //     .local_private_key(&local_identity.private_key_to_der()?)
-        //     .psk(0, &psk)
-        //     .build_initiator()
-        //     .unwrap();
-
-        // let mut msg = [0; 65535];
-        // let len = noise.write_message(&[], &mut msg).unwrap();
-
+        let (mut noise, handshake_message) = CableNoise::build_initator(Some(local_identity), psk, None)?;
         trace!(">>> {:02x?}", &handshake_message);
         //let s = stream.get_mut();
         stream
@@ -161,53 +128,12 @@ impl Tunnel {
         //let len = s.read(&mut msg).await.unwrap();
         //trace!("<<< {:02x?}", &msg[..len]);
         trace!("<<< {:?}", resp);
-        if let Message::Binary(v) = resp {
-            if v.len() < 65 {
-                warn!("too short response? got {} bytes", v.len());
-            }
-            // this is 81 bytes
-
-            // ProcessResponse
-            let peer_point_bytes = &v[..65];
-            let ct = &v[65..];
-
-            let peer_key = bytes_to_public_key(peer_point_bytes)?;
-            let mut shared_key_ee = [0; 32];
-            ecdh(&ephemeral_key, &peer_key, &mut shared_key_ee)?;
-            noise.mix_hash(peer_point_bytes);
-            noise.mix_key(peer_point_bytes)?;
-            noise.mix_key(&shared_key_ee)?;
-
-            // local identity
-            let mut shared_key_se = [0; 32];
-            ecdh(&local_identity, &peer_key, &mut shared_key_se)?;
-            noise.mix_key(&shared_key_se)?;
-
-            let pt = noise.decrypt_and_hash(ct)?;
-
-            // let mut payload = [0; 65535];
-            // let len = noise.read_message(&v, &mut payload).unwrap();
-            if pt.len() != 0 {
-                panic!(
-                    "expected handshake to be empty, got {} bytes: {:02x?}",
-                    pt.len(),
-                    &pt
-                );
-            }
+        let mut crypter = if let Message::Binary(v) = resp {
+            noise.process_response(&v)?
         } else {
             error!("Unexpected websocket response type");
             return Err(WebauthnCError::Unknown);
-        }
-
-        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=982;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
-        // TODO: write_key here may be wrong
-        // suspect the only way to debug this is to implement RespondToHandshake for a test
-        // read_key is correct
-        let (write_key, read_key) = noise.traffic_keys()?;
-
-        trace!(?write_key);
-        trace!(?read_key);
-        let mut crypter = Crypter::new(read_key, write_key);
+        };
 
         // Waiting for post-handshake message
         trace!("Waiting for post-handshake message...");
@@ -239,8 +165,6 @@ impl Tunnel {
         let t = Self {
             psk,
             stream,
-            noise,
-            ephemeral_key,
             crypter,
             info,
         };
@@ -347,14 +271,14 @@ fn point_to_bytes(point: &EcPointRef) -> Result<Vec<u8>, WebauthnCError> {
     Ok(point.to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?)
 }
 
-fn bytes_to_public_key(buf: &[u8]) -> Result<EcKey<Public>, WebauthnCError> {
+pub fn bytes_to_public_key(buf: &[u8]) -> Result<EcKey<Public>, WebauthnCError> {
     let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
     let mut ctx = BigNumContext::new()?;
     let point = EcPoint::from_bytes(&group, &buf, &mut ctx)?;
     Ok(EcKey::from_public_key(&group, &point)?)
 }
 
-fn ecdh(
+pub fn ecdh(
     private_key: &EcKeyRef<Private>,
     peer_key: &EcKeyRef<Public>,
     output: &mut [u8],

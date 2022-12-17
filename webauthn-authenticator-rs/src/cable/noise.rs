@@ -12,6 +12,8 @@ use openssl::{
 
 use crate::{ctap2::hkdf_sha_256, prelude::WebauthnCError, util::compute_sha256_2};
 
+use super::{Psk, tunnel::{bytes_to_public_key, ecdh}, crypter::Crypter};
+
 pub fn get_public_key_bytes(private_key: &EcKeyRef<Private>) -> Vec<u8> {
     let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
     let mut ctx = BigNumContext::new().unwrap();
@@ -30,33 +32,40 @@ pub enum HandshakeType {
     NKpsk0,
 }
 
-#[derive(Default)]
 pub struct CableNoise {
     chaining_key: [u8; 32],
     h: [u8; 32],
     symmetric_key: [u8; 32],
     symmetric_nonce: u32,
+    ephemeral_key: EcKey<Private>,
+    local_identity: Option<EcKey<Private>>,
 }
 
 impl CableNoise {
-    pub fn new(handshake_type: HandshakeType) -> Self {
+    fn new(handshake_type: HandshakeType) -> Result<Self, WebauthnCError> {
         let chaining_key = match handshake_type {
             HandshakeType::KNpsk0 => *NOISE_KN_PROTOCOL,
             HandshakeType::NKpsk0 => *NOISE_NK_PROTOCOL,
         };
 
-        Self {
+        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
+        let ephemeral_key = EcKey::generate(&group)?;
+
+        Ok(Self {
             chaining_key,
             h: chaining_key,
-            ..Default::default()
-        }
+            symmetric_key: [0; 32],
+            symmetric_nonce: 0,
+            ephemeral_key,
+            local_identity: None,
+        })
     }
 
-    pub fn mix_hash(&mut self, i: &[u8]) {
+    fn mix_hash(&mut self, i: &[u8]) {
         self.h = compute_sha256_2(&self.h, i);
     }
 
-    pub fn mix_hash_point(&mut self, point: &EcPointRef) -> Result<(), WebauthnCError> {
+    fn mix_hash_point(&mut self, point: &EcPointRef) -> Result<(), WebauthnCError> {
         let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
         let mut ctx = BigNumContext::new()?;
         let point = point.to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?;
@@ -64,7 +73,7 @@ impl CableNoise {
         Ok(())
     }
 
-    pub fn mix_key(&mut self, ikm: &[u8]) -> Result<(), WebauthnCError> {
+    fn mix_key(&mut self, ikm: &[u8]) -> Result<(), WebauthnCError> {
         let mut o = [0; 64];
         hkdf_sha_256(&self.chaining_key, ikm, None, &mut o)?;
         self.chaining_key.copy_from_slice(&o[..32]);
@@ -72,7 +81,7 @@ impl CableNoise {
         Ok(())
     }
 
-    pub fn mix_key_and_hash(&mut self, ikm: &[u8]) -> Result<(), WebauthnCError> {
+    fn mix_key_and_hash(&mut self, ikm: &[u8]) -> Result<(), WebauthnCError> {
         // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/noise.cc;l=90;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
         let mut o = [0; 32 * 3];
         hkdf_sha_256(&self.chaining_key, ikm, None, &mut o)?;
@@ -82,7 +91,7 @@ impl CableNoise {
         Ok(())
     }
 
-    pub fn encrypt_and_hash(&mut self, pt: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
+    fn encrypt_and_hash(&mut self, pt: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
         let mut nonce = [0; 12];
         nonce[..size_of::<u32>()].copy_from_slice(&self.symmetric_nonce.to_be_bytes());
         self.symmetric_nonce += 1;
@@ -102,7 +111,7 @@ impl CableNoise {
         Ok(encrypted)
     }
 
-    pub fn decrypt_and_hash(&mut self, ct: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
+    fn decrypt_and_hash(&mut self, ct: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
         let mut nonce = [0; 12];
         nonce[..size_of::<u32>()].copy_from_slice(&self.symmetric_nonce.to_be_bytes());
         self.symmetric_nonce += 1;
@@ -129,7 +138,7 @@ impl CableNoise {
     }
 
     /// `write_key, read_key`
-    pub fn traffic_keys(&self) -> Result<([u8; 32], [u8; 32]), WebauthnCError> {
+    fn traffic_keys(&self) -> Result<([u8; 32], [u8; 32]), WebauthnCError> {
         let mut o = [0; 64];
         hkdf_sha_256(&self.chaining_key, &[], None, &mut o)?;
 
@@ -145,6 +154,111 @@ impl CableNoise {
         self.symmetric_key.copy_from_slice(key);
         self.symmetric_nonce = 0;
     }
+
+    fn get_ephemeral_key_public_bytes(&self) -> Result<[u8; 65], WebauthnCError> {
+        let mut o = [0; 65];
+        let v = get_public_key_bytes(self.ephemeral_key.as_ref());
+        if v.len() != o.len() {
+            error!("unexpected public key length {} != {}", v.len(), o.len());
+            return Err(WebauthnCError::Internal);
+        }
+        o.copy_from_slice(&v);
+        Ok(o)
+    }
+
+    /// Starts a Noise handshake with a peer as the initiating party (platform).
+    /// 
+    /// Returns `(CableNoise, initial_message)`.
+    pub fn build_initator(local_identity: Option<&EcKeyRef<Private>>, psk: Psk, peer_identity: Option<[u8; 65]>) -> Result<(Self, Vec<u8>), WebauthnCError> {
+        // BuildInitialMessage
+        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=880;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
+
+        let mut noise = if let Some(peer_identity) = peer_identity {
+            // TODO: test
+            let mut noise = Self::new(HandshakeType::NKpsk0)?;
+            let prologue = [0];
+            noise.mix_hash(&prologue);
+            noise.mix_hash(&peer_identity);
+            noise
+        } else if let Some(local_identity) = local_identity {
+            let mut noise = Self::new(HandshakeType::KNpsk0)?;
+            let prologue = [1];
+            noise.mix_hash(&prologue);
+            noise.mix_hash_point(&local_identity.public_key())?;
+            noise.local_identity = Some(local_identity.to_owned());
+            noise
+        } else {
+            error!("build_initiator requires local_identity or peer_identity");
+            return Err(WebauthnCError::Internal);
+        };
+
+        noise.mix_key_and_hash(&psk)?;
+
+        let ephemeral_key_public_bytes = noise.get_ephemeral_key_public_bytes()?;
+
+        noise.mix_hash(&ephemeral_key_public_bytes);
+        noise.mix_key(&ephemeral_key_public_bytes)?;
+
+        if let Some(peer_identity) = peer_identity {
+            // TODO: test
+            let peer_identity_point = bytes_to_public_key(&peer_identity)?;
+            let mut es_key = [0; 32];
+            ecdh(&noise.ephemeral_key, &peer_identity_point, &mut es_key)?;
+            noise.mix_key(&es_key)?;
+        }
+
+        let ct = noise.encrypt_and_hash(&[])?;
+
+        let mut handshake_message = Vec::with_capacity(ephemeral_key_public_bytes.len() + ct.len());
+        handshake_message.extend_from_slice(&ephemeral_key_public_bytes);
+        handshake_message.extend_from_slice(&ct);
+
+        Ok((noise, handshake_message))
+    }
+
+    /// Processes the response from the responding party (authenticator) and
+    /// creates a [Crypter] for further message passing.
+    pub fn process_response(&mut self, response: &[u8]) -> Result<Crypter, WebauthnCError> {
+        if response.len() < 65 {
+            error!("Handshake response too short ({} bytes)", response.len());
+            return Err(WebauthnCError::MessageTooShort);
+        }
+
+        // ProcessResponse
+        let peer_point_bytes = &response[..65];
+        let ct = &response[65..];
+
+        let peer_key = bytes_to_public_key(peer_point_bytes)?;
+        let mut shared_key_ee = [0; 32];
+        ecdh(&self.ephemeral_key, &peer_key, &mut shared_key_ee)?;
+        self.mix_hash(peer_point_bytes);
+        self.mix_key(peer_point_bytes)?;
+        self.mix_key(&shared_key_ee)?;
+
+        if let Some(local_identity) = &self.local_identity {
+            let mut shared_key_se = [0; 32];
+            ecdh(&local_identity, &peer_key, &mut shared_key_se)?;
+            self.mix_key(&shared_key_se)?;
+        }
+
+        let pt = self.decrypt_and_hash(ct)?;
+        if pt.len() != 0 {
+            error!(
+                "expected handshake to be empty, got {} bytes: {:02x?}",
+                pt.len(),
+                &pt
+            );
+            return Err(WebauthnCError::MessageTooLarge);
+        }
+
+        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=982;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
+        let (write_key, read_key) = self.traffic_keys()?;
+
+        trace!(?write_key);
+        trace!(?read_key);
+        Ok(Crypter::new(read_key, write_key))
+    }
+
 }
 
 #[cfg(test)]

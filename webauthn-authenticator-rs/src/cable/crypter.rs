@@ -9,6 +9,7 @@ pub const OLD_ADDITIONAL_BYTES: [u8; 1] = [/* version */ 2];
 pub const NEW_ADDITIONAL_BYTES: [u8; 0] = [];
 const PADDING_MUL: usize = 32;
 
+/// Encrypted message passing channel for caBLE
 #[derive(Default)]
 pub struct Crypter {
     read_key: EncryptionKey,
