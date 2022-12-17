@@ -360,12 +360,21 @@ impl Discovery {
     }
 }
 
+/// Starts a connection with a caBLE authenticator (mobile device).
+/// 
+/// This uses a QR code and Bluetooth Low Energy to exchange some key material,
+/// and then establishes an encrypted channel over Websockets with a third-party
+/// broker (selected by the authenticator), which is used to pass ordinary
+/// CTAP 2.0 messages.
+/// 
+/// The tunnel can only be used for _one_ transaction, either `MakeCredential`
+/// or `GetAssertion`, and then the mobile device hangs up.
 pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(request_type: CableRequestType, ui_callback: &'a U) -> Result<CtapAuthenticator<'a, Tunnel, U>, WebauthnCError> {
     trace!("Creating discovery QR code...");
     let disco = Discovery::new(request_type)?;
     let handshake = disco.make_handshake()?;
     let url = handshake.to_qr_url()?;
-    ui_callback.cable_qr_code(url);
+    ui_callback.cable_qr_code(request_type, url);
 
     trace!("Opening BTLE...");
     let scanner = Scanner::new().await?;
