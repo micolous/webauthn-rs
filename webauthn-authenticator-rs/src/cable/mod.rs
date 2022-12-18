@@ -190,6 +190,18 @@ enum DerivedValueType {
     PerContactIDSecret = 6,
 }
 
+impl DerivedValueType {
+    pub fn derive(
+        &self,
+        ikm: &[u8],
+        salt: &[u8],
+        output: &mut [u8],
+    ) -> Result<(), WebauthnCError> {
+        let typ = self.to_u32().ok_or(WebauthnCError::Internal)?.to_le_bytes();
+        Ok(hkdf_sha_256(salt, ikm, Some(&typ), output)?)
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct Eid {
     pub tunnel_server_id: u16,
@@ -215,7 +227,7 @@ impl Eid {
         o
     }
 
-    pub fn from_bytes(eid: CableEid) -> Self {
+    fn from_bytes(eid: CableEid) -> Self {
         let mut p = 1;
         let mut nonce: BleNonce = [0; size_of::<BleNonce>()];
         let mut q = p + size_of::<BleNonce>();
@@ -236,6 +248,61 @@ impl Eid {
             tunnel_server_id,
         }
     }
+
+    fn decrypt_advert(advert: BleAdvert, key: &EidKey) -> Result<Option<Eid>, WebauthnCError> {
+        let signing_key = PKey::hmac(&key[32..64])?;
+        let mut signer = Signer::new(MessageDigest::sha256(), &signing_key)?;
+    
+        let mut calculated_hmac: [u8; 32] = [0; 32];
+        signer.update(&advert[..16])?;
+        signer.sign(&mut calculated_hmac)?;
+        if &calculated_hmac[..4] != &advert[16..20] {
+            warn!("incorrect HMAC when decrypting caBLE advertisement");
+            return Ok(None);
+        }
+    
+        // HMAC checks out, try to decrypt
+        let plaintext = decrypt(&key[..32], None, &advert[..16])?;
+        let plaintext: Option<CableEid> = plaintext.try_into().ok();
+    
+        Ok(match plaintext {
+            Some(plaintext) => {
+                if plaintext[0] != 0 {
+                    warn!("reserved bits not 0 in decrypted caBLE advertisement");
+                    return Ok(None);
+                }
+    
+                let eid = Eid::from_bytes(plaintext);
+                if eid.get_domain().is_none() {
+                    return Ok(None);
+                }
+    
+                Some(eid)
+            }
+            None => {
+                warn!("decrypt fail");
+                None
+            }
+        })
+    }
+
+    fn encrypt_advert(&self, key: &EidKey) -> Result<BleAdvert, WebauthnCError> {
+        let eid = self.to_bytes();
+        let c = encrypt(&key[..32], None, &eid)?;
+    
+        let mut crypted: BleAdvert = [0; size_of::<BleAdvert>()];
+        crypted[..size_of::<CableEid>()].copy_from_slice(&c);
+    
+        let signing_key = PKey::hmac(&key[32..64])?;
+        let mut signer = Signer::new(MessageDigest::sha256(), &signing_key)?;
+    
+        let mut calculated_hmac: [u8; 32] = [0; 32];
+        signer.update(&crypted[..16])?;
+        signer.sign(&mut calculated_hmac)?;
+        crypted[size_of::<CableEid>()..].copy_from_slice(&calculated_hmac[..4]);
+    
+        Ok(crypted)
+    }    
 
     fn get_domain(&self) -> Option<String> {
         get_domain(self.tunnel_server_id)
@@ -282,78 +349,6 @@ impl Eid {
     }
 }
 
-fn derive(
-    ikm: &[u8],
-    salt: &[u8],
-    typ: DerivedValueType,
-    output: &mut [u8],
-) -> Result<(), WebauthnCError> {
-    let typ = typ.to_u32().ok_or(WebauthnCError::Internal)?.to_le_bytes();
-    Ok(hkdf_sha_256(salt, ikm, Some(&typ), output)?)
-}
-
-fn decrypt_advert(advert: BleAdvert, key: &EidKey) -> Result<Option<CableEid>, WebauthnCError> {
-    let signing_key = PKey::hmac(&key[32..64])?;
-    let mut signer = Signer::new(MessageDigest::sha256(), &signing_key)?;
-
-    let mut calculated_hmac: [u8; 32] = [0; 32];
-    signer.update(&advert[..16])?;
-    signer.sign(&mut calculated_hmac)?;
-    if &calculated_hmac[..4] != &advert[16..20] {
-        warn!("incorrect HMAC when decrypting caBLE advertisement");
-        return Ok(None);
-    }
-
-    // HMAC checks out, try to decrypt
-    let plaintext = decrypt(&key[..32], None, &advert[..16])?;
-    let plaintext: Option<CableEid> = plaintext.try_into().ok();
-
-    Ok(match plaintext {
-        Some(plaintext) => {
-            if plaintext[0] != 0 {
-                warn!("reserved bits not 0 in decrypted caBLE advertisement");
-                return Ok(None);
-            }
-
-            let tunnel_server_id = u16::from_le_bytes(
-                plaintext[14..16]
-                    .try_into()
-                    .map_err(|_| WebauthnCError::Internal)?,
-            );
-            if tunnel::get_domain(tunnel_server_id).is_none() {
-                warn!(
-                    "invalid tunnel server 0x{:04x} in caBLE advertisement",
-                    tunnel_server_id
-                );
-                return Ok(None);
-            }
-
-            Some(plaintext)
-        }
-        None => {
-            warn!("decrypt fail");
-            None
-        }
-    })
-}
-
-fn encrypt_advert(eid: CableEid, key: &EidKey) -> Result<BleAdvert, WebauthnCError> {
-    let c = encrypt(&key[..32], None, &eid)?;
-
-    let mut crypted: BleAdvert = [0; size_of::<BleAdvert>()];
-    crypted[..size_of::<CableEid>()].copy_from_slice(&c);
-
-    let signing_key = PKey::hmac(&key[32..64])?;
-    let mut signer = Signer::new(MessageDigest::sha256(), &signing_key)?;
-
-    let mut calculated_hmac: [u8; 32] = [0; 32];
-    signer.update(&crypted[..16])?;
-    signer.sign(&mut calculated_hmac)?;
-    crypted[size_of::<CableEid>()..].copy_from_slice(&calculated_hmac[..4]);
-
-    Ok(crypted)
-}
-
 impl Discovery {
     pub fn new(request_type: CableRequestType) -> Result<Self, WebauthnCError> {
         // chrome_authenticator_request_delegate.cc  ChromeAuthenticatorRequestDelegate::ConfigureCable
@@ -374,7 +369,7 @@ impl Discovery {
         // Opted to just take in an EcKey here.
 
         let mut eid_key: EidKey = [0; size_of::<EidKey>()];
-        derive(&qr_secret, &[], DerivedValueType::EIDKey, &mut eid_key)?;
+        DerivedValueType::EIDKey.derive(&qr_secret, &[], &mut eid_key)?;
 
         Ok(Self {
             request_type,
@@ -392,12 +387,12 @@ impl Discovery {
         )?)
     }
 
-    pub fn decrypt_advert(&self, advert: BleAdvert) -> Result<Option<CableEid>, WebauthnCError> {
-        decrypt_advert(advert, &self.eid_key)
+    pub fn decrypt_advert(&self, advert: BleAdvert) -> Result<Option<Eid>, WebauthnCError> {
+        Eid::decrypt_advert(advert, &self.eid_key)
     }
 
-    pub fn encrypt_advert(&self, eid: CableEid) -> Result<BleAdvert, WebauthnCError> {
-        encrypt_advert(eid, &self.eid_key)
+    pub fn encrypt_advert(&self, eid: &Eid) -> Result<BleAdvert, WebauthnCError> {
+        eid.encrypt_advert(&self.eid_key)
     }
 
     pub fn make_handshake(&self) -> Result<HandshakeV2, WebauthnCError> {
@@ -425,11 +420,33 @@ impl Discovery {
             let mut advert: BleAdvert = [0; size_of::<BleAdvert>()];
             advert.copy_from_slice(a.as_ref());
             if let Some(eid) = self.decrypt_advert(advert)? {
-                return Ok(Some(Eid::from_bytes(eid)));
+                return Ok(Some(eid));
             }
         }
 
         Ok(None)
+    }
+
+    /// Gets the tunnel ID associated with this [Discovery]
+    pub fn get_tunnel_id(&self) -> Result<TunnelId, WebauthnCError> {
+        let mut tunnel_id: TunnelId = [0; size_of::<TunnelId>()];
+        DerivedValueType::TunnelID.derive(
+            &self.qr_secret,
+            &[],
+            &mut tunnel_id,
+        )?;
+        Ok(tunnel_id)
+    }
+
+    /// Gets the pre-shared key associated with this [Discovery]
+    pub fn get_psk(&self, eid: &Eid) -> Result<Psk, WebauthnCError> {
+        let mut psk: Psk = [0; size_of::<Psk>()];
+        DerivedValueType::PSK.derive(
+            &self.qr_secret,
+            &eid.to_bytes(),
+            &mut psk,
+        )?;
+        Ok(psk)
     }
 }
 
@@ -458,21 +475,8 @@ pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(
         })?;
     ui_callback.dismiss_qr_code();
 
-    // TODO: move to library proper
-    let mut tunnel_id: TunnelId = [0; size_of::<TunnelId>()];
-    derive(
-        &disco.qr_secret,
-        &[],
-        DerivedValueType::TunnelID,
-        &mut tunnel_id,
-    )?;
-    let mut psk: Psk = [0; size_of::<Psk>()];
-    derive(
-        &disco.qr_secret,
-        &eid.to_bytes(),
-        DerivedValueType::PSK,
-        &mut psk,
-    )?;
+    let tunnel_id: TunnelId = disco.get_tunnel_id()?;
+    let psk: Psk = disco.get_psk(&eid)?;
 
     let connect_url = eid.get_connect_url(tunnel_id).ok_or_else(|| {
         error!("Unknown WebSocket tunnel URL for {:?}", eid);
@@ -501,16 +505,10 @@ mod test {
             nonce: [9, 139, 115, 107, 54, 169, 140, 185, 164, 47],
         };
 
-        let eid = c.to_bytes();
-        let mut advert = d.encrypt_advert(eid).unwrap();
-        // advert != eid
-        assert_ne!(&eid, &advert[..eid.len()]);
+        let mut advert = d.encrypt_advert(&c).unwrap();
 
-        let decrypted = d.decrypt_advert(advert.clone()).unwrap().unwrap();
+        let c2 = d.decrypt_advert(advert.clone()).unwrap().unwrap();
         // decrypting gets back the original value
-        assert_eq!(&eid, &decrypted);
-
-        let c2 = Eid::from_bytes(eid);
         assert_eq!(c, c2);
 
         // Changing bits fails
@@ -552,22 +550,10 @@ mod test {
             1, 254, 166, 247, 196, 128, 116, 147, 220, 37, 111, 158, 172, 247, 86, 201,
         ];
         let mut eid_key: EidKey = [0; size_of::<EidKey>()];
-        derive(&qr_secret, &[], DerivedValueType::EIDKey, &mut eid_key).unwrap();
+        DerivedValueType::EIDKey.derive(&qr_secret, &[], &mut eid_key).unwrap();
         trace!("eid_key = {:?}", eid_key);
 
-        // TODO: didn't doesn't decrypt; probably doing eid_key derivation wrong
-        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=242;drc=f7385067f48da7ba86322cbd4eea3631037222fc
-        // states:
-        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/fido_tunnel_device.h;l=79;drc=f7385067f48da7ba86322cbd4eea3631037222fc
-        // matching advert:
-        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/fido_tunnel_device.cc;l=200-223;drc=f7385067f48da7ba86322cbd4eea3631037222fc
-        // eid key:
-        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/fido_tunnel_device.cc;l=162;drc=f7385067f48da7ba86322cbd4eea3631037222fc
-        // ah, salt and key (ikm) were swapped!
-        let r = decrypt_advert(advert, &eid_key).unwrap();
-        trace!("decrypted: {:?}", r);
-        let r = r.unwrap();
-        let r = Eid::from_bytes(r);
+        let r = Eid::decrypt_advert(advert, &eid_key).unwrap().unwrap();
         trace!("eid: {:?}", r);
 
         let expected = Eid {

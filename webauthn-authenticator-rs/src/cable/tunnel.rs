@@ -60,7 +60,10 @@ pub fn get_domain(domain_id: u16) -> Option<String> {
     if domain_id < 256 {
         return match ASSIGNED_DOMAINS.get(usize::from(domain_id)) {
             Some(d) => Some(d.to_string()),
-            None => None,
+            None => {
+                warn!("Invalid tunnel server ID {:04x}", domain_id);
+                None
+            },
         };
     }
 
