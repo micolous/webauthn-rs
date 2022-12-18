@@ -81,9 +81,7 @@ impl PinUvPlatformInterface {
                 }
             }
         }
-        // cable HACK
-        Self::new::<PinUvPlatformInterfaceProtocolTwo>()
-        //Err(WebauthnCError::NotSupported)
+        Err(WebauthnCError::NotSupported)
     }
 
     fn ecdh(&self, peer_cose_key: COSEKey) -> Result<Vec<u8>, WebauthnCError> {
