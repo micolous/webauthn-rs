@@ -56,6 +56,7 @@ pub enum WebauthnCError {
     InvalidCableUrl,
     Base10(crate::cable::DecodeError),
     BluetoothError(String),
+    NoBluetoothAdapter,
 }
 
 #[cfg(feature = "nfc")]

@@ -1,14 +1,18 @@
 //! caBLE / Hybrid Authenticator
 //!
-//! In absence of a publicly-published spec, this is based on [Chromium's implementation][crcable].
+//! **tl;dr:** scan a QR code with a `FIDO:/` URL, mobile device sends a BLE
+//! advertisement, this is used to establish a doubly-encrypted (TLS and Noise)
+//! Websocket tunnel over which the platform can send a single CTAP 2.x command
+//! and get a response.
 //!
 //! ## Warning
 //!
+//! **There is no publicly-published spec from this protocol, aside from
+//! [Chromium's C++ implementation][crcable]. There are probably errors in this
+//! implementation and its documentation.**
+//!
 //! **This implementation is incomplete, and has not been reviewed from a
 //! cryptography standpoint.**
-//!
-//! **There is no publicly-published spec from this protocol, aside from
-//! Chromium's C++ implementation.**
 //!
 //! This implementation is a *very* rough port to "make things work" based on
 //! what Chromium does -- there will probably be errors compared to whatever
@@ -29,39 +33,101 @@
 //!
 //! This does not implement "contact lists" ("remember this computer").
 //!
+//! ## Requirements
+//!
+//! The platform (generating the request) requires:
+//!
+//! * a Bluetooth Low Energy (BLE) adaptor
+//!
+//! * an internet connection
+//!
+//! The authenticator (mobile device) requires:
+//!
+//! * a caBLE implementation, such as:
+//!
+//!   * [Android 7 or later][android-ver] with
+//!     [a recent version of Chrome and Google Play Services (October 2022)][android-announce]
+//!
+//!   * [iOS 16 or later][ios]
+//!
+//! * a Bluetooth Low Energy (BLE) radio
+//!
+//! * a camera and QR code scanner[^qr]
+//!
+//! * an internet connection
+//!
+//! **On Android,** Chrome handles the `FIDO:/` URL and establishes the
+//! Websocket tunnel, and proxies commands to
+//! [Google Play's FIDO2 API][gpfido2]. The authenticator
+//! [is stored in Google Password Manager][android-sec], and it also supports
+//! [devicePubKey][] for an un-synchronised credential.
+//!
+//! **On iOS,** the authenticator is stored in the iCloud Keychain and shared
+//! with all devices signed in to that iCloud account. There is no way to
+//! identify which device was used.
+//!
+//! In both cases, the credential is cached in the device's secure element, and
+//! requires user verification (lock screen pattern, PIN, password or biometric
+//! authentication) to access.
+//!
+//! **Warning:** iOS 15 will recognise caBLE QR codes and attempt to offer to
+//! authenticate, but this version of the protocol is not supported.
+//!
 //! ## Protocol overview
 //!
-//! The platform generates a CBOR message ([HandshakeV2]) containing a shared
-//! secret and some protocol version information. This gets encoded as
-//! [base10] and turned into a `FIDO:/` URL, and is then displayed as a QR
-//! code.
+//! The platform (or "browser") generates a CBOR message ([HandshakeV2])
+//! containing the desired transaction type (`MakeCredential` or
+//! `GetAssertion`), a shared secret and some protocol version information. This
+//! gets encoded as [base10] and turned into a `FIDO:/` URL, and is displayed as
+//! a QR code for the user to scan with their mobile device.
 //!
-//! The authenticator scans this QR code, and establishes a tunnel to a
-//! well-known WebSocket tunnel server of its choosing ([get_domain]). Once
-//! established, it then broadcasts an encrypted [Eid] message over Bluetooth
-//! Low Energy service advertisements to be discovered by the platform.
+//! The authenticator (mobile device) scans this QR code, and establishes a
+//! tunnel to a well-known WebSocket tunnel server of *its* choosing
+//! ([get_domain]). Once established, it then broadcasts an encrypted [Eid]
+//! message over BLE service advertisements to be discovered by the platform.
 //!
-//! The platform scans for BTLE advertisements and tries to decrypt them. On
-//! success, it can then find which tunnel server to connect to, and the
-//! tunnel ID.
+//! Meanwhile, the platform scans for caBLE BLE advertisements and tries to
+//! decrypt and parse them ([decrypt_advert]). On success, it can then find
+//! which tunnel server to connect to, the tunnel ID, and a nonce.
 //!
-//! The platform and the authenticator then perform another handshake using the
-//! [Noise protocol]. Chromium doesn't seem to have a complete implementation
-//! of Noise, and its not yet clear whether that is different in some way.
+//! The platform connects to the tunnel server, and starts a handshake with the
+//! authenticator using a non-standard version of the [Noise protocol][]
+//! ([noise::CableNoise]), using secrets exchanged in the QR code and BTLE
+//! advertisement and a new ephemeral session key, allowing them to derive
+//! traffic keys for [crypter::Crypter].
 //!
-//! Then ???
+//! The authenticator will then immediately send a [GetInfoResponse], and may
+//! also send a pairing payload (presently Android only). Where supported, a
+//! pairing payload is sent *regardless* of whether the user selects "remember
+//! this computer" on the mobile device (the payload will just be null bytes).
 //!
-//! Then we can talk normal CTAP2 protocol? That's where I'm up to with this.
+//! The platform can then send a *single* `MakeCredential` or `GetAssertion`
+//! command to the authenticator in CTAP 2.x format.
 //!
+//! Once the command is sent, the authenticator will prompt the user to approve
+//! the request in a user-verifying way (biometric or lock screen pattern,
+//! password or PIN), showing the relying party information (website domain).
+//!
+//! The authenticator returns the response to the command, and then closes the
+//! Websocket channel. A new handshake must be performed if the user wishes to
+//! perform another transaction.
+//!
+//! [android]: https://developers.google.com/identity/passkeys/supported-environments
+//! [android-sec]: https://security.googleblog.com/2022/10/SecurityofPasskeysintheGooglePasswordManager.html
+//! [android-ver]: https://source.chromium.org/chromium/chromium/src/+/main:chrome/android/features/cablev2_authenticator/java/src/org/chromium/chrome/browser/webauth/authenticator/CableAuthenticatorUI.java;l=170-171;drc=4a8573cb240df29b0e4d9820303538fb28e31d84
 //! [crcable]: https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/
+//! [devicePubKey]: https://w3c.github.io/webauthn/#sctn-device-publickey-extension
+//! [gpfido2]: https://developers.google.com/android/reference/com/google/android/gms/fido/fido2/Fido2PrivilegedApiClient
+//! [ios]: https://developer.apple.com/videos/play/wwdc2022/10092/
 //! [Noise protocol]: http://noiseprotocol.org/noise.html
+//! [^qr]: Most mobile device camera apps have an integrated QR code scanner.
 
 mod base10;
 mod btle;
 mod crypter;
+mod framing;
 mod handshake;
 mod noise;
-mod framing;
 mod tunnel;
 
 use std::mem::size_of;
@@ -79,11 +145,18 @@ use openssl::{
 };
 use tokio_tungstenite::tungstenite::http::Uri;
 
-use self::{btle::*, handshake::*, tunnel::{get_domain, Tunnel}};
 pub use self::handshake::CableRequestType;
+use self::{
+    btle::*,
+    handshake::*,
+    tunnel::{get_domain, Tunnel},
+};
 use crate::{
-    ctap2::{decrypt, encrypt, hkdf_sha_256, regenerate, CtapAuthenticator},
-    error::WebauthnCError, ui::UiCallback,
+    ctap2::{
+        commands::GetInfoResponse, decrypt, encrypt, hkdf_sha_256, regenerate, CtapAuthenticator,
+    },
+    error::WebauthnCError,
+    ui::UiCallback,
 };
 
 type BleAdvert = [u8; 16 + 4];
@@ -360,7 +433,13 @@ impl Discovery {
     }
 }
 
-pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(request_type: CableRequestType, ui_callback: &'a U) -> Result<CtapAuthenticator<'a, Tunnel, U>, WebauthnCError> {
+pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(
+    request_type: CableRequestType,
+    ui_callback: &'a U,
+) -> Result<CtapAuthenticator<'a, Tunnel, U>, WebauthnCError> {
+    // TODO: it may be better to return a caBLE-specific authenticator object,
+    // rather than CtapAuthenticator, because the device will close the
+    // Websocket connection as soon as we've sent a single command.
     trace!("Creating discovery QR code...");
     let disco = Discovery::new(request_type)?;
     let handshake = disco.make_handshake()?;
