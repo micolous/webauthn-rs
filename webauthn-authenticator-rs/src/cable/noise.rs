@@ -415,9 +415,14 @@ mod test {
         // Decrypting the same ciphertext twice should fail, because of the nonce change
         assert!(initiator_crypt.decrypt(&ct).is_err());
 
-        let ct = initiator_crypt.encrypt(b"The quick brown fox jumps over the lazy dog").unwrap();
-        let pt = responder_crypt.decrypt(&ct).unwrap();
-        assert_eq!(b"The quick brown fox jumps over the lazy dog", pt.as_slice());
+        let ct2 = initiator_crypt.encrypt(b"The quick brown fox jumps over the lazy dog").unwrap();
+
+        // Decrypting responder's initial ciphertext should fail because of different keys from Noise
+        assert!(responder_crypt.decrypt(&ct).is_err());
+
+        // A failure in Crypter shouldn't impact our ability to receive correct ciphertexts, if they're in order
+        let pt2 = responder_crypt.decrypt(&ct2).unwrap();
+        assert_eq!(b"The quick brown fox jumps over the lazy dog", pt2.as_slice());
         assert!(responder_crypt.decrypt(&ct).is_err());
     }
 }
