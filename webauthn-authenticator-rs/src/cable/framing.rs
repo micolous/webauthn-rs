@@ -2,7 +2,7 @@
 //!
 //! ### Post-handshake message
 //!
-//! https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/fido_tunnel_device.cc;l=368-395;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
+//! <https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/fido_tunnel_device.cc;l=368-395;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29>
 //!
 //! * Two protocol versions here, protocol 1 and protocol 0.
 //! * Protocol 1 has a CBOR map:

@@ -5,8 +5,8 @@ use openssl::symm::{decrypt_aead, encrypt_aead, Cipher};
 use crate::error::WebauthnCError;
 
 pub type EncryptionKey = [u8; 32];
-pub const OLD_ADDITIONAL_BYTES: [u8; 1] = [/* version */ 2];
-pub const NEW_ADDITIONAL_BYTES: [u8; 0] = [];
+const OLD_ADDITIONAL_BYTES: [u8; 1] = [/* version */ 2];
+const NEW_ADDITIONAL_BYTES: [u8; 0] = [];
 const PADDING_MUL: usize = 32;
 
 /// Encrypted message passing channel for caBLE
@@ -16,6 +16,14 @@ pub struct Crypter {
     write_key: EncryptionKey,
     read_seq: u32,
     write_seq: u32,
+
+    /// Using "new construction" (caBLE v2.1+) changes the protocol to be more
+    /// like regular Noise, by removing "additional bytes" and using a
+    /// big-endian `read_seq` / `write_seq` nonce.
+    /// 
+    /// Crypter will automatically switch to this mode if the first call to
+    /// [Crypter::decrypt] contains a message encrypted in `new_construction`
+    /// mode.
     new_construction: bool,
 }
 
@@ -119,8 +127,24 @@ impl Crypter {
         trace!("new_constuction: {:?}, nonce: {:?}", self.new_construction, nonce);
         nonce
     }
+
+    /// Returns `true` if the `other` [Crypter] uses "remote side" (swapped)
+    /// read and write keys.
+    /// 
+    /// This function is only useful for testing.
+    pub(super) fn is_counterparty(&self, other: &Self) -> bool {
+        self.read_key == other.write_key && self.write_key == other.read_key
+    }
+
+    /// Switches to "new construction", for caBLE v2.1+.
+    pub fn use_new_construction(&mut self) {
+        self.new_construction = true;
+    }
 }
 
+/// Pads a message to a multiple of [PADDING_MUL] bytes.
+/// 
+/// See also: [unpad]
 fn pad(msg: &[u8]) -> Vec<u8> {
     let padded_len = (msg.len() + PADDING_MUL) & !(PADDING_MUL - 1);
     assert!(padded_len > msg.len());
@@ -133,6 +157,7 @@ fn pad(msg: &[u8]) -> Vec<u8> {
     padded
 }
 
+/// Unpads a message padded with [pad].
 fn unpad(msg: &mut Vec<u8>) -> Result<(), WebauthnCError> {
     let padding_len = (msg.last().map(|l| *l).unwrap_or_default() as usize) + 1;
     if padding_len > msg.len() {
@@ -193,7 +218,7 @@ mod test {
         let key1 = [231; 32];
 
         let mut alice = Crypter::new(key0, key1);
-        alice.new_construction = true;
+        alice.use_new_construction();
         let mut bob = Crypter::new(key1, key0);
         let mut corrupted = Crypter::new(key1, key0);
 

@@ -24,7 +24,11 @@
 //! [crbase10]: https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=471-568;drc=6767131b3528fefd866f604b32ebbb278c35d395
 //! [RFC 9285]: https://www.rfc-editor.org/rfc/rfc9285.html
 //! [url-chars]: https://www.rfc-editor.org/rfc/rfc3986.html#section-2.3
+
+/// Size of a chunk of data in its original form
 const CHUNK_SIZE: usize = 7;
+
+/// Size of a chunk of data in its encoded form
 const CHUNK_DIGITS: usize = 17;
 
 /// Encodes binary data into Base10 format.
@@ -73,10 +77,10 @@ pub fn decode(i: &str) -> Result<Vec<u8>, DecodeError> {
         return Err(DecodeError::ContainsNonDigitChars);
     }
 
-    // It's safe to operate on bytes now because:
+    // It's safe to operate on the string in bytes now because:
     //
     // - we've previously thrown an error for anything containing non-ASCII digits.
-    // - each ASCII digits is exactly 1 byte in UTF-8.
+    // - each ASCII digit is exactly 1 byte in UTF-8.
     // - &str is always valid UTF-8.
     let mut o = Vec::with_capacity(((i.len() + CHUNK_DIGITS - 1) / CHUNK_DIGITS) * CHUNK_SIZE);
 
