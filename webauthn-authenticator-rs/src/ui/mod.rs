@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::io::{stderr, Write};
 use qrcode::{QrCode, render::unicode::Dense1x2};
 
+use crate::cable::CableRequestType;
 use crate::ctap2::EnrollSampleStatus;
 
 pub trait UiCallback: Sync + Send + Debug {
@@ -29,6 +30,7 @@ pub trait UiCallback: Sync + Send + Debug {
     /// This method will be called synchronously, and must not block.
     fn cable_qr_code(
         &self,
+        request_type: CableRequestType,
         url: String,
     );
 
@@ -73,6 +75,7 @@ impl UiCallback for Cli {
 
     fn cable_qr_code(
         &self,
+        request_type: CableRequestType,
         url: String,
     ) {
         let qr = QrCode::new(&url).unwrap();
@@ -82,7 +85,15 @@ impl UiCallback for Cli {
             .dark_color(Dense1x2::Light)
             .light_color(Dense1x2::Dark)
             .build();
-        println!("Scan the QR code with your mobile device to use caBLE:");
+        match request_type {
+            CableRequestType::DiscoverableMakeCredential | CableRequestType::MakeCredential => {
+                println!("Scan the QR code with your mobile device to create a new credential with caBLE:");
+            },
+            CableRequestType::GetAssertion => {
+                println!("Scan the QR code with your mobile device to sign in with caBLE:");
+            }
+        }
+        println!("This feature requires Android with Google Play, or iOS 16 or later.");
         println!("{}", code);
         println!("{}", url);
     }

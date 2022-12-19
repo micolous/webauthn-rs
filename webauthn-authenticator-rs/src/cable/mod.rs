@@ -205,7 +205,7 @@ pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(
     let disco = Discovery::new(request_type)?;
     let handshake = disco.make_handshake()?;
     let url = handshake.to_qr_url()?;
-    ui_callback.cable_qr_code(url);
+    ui_callback.cable_qr_code(request_type, url);
 
     trace!("Opening BTLE...");
     let scanner = Scanner::new().await?;
