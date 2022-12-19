@@ -1,12 +1,10 @@
 use std::mem::size_of;
 
 use openssl::{
-    bn::{BigNum, BigNumContext},
-    ec::{EcGroup, EcKey, EcKeyRef, EcPoint, EcPointRef, PointConversionForm},
-    envelope::Seal,
+    bn::BigNumContext,
+    ec::{EcGroup, EcKey, EcKeyRef, EcPointRef, PointConversionForm},
     nid::Nid,
-    pkey::{PKey, Private},
-    pkey_ctx::PkeyCtx,
+    pkey::Private,
     symm::{decrypt_aead, encrypt_aead, Cipher},
 };
 

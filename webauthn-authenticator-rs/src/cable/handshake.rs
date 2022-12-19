@@ -2,8 +2,7 @@ use openssl::{
     bn::BigNumContext,
     ec::{EcGroup, EcKey, EcKeyRef, EcPoint, PointConversionForm},
     nid::Nid,
-    pkey::Public,
-    rand::rand_bytes, pkey_ctx::PkeyCtx,
+    pkey::Public
 };
 use serde::Serialize;
 use serde_cbor::Value;
@@ -13,46 +12,12 @@ use std::{
 };
 
 use crate::{
-    cable::base10,
+    cable::{base10, CableRequestType},
     ctap2::commands::{
         value_to_bool, value_to_string, value_to_u32, value_to_u64, value_to_vec_u8,
     },
     error::WebauthnCError,
 };
-
-#[derive(Debug, PartialEq, Eq, Clone, Default, Copy)]
-pub enum CableRequestType {
-    #[default]
-    GetAssertion,
-    MakeCredential,
-    DiscoverableMakeCredential,
-}
-
-impl ToString for CableRequestType {
-    fn to_string(&self) -> String {
-        use CableRequestType::*;
-        match self {
-            GetAssertion => String::from("ga"),
-            DiscoverableMakeCredential => String::from("mc"),
-            MakeCredential => String::from("mc"),
-        }
-    }
-}
-
-impl CableRequestType {
-    pub fn from_string(val: &str, supports_non_discoverable_make_credential: bool) -> Option<Self> {
-        use CableRequestType::*;
-        match val {
-            "ga" => Some(GetAssertion),
-            "mc" => Some(if supports_non_discoverable_make_credential {
-                MakeCredential
-            } else {
-                DiscoverableMakeCredential
-            }),
-            _ => None,
-        }
-    }
-}
 
 #[derive(Serialize, Debug, Clone)]
 #[serde(into = "BTreeMap<u32, Value>", try_from = "BTreeMap<u32, Value>")]

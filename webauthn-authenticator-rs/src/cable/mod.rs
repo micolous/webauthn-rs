@@ -60,7 +60,7 @@
 //! Websocket tunnel, and proxies commands to
 //! [Google Play's FIDO2 API][gpfido2]. The authenticator
 //! [is stored in Google Password Manager][android-sec], and it also supports
-//! [devicePubKey][] for an un-synchronised credential.
+//! [devicePubKey][] to attest a specific device's identity.
 //!
 //! **On iOS,** the authenticator is stored in the iCloud Keychain and shared
 //! with all devices signed in to that iCloud account. There is no way to
@@ -75,31 +75,36 @@
 //!
 //! ## Protocol overview
 //!
-//! The platform (or "browser") generates a CBOR message ([HandshakeV2])
-//! containing the desired transaction type (`MakeCredential` or
-//! `GetAssertion`), a shared secret and some protocol version information. This
-//! gets encoded as [base10] and turned into a `FIDO:/` URL, and is displayed as
-//! a QR code for the user to scan with their mobile device.
+//! The platform (or "browser") generates a CBOR message
+//! ([HandshakeV2][handshake::HandshakeV2]) containing the desired transaction
+//! type (`MakeCredential` or `GetAssertion`), a shared secret and some protocol
+//! version information. This gets encoded as [base10] and turned into a
+//! `FIDO:/` URL, and is displayed as a QR code for the user to scan with their
+//! mobile device.
 //!
 //! The authenticator (mobile device) scans this QR code, and establishes a
 //! tunnel to a well-known WebSocket tunnel server of *its* choosing
-//! ([get_domain]). Once established, it then broadcasts an encrypted [Eid]
-//! message over BLE service advertisements to be discovered by the platform.
+//! ([get_domain][tunnel::get_domain]). Once established, it broadcasts an
+//! encrypted [Eid][discovery::Eid] message over BLE service
+//! advertisements to be discovered by the platform.
 //!
 //! Meanwhile, the platform scans for caBLE BLE advertisements and tries to
-//! decrypt and parse them ([decrypt_advert]). On success, it can then find
-//! which tunnel server to connect to, the tunnel ID, and a nonce.
+//! decrypt and parse them
+//! ([decrypt_advert][discovery::Discovery::decrypt_advert]). On success,
+//! it can then find which tunnel server to connect to, the tunnel ID, and a
+//! nonce.
 //!
 //! The platform connects to the tunnel server, and starts a handshake with the
 //! authenticator using a non-standard version of the [Noise protocol][]
-//! ([noise::CableNoise]), using secrets exchanged in the QR code and BTLE
+//! ([CableNoise][noise::CableNoise]), using secrets exchanged in the QR code and BTLE
 //! advertisement and a new ephemeral session key, allowing them to derive
-//! traffic keys for [crypter::Crypter].
+//! traffic keys for [Crypter][crypter::Crypter].
 //!
-//! The authenticator will then immediately send a [GetInfoResponse], and may
-//! also send a pairing payload (presently Android only). Where supported, a
-//! pairing payload is sent *regardless* of whether the user selects "remember
-//! this computer" on the mobile device (the payload will just be null bytes).
+//! The authenticator will then immediately send a
+//! [GetInfoResponse][crate::ctap2::GetInfoResponse], and may also send a
+//! pairing payload (presently Android only). Where supported, a pairing payload
+//! is sent *regardless* of whether the user selects "remember this computer" on
+//! the mobile device (the payload will just be null bytes).
 //!
 //! The platform can then send a *single* `MakeCredential` or `GetAssertion`
 //! command to the authenticator in CTAP 2.x format.
@@ -121,6 +126,7 @@
 //! [ios]: https://developer.apple.com/videos/play/wwdc2022/10092/
 //! [Noise protocol]: http://noiseprotocol.org/noise.html
 //! [^qr]: Most mobile device camera apps have an integrated QR code scanner.
+#[allow(rustdoc::private_intra_doc_links)]
 
 mod base10;
 mod btle;
@@ -131,61 +137,63 @@ mod handshake;
 mod noise;
 mod tunnel;
 
-use std::mem::size_of;
-
 pub use base10::DecodeError;
-use num_traits::ToPrimitive;
-use openssl::{
-    bn::{BigNum, BigNumContext},
-    ec::{EcGroup, EcKey},
-    hash::MessageDigest,
-    nid::Nid,
-    pkey::{PKey, Private, Public},
-    rand::rand_bytes,
-    sign::Signer,
-};
-use tokio_tungstenite::tungstenite::http::Uri;
 
-pub use self::handshake::CableRequestType;
 use self::{
-    btle::*,
-    handshake::*,
-    discovery::{Eid, Discovery},
-    tunnel::{get_domain, Tunnel},
+    btle::Scanner,
+    discovery::Discovery,
+    tunnel::Tunnel,
 };
 use crate::{
-    ctap2::{
-        commands::GetInfoResponse, decrypt, encrypt, hkdf_sha_256, regenerate, CtapAuthenticator,
-    },
+    ctap2::CtapAuthenticator,
     error::WebauthnCError,
     ui::UiCallback,
 };
 
 type Psk = [u8; 32];
 
-#[derive(FromPrimitive, ToPrimitive, Debug, PartialEq, Eq)]
-#[repr(u32)]
-enum DerivedValueType {
-    EIDKey = 1,
-    TunnelID = 2,
-    PSK = 3,
-    PairedSecret = 4,
-    IdentityKeySeed = 5,
-    PerContactIDSecret = 6,
+#[derive(Debug, PartialEq, Eq, Clone, Default, Copy)]
+pub enum CableRequestType {
+    #[default]
+    GetAssertion,
+    MakeCredential,
+    DiscoverableMakeCredential,
 }
 
-impl DerivedValueType {
-    pub fn derive(
-        &self,
-        ikm: &[u8],
-        salt: &[u8],
-        output: &mut [u8],
-    ) -> Result<(), WebauthnCError> {
-        let typ = self.to_u32().ok_or(WebauthnCError::Internal)?.to_le_bytes();
-        Ok(hkdf_sha_256(salt, ikm, Some(&typ), output)?)
+impl ToString for CableRequestType {
+    fn to_string(&self) -> String {
+        use CableRequestType::*;
+        match self {
+            GetAssertion => String::from("ga"),
+            DiscoverableMakeCredential => String::from("mc"),
+            MakeCredential => String::from("mc"),
+        }
     }
 }
 
+impl CableRequestType {
+    pub fn from_string(val: &str, supports_non_discoverable_make_credential: bool) -> Option<Self> {
+        use CableRequestType::*;
+        match val {
+            "ga" => Some(GetAssertion),
+            "mc" => Some(if supports_non_discoverable_make_credential {
+                MakeCredential
+            } else {
+                DiscoverableMakeCredential
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// Establishes a connection to a caBLE authenticator using QR codes, Bluetooth
+/// Low Energy and a Websocket tunnel.
+/// 
+/// The QR code to be displayed will be passed via [UiCallback::cable_qr_code].
+/// 
+/// The resulting connection is passed as a [CtapAuthenticator], but the remote
+/// device will only accept a single command (specified in the `request_type`
+/// parameter) and then close the underlying Websocket.
 pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(
     request_type: CableRequestType,
     ui_callback: &'a U,
@@ -211,11 +219,10 @@ pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(
         })?;
     ui_callback.dismiss_qr_code();
 
-    let tunnel_id = disco.get_tunnel_id()?;
     let psk = disco.get_psk(&eid)?;
 
     let connect_url = disco.get_connect_uri(&eid)?;
-    let tun = Tunnel::connect(&connect_url, psk, &disco.local_identity.as_ref()).await?;
+    let tun = Tunnel::connect(&connect_url, psk, disco.local_identity.as_ref()).await?;
 
     tun.get_authenticator(ui_callback).ok_or_else(|| {
         error!("no supported protocol versions!");
@@ -225,5 +232,19 @@ pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(
 
 #[cfg(test)]
 mod test {
-    // TODO
+    use super::*;
+
+    #[test]
+    fn cable_request_type() {
+        assert_eq!(Some(CableRequestType::DiscoverableMakeCredential), CableRequestType::from_string("mc", false));
+        assert_eq!(Some(CableRequestType::MakeCredential), CableRequestType::from_string("mc", true));
+        assert_eq!(Some(CableRequestType::GetAssertion), CableRequestType::from_string("ga", false));
+        assert_eq!(Some(CableRequestType::GetAssertion), CableRequestType::from_string("ga", true));
+        assert_eq!(None, CableRequestType::from_string("nonsense", false));
+
+        assert_eq!("mc", CableRequestType::DiscoverableMakeCredential.to_string());
+        assert_eq!("mc", CableRequestType::MakeCredential.to_string());
+        assert_eq!("ga", CableRequestType::GetAssertion.to_string());
+    }
+
 }

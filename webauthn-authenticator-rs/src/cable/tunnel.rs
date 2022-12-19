@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use openssl::{
-    ec::{EcKeyRef, EcPoint, EcPointRef, PointConversionForm},
-    pkey_ctx::PkeyCtx,
+    ec::{EcKeyRef, EcPoint, EcPointRef, PointConversionForm, EcGroup, EcKey},
+    pkey_ctx::PkeyCtx, pkey::{Private, Public, PKey}, nid::Nid, bn::BigNumContext,
 };
 use serde_cbor::Value;
 use tokio::net::TcpStream;
@@ -22,21 +22,20 @@ use tokio_tungstenite::{
 };
 use webauthn_rs_proto::AuthenticatorTransport;
 
-use crate::error::CtapError;
 use crate::{
     cable::{
         crypter::Crypter,
         framing::{CableCommand, CablePostHandshake, MessageType},
-        noise::{get_public_key_bytes, CableNoise, HandshakeType},
+        noise::CableNoise,
+        Psk,
     },
     ctap2::{commands::GetInfoResponse, CBORCommand, CtapAuthenticator},
+    error::CtapError,
     prelude::WebauthnCError,
     transport::Token,
     ui::UiCallback,
     util::compute_sha256,
 };
-
-use super::*;
 
 /// Well-known domains.
 ///
@@ -91,7 +90,7 @@ pub fn get_domain(domain_id: u16) -> Option<String> {
 /// This implements [Token], but unlike most transports:
 /// 
 /// * this only allows a single command to be executed
-/// * the command must be specified in the [HandshakeV2] QR code
+/// * the command must be specified in the [HandshakeV2][super::handshake::HandshakeV2] QR code
 /// * the remote side "hangs up" after a single command
 pub struct Tunnel {
     psk: Psk,
@@ -238,10 +237,10 @@ impl Token for Tunnel {
         AuthenticatorTransport::Hybrid
     }
 
-    async fn transmit_raw<C, U>(&mut self, cmd: C, ui: &U) -> Result<Vec<u8>, WebauthnCError>
+    async fn transmit_raw<C, U>(&mut self, cmd: C, _ui: &U) -> Result<Vec<u8>, WebauthnCError>
     where
         C: CBORCommand,
-        U: UiCallback,
+        U: UiCallback, 
     {
         let f = CableCommand {
             // TODO: handle protocol versions

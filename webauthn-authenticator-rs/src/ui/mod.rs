@@ -75,7 +75,7 @@ impl UiCallback for Cli {
         &self,
         url: String,
     ) {
-        let qr = QrCode::new(url).unwrap();
+        let qr = QrCode::new(&url).unwrap();
 
         let code = qr
             .render::<Dense1x2>()
@@ -84,6 +84,7 @@ impl UiCallback for Cli {
             .build();
         println!("Scan the QR code with your mobile device to use caBLE:");
         println!("{}", code);
+        println!("{}", url);
     }
 
     fn dismiss_qr_code(

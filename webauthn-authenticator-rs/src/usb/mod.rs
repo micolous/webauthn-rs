@@ -282,7 +282,7 @@ impl Token for USBToken {
         }
     }
 
-    fn close(&self) -> Result<(), WebauthnCError> {
+    async fn close(&mut self) -> Result<(), WebauthnCError> {
         Ok(())
     }
 

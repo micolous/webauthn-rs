@@ -384,7 +384,7 @@ impl Token for NFCCard {
         Ok(())
     }
 
-    fn close(&self) -> Result<(), WebauthnCError> {
+    async fn close(&mut self) -> Result<(), WebauthnCError> {
         let guard = self.card.lock()?;
         let resp = transmit(
             guard.deref(),

@@ -1,6 +1,6 @@
 /// Structures for device discovery over BTLE.
 use std::mem::size_of;
-
+use num_traits::ToPrimitive;
 use openssl::{
     ec::{EcGroup, EcKey},
     hash::MessageDigest,
@@ -11,9 +11,10 @@ use openssl::{
 };
 use tokio_tungstenite::tungstenite::http::Uri;
 
-use super::{btle::*, handshake::*, tunnel::get_domain, CableRequestType, DerivedValueType, Psk};
+use super::{btle::*, handshake::*, tunnel::get_domain};
 use crate::{
-    ctap2::{decrypt, encrypt, regenerate},
+    cable::{CableRequestType, Psk},
+    ctap2::{decrypt, encrypt, regenerate, hkdf_sha_256},
     error::WebauthnCError,
 };
 
@@ -28,6 +29,29 @@ type CableEid = [u8; 16];
 type TunnelId = [u8; 16];
 
 const BASE64URL: base64::Config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
+
+#[derive(FromPrimitive, ToPrimitive, Debug, PartialEq, Eq)]
+#[repr(u32)]
+enum DerivedValueType {
+    EIDKey = 1,
+    TunnelID = 2,
+    PSK = 3,
+    PairedSecret = 4,
+    IdentityKeySeed = 5,
+    PerContactIDSecret = 6,
+}
+
+impl DerivedValueType {
+    pub fn derive(
+        &self,
+        ikm: &[u8],
+        salt: &[u8],
+        output: &mut [u8],
+    ) -> Result<(), WebauthnCError> {
+        let typ = self.to_u32().ok_or(WebauthnCError::Internal)?.to_le_bytes();
+        Ok(hkdf_sha_256(salt, ikm, Some(&typ), output)?)
+    }
+}
 
 #[derive(Debug)]
 pub struct Discovery {
