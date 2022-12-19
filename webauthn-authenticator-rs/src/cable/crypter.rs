@@ -119,6 +119,11 @@ impl Crypter {
         trace!("new_constuction: {:?}, nonce: {:?}", self.new_construction, nonce);
         nonce
     }
+
+    /// Returns `true` if the `other` [Crypter] uses matching "remote" keys.
+    pub(super) fn is_counterparty(&self, other: &Self) -> bool {
+        self.read_key == other.write_key && self.write_key == other.read_key
+    }
 }
 
 fn pad(msg: &[u8]) -> Vec<u8> {

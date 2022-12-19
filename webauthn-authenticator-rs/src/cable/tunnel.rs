@@ -124,7 +124,7 @@ impl Tunnel {
 
         // BuildInitialMessage
         // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=880;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
-        let (mut noise, handshake_message) = CableNoise::build_initator(Some(local_identity), psk, None)?;
+        let (mut noise, handshake_message) = CableNoise::build_initiator(Some(local_identity), psk, None)?;
         trace!(">>> {:02x?}", &handshake_message);
         //let s = stream.get_mut();
         stream
