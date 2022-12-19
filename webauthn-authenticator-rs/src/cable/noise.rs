@@ -392,19 +392,32 @@ mod test {
 
     #[test]
     fn noise() {
+        let _ = tracing_subscriber::fmt::try_init();
         let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
         let identity_key = EcKey::generate(&group).unwrap();
         let identity_pub = get_public_key_bytes(&identity_key).try_into().unwrap();
         let psk = [0; size_of::<Psk>()];
 
-        let (mut initiator_noise, initiator_msg) =
+        let (initiator_noise, initiator_msg) =
             CableNoise::build_initiator(Some(&identity_key), psk.to_owned(), None).unwrap();
 
         let (mut responder_crypt, responder_msg) =
             CableNoise::build_responder(None, psk, Some(identity_pub), &initiator_msg).unwrap();
 
-        let mut initator_crypt = initiator_noise.process_response(&responder_msg).unwrap();
+        let mut initiator_crypt = initiator_noise.process_response(&responder_msg).unwrap();
 
-        assert!(initator_crypt.is_counterparty(&responder_crypt));
+        assert!(initiator_crypt.is_counterparty(&responder_crypt));
+        responder_crypt.use_new_construction();
+
+        let ct = responder_crypt.encrypt(b"Hello, world!").unwrap();
+        let pt = initiator_crypt.decrypt(&ct).unwrap();
+        assert_eq!(b"Hello, world!", pt.as_slice());
+        // Decrypting the same ciphertext twice should fail, because of the nonce change
+        assert!(initiator_crypt.decrypt(&ct).is_err());
+
+        let ct = initiator_crypt.encrypt(b"The quick brown fox jumps over the lazy dog").unwrap();
+        let pt = responder_crypt.decrypt(&ct).unwrap();
+        assert_eq!(b"The quick brown fox jumps over the lazy dog", pt.as_slice());
+        assert!(responder_crypt.decrypt(&ct).is_err());
     }
 }
