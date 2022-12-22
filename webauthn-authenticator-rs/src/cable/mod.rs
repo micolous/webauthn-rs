@@ -46,11 +46,12 @@
 //! * a caBLE implementation, such as:
 //!
 //!   * [Android 7 or later][android-ver] with
-//!     [a recent version of Chrome and Google Play Services (October 2022)][android-announce]
+//!     [a recent version of Chrome and Google Play Services (October 2022)][android]
 //!
 //!   * [iOS 16 or later][ios]
 //!
-//! * a Bluetooth Low Energy (BLE) radio
+//! * a Bluetooth Low Energy (BLE) radio which can transmit service data
+//!   advertisements
 //!
 //! * a camera and QR code scanner[^qr]
 //!
@@ -127,7 +128,6 @@
 //! [Noise protocol]: http://noiseprotocol.org/noise.html
 //! [^qr]: Most mobile device camera apps have an integrated QR code scanner.
 #[allow(rustdoc::private_intra_doc_links)]
-
 mod base10;
 mod btle;
 mod crypter;
@@ -139,16 +139,8 @@ mod tunnel;
 
 pub use base10::DecodeError;
 
-use self::{
-    btle::Scanner,
-    discovery::Discovery,
-    tunnel::Tunnel,
-};
-use crate::{
-    ctap2::CtapAuthenticator,
-    error::WebauthnCError,
-    ui::UiCallback,
-};
+use self::{btle::Scanner, discovery::Discovery, handshake::HandshakeV2, tunnel::Tunnel};
+use crate::{ctap2::CtapAuthenticator, error::WebauthnCError, transport::Token, ui::UiCallback};
 
 type Psk = [u8; 32];
 
@@ -188,9 +180,9 @@ impl CableRequestType {
 
 /// Establishes a connection to a caBLE authenticator using QR codes, Bluetooth
 /// Low Energy and a Websocket tunnel.
-/// 
+///
 /// The QR code to be displayed will be passed via [UiCallback::cable_qr_code].
-/// 
+///
 /// The resulting connection is passed as a [CtapAuthenticator], but the remote
 /// device will only accept a single command (specified in the `request_type`
 /// parameter) and then close the underlying Websocket.
@@ -230,21 +222,53 @@ pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(
     })
 }
 
+/// Share an authenicator using caBLE.
+///
+/// **This functionality is not yet implemented**
+///
+/// This functionality is not available on macOS or Windows, because they do not
+/// support sending arbitrary Service Data advertisements.
+///
+/// It requires direct HCI access to your Bluetooth radio.
+async fn share_cable_authenticator<'a, T: Token, U: UiCallback + 'a>(
+    authenticator: CtapAuthenticator<'a, T, U>,
+    url: &str,
+) -> Result<(), WebauthnCError> {
+    let handshake = HandshakeV2::from_qr_url(url)?;
+    let discovery = handshake.to_discovery()?;
+
+    todo!()
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
 
     #[test]
     fn cable_request_type() {
-        assert_eq!(Some(CableRequestType::DiscoverableMakeCredential), CableRequestType::from_string("mc", false));
-        assert_eq!(Some(CableRequestType::MakeCredential), CableRequestType::from_string("mc", true));
-        assert_eq!(Some(CableRequestType::GetAssertion), CableRequestType::from_string("ga", false));
-        assert_eq!(Some(CableRequestType::GetAssertion), CableRequestType::from_string("ga", true));
+        assert_eq!(
+            Some(CableRequestType::DiscoverableMakeCredential),
+            CableRequestType::from_string("mc", false)
+        );
+        assert_eq!(
+            Some(CableRequestType::MakeCredential),
+            CableRequestType::from_string("mc", true)
+        );
+        assert_eq!(
+            Some(CableRequestType::GetAssertion),
+            CableRequestType::from_string("ga", false)
+        );
+        assert_eq!(
+            Some(CableRequestType::GetAssertion),
+            CableRequestType::from_string("ga", true)
+        );
         assert_eq!(None, CableRequestType::from_string("nonsense", false));
 
-        assert_eq!("mc", CableRequestType::DiscoverableMakeCredential.to_string());
+        assert_eq!(
+            "mc",
+            CableRequestType::DiscoverableMakeCredential.to_string()
+        );
         assert_eq!("mc", CableRequestType::MakeCredential.to_string());
         assert_eq!("ga", CableRequestType::GetAssertion.to_string());
     }
-
 }

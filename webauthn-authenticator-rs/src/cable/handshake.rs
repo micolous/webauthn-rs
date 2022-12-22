@@ -19,6 +19,8 @@ use crate::{
     error::WebauthnCError,
 };
 
+use super::discovery::Discovery;
+
 #[derive(Serialize, Debug, Clone)]
 #[serde(into = "BTreeMap<u32, Value>", try_from = "BTreeMap<u32, Value>")]
 pub struct HandshakeV2 {
@@ -192,6 +194,12 @@ impl HandshakeV2 {
             serde_cbor::from_slice(&payload).map_err(|_| WebauthnCError::Cbor)?;
 
         Ok(Self::try_from(v)?)
+    }
+
+    /// Converts a [HandshakeV2] payload (from a QR code) into a [Discovery]
+    /// which can be used to respond to the request.
+    pub fn to_discovery(&self) -> Result<Discovery, WebauthnCError> {
+        Discovery::new_with_qr_secret(self.request_type, self.secret.to_owned())
     }
 }
 

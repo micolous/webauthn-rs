@@ -62,20 +62,30 @@ pub struct Discovery {
 }
 
 impl Discovery {
+    /// Creates a [Discovery] for a given `request_type`.
+    /// 
+    /// This method generates a random `qr_secret` and `local_identity`, and is
+    /// suitable for use by an initiator.
     pub fn new(request_type: CableRequestType) -> Result<Self, WebauthnCError> {
         // chrome_authenticator_request_delegate.cc  ChromeAuthenticatorRequestDelegate::ConfigureCable
-        // generates a random value
         let mut qr_secret: QrSecret = [0; size_of::<QrSecret>()];
         rand_bytes(&mut qr_secret)?;
-        let local_identity = regenerate()?;
-
-        Self::new_with_qr_generator_key(request_type, local_identity, qr_secret)
+        Self::new_with_qr_secret(request_type, qr_secret)
     }
 
-    pub fn new_with_qr_generator_key(
+    /// Creates a [Discovery] for a given `request_type` and `qr_secret`.
+    /// 
+    /// This method generates a random `local_identity`, and is suitable for use
+    /// by an authenticator.  See [HandshakeV2.to_discovery] for a public API.
+    pub(super) fn new_with_qr_secret(request_type: CableRequestType, qr_secret: QrSecret) -> Result<Self, WebauthnCError> {        
+        let local_identity = regenerate()?;
+        Self::new_with_qr_secret_and_cert(request_type, qr_secret, local_identity)
+    }
+
+    fn new_with_qr_secret_and_cert(
         request_type: CableRequestType,
-        local_identity: EcKey<Private>,
         qr_secret: QrSecret,
+        local_identity: EcKey<Private>,
     ) -> Result<Self, WebauthnCError> {
         // Trying to EC_KEY_derive_from_secret is only in BoringSSL, and doesn't have openssl-rs bindings
         // Opted to just take in an EcKey here.
@@ -91,22 +101,27 @@ impl Discovery {
         })
     }
 
-    fn seed_to_public_key(&self) -> Result<EcKey<Public>, WebauthnCError> {
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
-        Ok(EcKey::from_public_key(
-            &group,
-            self.local_identity.public_key(),
-        )?)
-    }
-
+    /// Decrypts a Bluetooth service data advertisement with this [Discovery]'s
+    /// `eid_key`.
+    /// 
+    /// Returns `Ok(None)` when the advertisement was encrypted using a
+    /// different key.
     pub fn decrypt_advert(&self, advert: BleAdvert) -> Result<Option<Eid>, WebauthnCError> {
         Eid::decrypt_advert(advert, &self.eid_key)
     }
 
+    /// Encrypts an [Eid] with this [Discovery]'s `eid_key`.
+    /// 
+    /// Returns a byte array to be transmitted in as the payload of a Bluetooth
+    /// service data advertisement.
     pub fn encrypt_advert(&self, eid: &Eid) -> Result<BleAdvert, WebauthnCError> {
         eid.encrypt_advert(&self.eid_key)
     }
 
+    /// Makes a [HandshakeV2] for this [Discovery].
+    /// 
+    /// This payload includes the `request_type`, public key for the
+    /// `local_identity`, and `qr_secret`.
     pub fn make_handshake(&self) -> Result<HandshakeV2, WebauthnCError> {
         let public_key = EcKey::from_public_key(
             self.local_identity.group(),
@@ -383,10 +398,10 @@ mod test {
         ];
         let local_identity = EcKey::private_key_from_pem(&test_key).unwrap();
 
-        let discovery = Discovery::new_with_qr_generator_key(
+        let discovery = Discovery::new_with_qr_secret_and_cert(
             CableRequestType::DiscoverableMakeCredential,
-            local_identity,
             qr_secret,
+            local_identity,
         )
         .unwrap();
         // Discovery { request_type: DiscoverableMakeCredential, local_identity: EcKey,
