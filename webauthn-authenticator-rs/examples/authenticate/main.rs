@@ -43,17 +43,15 @@ enum Provider {
 }
 
 impl Provider {
-    async fn connect_provider<'a, U: UiCallback>(&self, request_type: CableRequestType, ui: &'a U) -> Box<dyn AuthenticatorBackend + 'a>{
+    async fn connect_provider<'a, U: UiCallback>(
+        &self,
+        request_type: CableRequestType,
+        ui: &'a U,
+    ) -> Box<dyn AuthenticatorBackend + 'a> {
         match self {
-            Provider::SoftToken => {
-                Box::new(SoftToken::new().unwrap().0)
-            },
-            Provider::CTAP => {
-                Box::new(select_transport(ui))
-            },
-            Provider::Cable => {
-                Box::new(connect_cable(request_type, ui).await)
-            }
+            Provider::SoftToken => Box::new(SoftToken::new().unwrap().0),
+            Provider::CTAP => Box::new(select_transport(ui)),
+            Provider::Cable => Box::new(connect_cable(request_type, ui).await),
         }
     }
 
@@ -62,15 +60,16 @@ impl Provider {
         match self {
             SoftToken => "SoftToken",
             CTAP => "CTAP",
-            Cable => "Cable"
+            Cable => "Cable",
         }
     }
 }
 
-async fn connect_cable<'a, U: UiCallback>(request_type: CableRequestType, ui: &'a U) -> impl AuthenticatorBackend + 'a {
-    connect_cable_authenticator(request_type, ui)
-        .await
-        .unwrap()
+async fn connect_cable<'a, U: UiCallback>(
+    request_type: CableRequestType,
+    ui: &'a U,
+) -> impl AuthenticatorBackend + 'a {
+    connect_cable_authenticator(request_type, ui).await.unwrap()
 }
 
 fn select_provider() -> Provider {
@@ -85,11 +84,7 @@ fn select_provider() -> Provider {
     // providers.push(("Windows 10", |_| {
     //     Box::new(webauthn_authenticator_rs::win10::Win10::default())
     // }));
-    let providers = [
-        Provider::SoftToken,
-        Provider::CTAP,
-        Provider::Cable,
-    ];
+    let providers = [Provider::SoftToken, Provider::CTAP, Provider::Cable];
 
     if providers.is_empty() {
         panic!("oops, no providers available in this build!");
@@ -126,7 +121,9 @@ async fn main() {
     tracing_subscriber::fmt::init();
     let ui = Cli {};
     let provider = select_provider();
-    let mut u = provider.connect_provider(CableRequestType::MakeCredential, &ui).await;
+    let mut u = provider
+        .connect_provider(CableRequestType::MakeCredential, &ui)
+        .await;
 
     // WARNING: don't use this as an example of how to use the library!
     let wan = Webauthn::new_unsafe_experts_only(
@@ -163,7 +160,9 @@ async fn main() {
 
     loop {
         if provider == Provider::Cable {
-            u = provider.connect_provider(CableRequestType::GetAssertion, &ui).await;
+            u = provider
+                .connect_provider(CableRequestType::GetAssertion, &ui)
+                .await;
         }
         let (chal, auth_state) = wan
             .generate_challenge_authenticate(

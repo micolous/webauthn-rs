@@ -1,5 +1,3 @@
-/// Structures for device discovery over BTLE.
-use std::mem::size_of;
 use num_traits::ToPrimitive;
 use openssl::{
     ec::{EcGroup, EcKey},
@@ -9,12 +7,14 @@ use openssl::{
     rand::rand_bytes,
     sign::Signer,
 };
+/// Structures for device discovery over BTLE.
+use std::mem::size_of;
 use tokio_tungstenite::tungstenite::http::Uri;
 
 use super::{btle::*, handshake::*, tunnel::get_domain};
 use crate::{
     cable::{CableRequestType, Psk},
-    ctap2::{decrypt, encrypt, regenerate, hkdf_sha_256},
+    ctap2::{decrypt, encrypt, hkdf_sha_256, regenerate},
     error::WebauthnCError,
 };
 
@@ -42,12 +42,7 @@ enum DerivedValueType {
 }
 
 impl DerivedValueType {
-    pub fn derive(
-        &self,
-        ikm: &[u8],
-        salt: &[u8],
-        output: &mut [u8],
-    ) -> Result<(), WebauthnCError> {
+    pub fn derive(&self, ikm: &[u8], salt: &[u8], output: &mut [u8]) -> Result<(), WebauthnCError> {
         let typ = self.to_u32().ok_or(WebauthnCError::Internal)?.to_le_bytes();
         Ok(hkdf_sha_256(salt, ikm, Some(&typ), output)?)
     }
@@ -63,7 +58,7 @@ pub struct Discovery {
 
 impl Discovery {
     /// Creates a [Discovery] for a given `request_type`.
-    /// 
+    ///
     /// This method generates a random `qr_secret` and `local_identity`, and is
     /// suitable for use by an initiator.
     pub fn new(request_type: CableRequestType) -> Result<Self, WebauthnCError> {
@@ -74,10 +69,13 @@ impl Discovery {
     }
 
     /// Creates a [Discovery] for a given `request_type` and `qr_secret`.
-    /// 
+    ///
     /// This method generates a random `local_identity`, and is suitable for use
     /// by an authenticator.  See [HandshakeV2.to_discovery] for a public API.
-    pub(super) fn new_with_qr_secret(request_type: CableRequestType, qr_secret: QrSecret) -> Result<Self, WebauthnCError> {        
+    pub(super) fn new_with_qr_secret(
+        request_type: CableRequestType,
+        qr_secret: QrSecret,
+    ) -> Result<Self, WebauthnCError> {
         let local_identity = regenerate()?;
         Self::new_with_qr_secret_and_cert(request_type, qr_secret, local_identity)
     }
@@ -103,7 +101,7 @@ impl Discovery {
 
     /// Decrypts a Bluetooth service data advertisement with this [Discovery]'s
     /// `eid_key`.
-    /// 
+    ///
     /// Returns `Ok(None)` when the advertisement was encrypted using a
     /// different key.
     pub fn decrypt_advert(&self, advert: BleAdvert) -> Result<Option<Eid>, WebauthnCError> {
@@ -111,7 +109,7 @@ impl Discovery {
     }
 
     /// Encrypts an [Eid] with this [Discovery]'s `eid_key`.
-    /// 
+    ///
     /// Returns a byte array to be transmitted in as the payload of a Bluetooth
     /// service data advertisement.
     pub fn encrypt_advert(&self, eid: &Eid) -> Result<BleAdvert, WebauthnCError> {
@@ -119,7 +117,7 @@ impl Discovery {
     }
 
     /// Makes a [HandshakeV2] for this [Discovery].
-    /// 
+    ///
     /// This payload includes the `request_type`, public key for the
     /// `local_identity`, and `qr_secret`.
     pub fn make_handshake(&self) -> Result<HandshakeV2, WebauthnCError> {

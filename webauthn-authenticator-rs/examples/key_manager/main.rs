@@ -207,8 +207,7 @@ fn main() {
                 })
                 .collect();
             assert_eq!(
-                token_count,
-                1,
+                token_count, 1,
                 "Expected exactly 1 CTAP2.1 authenticator supporting biometrics"
             );
             let id =
@@ -287,8 +286,7 @@ fn main() {
                 })
                 .collect();
             assert_eq!(
-                token_count,
-                1,
+                token_count, 1,
                 "Expected exactly 1 CTAP2.1 authenticator supporting biometrics"
             );
             let ids: Vec<Vec<u8>> =

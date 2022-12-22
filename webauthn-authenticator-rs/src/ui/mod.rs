@@ -1,6 +1,6 @@
+use qrcode::{render::unicode::Dense1x2, QrCode};
 use std::fmt::Debug;
 use std::io::{stderr, Write};
-use qrcode::{QrCode, render::unicode::Dense1x2};
 
 use crate::cable::CableRequestType;
 use crate::ctap2::EnrollSampleStatus;
@@ -26,21 +26,14 @@ pub trait UiCallback: Sync + Send + Debug {
 
     /// Prompt the user to scan a QR code with their mobile device to start the
     /// caBLE linking process.
-    /// 
+    ///
     /// This method will be called synchronously, and must not block.
-    fn cable_qr_code(
-        &self,
-        request_type: CableRequestType,
-        url: String,
-    );
+    fn cable_qr_code(&self, request_type: CableRequestType, url: String);
 
     /// Dismiss a displayed QR code from the screen.
-    /// 
+    ///
     /// This method will be called synchronously, and must not block.
-    fn dismiss_qr_code(
-        &self,
-    );
-
+    fn dismiss_qr_code(&self);
 }
 
 /// Basic CLI [UiCallback] implementation.
@@ -73,11 +66,7 @@ impl UiCallback for Cli {
         }
     }
 
-    fn cable_qr_code(
-        &self,
-        request_type: CableRequestType,
-        url: String,
-    ) {
+    fn cable_qr_code(&self, request_type: CableRequestType, url: String) {
         let qr = QrCode::new(&url).unwrap();
 
         let code = qr
@@ -88,7 +77,7 @@ impl UiCallback for Cli {
         match request_type {
             CableRequestType::DiscoverableMakeCredential | CableRequestType::MakeCredential => {
                 println!("Scan the QR code with your mobile device to create a new credential with caBLE:");
-            },
+            }
             CableRequestType::GetAssertion => {
                 println!("Scan the QR code with your mobile device to sign in with caBLE:");
             }
@@ -98,9 +87,7 @@ impl UiCallback for Cli {
         println!("{}", url);
     }
 
-    fn dismiss_qr_code(
-        &self,
-    ) {
+    fn dismiss_qr_code(&self) {
         println!("caBLE authenticator detected, connecting...");
     }
 }

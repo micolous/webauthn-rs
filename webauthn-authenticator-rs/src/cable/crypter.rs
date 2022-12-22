@@ -20,7 +20,7 @@ pub struct Crypter {
     /// Using "new construction" (caBLE v2.1+) changes the protocol to be more
     /// like regular Noise, by removing "additional bytes" and using a
     /// big-endian `read_seq` / `write_seq` nonce.
-    /// 
+    ///
     /// Crypter will automatically switch to this mode if the first call to
     /// [Crypter::decrypt] contains a message encrypted in `new_construction`
     /// mode.
@@ -124,13 +124,17 @@ impl Crypter {
         } else {
             nonce[..size_of::<u32>()].copy_from_slice(&counter.to_le_bytes());
         }
-        trace!("new_constuction: {:?}, nonce: {:?}", self.new_construction, nonce);
+        trace!(
+            "new_constuction: {:?}, nonce: {:?}",
+            self.new_construction,
+            nonce
+        );
         nonce
     }
 
     /// Returns `true` if the `other` [Crypter] uses "remote side" (swapped)
     /// read and write keys.
-    /// 
+    ///
     /// This function is only useful for testing.
     pub(super) fn is_counterparty(&self, other: &Self) -> bool {
         self.read_key == other.write_key && self.write_key == other.read_key
@@ -143,7 +147,7 @@ impl Crypter {
 }
 
 /// Pads a message to a multiple of [PADDING_MUL] bytes.
-/// 
+///
 /// See also: [unpad]
 fn pad(msg: &[u8]) -> Vec<u8> {
     let padded_len = (msg.len() + PADDING_MUL) & !(PADDING_MUL - 1);
@@ -180,7 +184,10 @@ mod test {
     use base64urlsafedata::Base64UrlSafeData;
     use webauthn_rs_proto::{PubKeyCredParams, PublicKeyCredentialDescriptor, RelyingParty, User};
 
-    use crate::{ctap2::{commands::MakeCredentialRequest, CBORCommand}, cable::framing::{CableCommand, MessageType}};
+    use crate::{
+        cable::framing::{CableCommand, MessageType},
+        ctap2::{commands::MakeCredentialRequest, CBORCommand},
+    };
 
     use super::*;
 

@@ -109,7 +109,7 @@ impl From<CablePostHandshake> for BTreeMap<u32, Value> {
         if let Some(linking_info) = h.linking_info {
             o.insert(0x02, Value::Bytes(linking_info));
         }
-        
+
         o
     }
 }

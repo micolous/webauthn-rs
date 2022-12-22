@@ -193,8 +193,8 @@ use crate::AuthenticatorBackend;
 pub use self::commands::EnrollSampleStatus;
 use self::commands::GetInfoRequest;
 pub use self::commands::{CBORCommand, CBORResponse, GetInfoResponse};
+pub(crate) use self::pin_uv::{decrypt, encrypt, hkdf_sha_256, regenerate};
 pub use self::{ctap20::Ctap20Authenticator, ctap21::Ctap21Authenticator};
-pub(crate) use self::pin_uv::{hkdf_sha_256, regenerate, decrypt, encrypt};
 
 /// Abstraction for different versions of the CTAP2 protocol.
 ///
@@ -225,7 +225,11 @@ impl<'a, T: Token, U: UiCallback> CtapAuthenticator<'a, T, U> {
     /// Creates a connection to an already-initialized token, and gets a reference to the highest supported FIDO version.
     ///
     /// Returns `None` if we don't support any version of CTAP which the token supports.
-    pub(crate) fn new_with_info(info: GetInfoResponse, token: T, ui_callback: &'a U) -> Option<CtapAuthenticator<'a, T, U>> {
+    pub(crate) fn new_with_info(
+        info: GetInfoResponse,
+        token: T,
+        ui_callback: &'a U,
+    ) -> Option<CtapAuthenticator<'a, T, U>> {
         if info.versions.contains(FIDO_2_1) {
             Some(Self::Fido21(Ctap21Authenticator::new(
                 info,

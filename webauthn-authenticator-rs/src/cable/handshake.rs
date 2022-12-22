@@ -2,7 +2,7 @@ use openssl::{
     bn::BigNumContext,
     ec::{EcGroup, EcKey, EcKeyRef, EcPoint, PointConversionForm},
     nid::Nid,
-    pkey::Public
+    pkey::Public,
 };
 use serde::Serialize;
 use serde_cbor::Value;
@@ -162,7 +162,11 @@ fn decompress_public_key(bytes: [u8; 33]) -> Result<EcKey<Public>, WebauthnCErro
 const URL_PREFIX: &str = "FIDO:/";
 
 impl HandshakeV2 {
-    pub fn new(request_type: CableRequestType, public_key: EcKey<Public>, qr_key: [u8; 16]) -> Result<Self, WebauthnCError> {
+    pub fn new(
+        request_type: CableRequestType,
+        public_key: EcKey<Public>,
+        qr_key: [u8; 16],
+    ) -> Result<Self, WebauthnCError> {
         Ok(Self {
             peer_identity: public_key,
             secret: qr_key,
@@ -177,7 +181,8 @@ impl HandshakeV2 {
 
     /// Encodes a [HandshakeV2] into a `FIDO:/` QR code.
     pub fn to_qr_url(&self) -> Result<String, WebauthnCError> {
-        let payload: Vec<u8> = serde_cbor::ser::to_vec_packed(self).map_err(|_| WebauthnCError::Cbor)?;
+        let payload: Vec<u8> =
+            serde_cbor::ser::to_vec_packed(self).map_err(|_| WebauthnCError::Cbor)?;
         Ok(format!("{}{}", URL_PREFIX, base10::encode(&payload)))
     }
 

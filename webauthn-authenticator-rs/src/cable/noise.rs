@@ -225,11 +225,11 @@ impl CableNoise {
 
     /// Processes the response from the responding party (authenticator) and
     /// creates a [Crypter] for further message passing.
-    /// 
+    ///
     /// * `response` is the message from the responding party ([CableNoise::build_responder])
-    /// 
+    ///
     /// ## Warning
-    /// 
+    ///
     /// This function mutates the state of `self`, *even on errors*. This
     /// renders the internal state invalid for "retrying" or future
     /// transactions.
@@ -274,9 +274,9 @@ impl CableNoise {
     }
 
     /// Starts a Noise handshake with a peer as the responding party (authenticator):
-    /// 
+    ///
     /// * `message` is the value from the initiating party ([CableNoise::build_initiator])
-    /// 
+    ///
     /// Returns `(crypter, response)`. `response` is sent to the initiating party ([CableNoise::process_response]).
     pub fn build_responder(
         local_identity: Option<&EcKeyRef<Private>>,
@@ -415,14 +415,19 @@ mod test {
         // Decrypting the same ciphertext twice should fail, because of the nonce change
         assert!(initiator_crypt.decrypt(&ct).is_err());
 
-        let ct2 = initiator_crypt.encrypt(b"The quick brown fox jumps over the lazy dog").unwrap();
+        let ct2 = initiator_crypt
+            .encrypt(b"The quick brown fox jumps over the lazy dog")
+            .unwrap();
 
         // Decrypting responder's initial ciphertext should fail because of different keys from Noise
         assert!(responder_crypt.decrypt(&ct).is_err());
 
         // A failure in Crypter shouldn't impact our ability to receive correct ciphertexts, if they're in order
         let pt2 = responder_crypt.decrypt(&ct2).unwrap();
-        assert_eq!(b"The quick brown fox jumps over the lazy dog", pt2.as_slice());
+        assert_eq!(
+            b"The quick brown fox jumps over the lazy dog",
+            pt2.as_slice()
+        );
         assert!(responder_crypt.decrypt(&ct).is_err());
     }
 }

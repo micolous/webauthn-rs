@@ -40,8 +40,7 @@ pub trait Transport<'b>: Sized + fmt::Debug + Send {
         &mut self,
         ui: &'a U,
     ) -> Result<CtapAuthenticator<'a, Self::Token, U>, WebauthnCError> {
-        self
-            .tokens()?
+        self.tokens()?
             .drain(..)
             .filter_map(|token| block_on(CtapAuthenticator::new(token, ui)))
             .next()

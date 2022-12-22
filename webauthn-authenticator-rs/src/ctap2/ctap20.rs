@@ -1,4 +1,4 @@
-use std::{fmt::Debug, collections::BTreeMap};
+use std::{collections::BTreeMap, fmt::Debug};
 
 use crate::{
     ctap2::{commands::*, pin_uv::*},
@@ -331,7 +331,10 @@ impl<'a, T: Token, U: UiCallback> Ctap20Authenticator<'a, T, U> {
         Ok((Some(iface), Some(pin_token)))
     }
 
-    async fn request_pin(&mut self, pin_uv_protocol: Option<u32>) -> Result<String, WebauthnCError> {
+    async fn request_pin(
+        &mut self,
+        pin_uv_protocol: Option<u32>,
+    ) -> Result<String, WebauthnCError> {
         let p = ClientPinRequest {
             pin_uv_protocol,
             sub_command: ClientPinSubCommand::GetPinRetries,
@@ -344,9 +347,7 @@ impl<'a, T: Token, U: UiCallback> Ctap20Authenticator<'a, T, U> {
 
         // TODO: handle lockouts
 
-        ui_callback
-            .request_pin()
-            .ok_or(WebauthnCError::Cancelled)
+        ui_callback.request_pin().ok_or(WebauthnCError::Cancelled)
     }
 }
 
@@ -372,7 +373,8 @@ impl<'a, T: Token, U: UiCallback> AuthenticatorBackend for Ctap20Authenticator<'
         ))?;
 
         // HACK for cable
-        let reqopts = if pin_uv_auth_proto == None && self.get_info().get_option("uv") == Some(true) {
+        let reqopts = if pin_uv_auth_proto == None && self.get_info().get_option("uv") == Some(true)
+        {
             Some(BTreeMap::from([(String::from("uv"), true)]))
         } else {
             None
@@ -449,7 +451,8 @@ impl<'a, T: Token, U: UiCallback> AuthenticatorBackend for Ctap20Authenticator<'
         ))?;
 
         // HACK for cable
-        let reqopts = if pin_uv_auth_proto == None && self.get_info().get_option("uv") == Some(true) {
+        let reqopts = if pin_uv_auth_proto == None && self.get_info().get_option("uv") == Some(true)
+        {
             Some(BTreeMap::from([(String::from("uv"), true)]))
         } else {
             None

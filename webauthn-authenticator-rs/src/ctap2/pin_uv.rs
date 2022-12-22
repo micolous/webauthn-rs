@@ -244,7 +244,11 @@ pub fn encrypt(key: &[u8], iv: Option<&[u8]>, plaintext: &[u8]) -> Result<Vec<u8
     Ok(ct)
 }
 
-pub fn decrypt(key: &[u8], iv: Option<&[u8]>, ciphertext: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
+pub fn decrypt(
+    key: &[u8],
+    iv: Option<&[u8]>,
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, WebauthnCError> {
     let cipher = openssl::symm::Cipher::aes_256_cbc();
     if ciphertext.len() % cipher.block_size() != 0 {
         error!(

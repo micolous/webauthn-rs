@@ -136,7 +136,10 @@ impl<'a, T: Token, U: UiCallback> Ctap21Authenticator<'a, T, U> {
     }
 
     /// Checks that a given `friendly_name` complies with authenticator limits, and returns the value in Unicode Normal Form C.
-    async fn check_friendly_name(&mut self, friendly_name: String) -> Result<String, WebauthnCError> {
+    async fn check_friendly_name(
+        &mut self,
+        friendly_name: String,
+    ) -> Result<String, WebauthnCError> {
         let ui_callback = self.ui_callback;
         let r = self
             .token

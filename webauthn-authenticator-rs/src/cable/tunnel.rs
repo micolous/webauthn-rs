@@ -1,13 +1,16 @@
 //! Tunnel functions
 
-use std::fmt::Debug;
 use std::collections::BTreeMap;
+use std::fmt::Debug;
 
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use openssl::{
-    ec::{EcKeyRef, EcPoint, EcPointRef, PointConversionForm, EcGroup, EcKey},
-    pkey_ctx::PkeyCtx, pkey::{Private, Public, PKey}, nid::Nid, bn::BigNumContext,
+    bn::BigNumContext,
+    ec::{EcGroup, EcKey, EcKeyRef, EcPoint, EcPointRef, PointConversionForm},
+    nid::Nid,
+    pkey::{PKey, Private, Public},
+    pkey_ctx::PkeyCtx,
 };
 use serde_cbor::Value;
 use tokio::net::TcpStream;
@@ -62,7 +65,7 @@ pub fn get_domain(domain_id: u16) -> Option<String> {
             None => {
                 warn!("Invalid tunnel server ID {:04x}", domain_id);
                 None
-            },
+            }
         };
     }
 
@@ -86,9 +89,9 @@ pub fn get_domain(domain_id: u16) -> Option<String> {
 }
 
 /// Websocket tunnel to a caBLE authenticator.
-/// 
+///
 /// This implements [Token], but unlike most transports:
-/// 
+///
 /// * this only allows a single command to be executed
 /// * the command must be specified in the [HandshakeV2][super::handshake::HandshakeV2] QR code
 /// * the remote side "hangs up" after a single command
@@ -124,7 +127,8 @@ impl Tunnel {
 
         // BuildInitialMessage
         // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=880;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
-        let (mut noise, handshake_message) = CableNoise::build_initiator(Some(local_identity), psk, None)?;
+        let (mut noise, handshake_message) =
+            CableNoise::build_initiator(Some(local_identity), psk, None)?;
         trace!(">>> {:02x?}", &handshake_message);
         //let s = stream.get_mut();
         stream
@@ -240,7 +244,7 @@ impl Token for Tunnel {
     async fn transmit_raw<C, U>(&mut self, cmd: C, _ui: &U) -> Result<Vec<u8>, WebauthnCError>
     where
         C: CBORCommand,
-        U: UiCallback, 
+        U: UiCallback,
     {
         let f = CableCommand {
             // TODO: handle protocol versions
@@ -281,7 +285,9 @@ impl Token for Tunnel {
             protocol_version: 1,
             message_type: MessageType::Shutdown,
             data: vec![],
-        }).await.ok();
+        })
+        .await
+        .ok();
         self.stream.close(None).await.ok();
         Ok(())
     }
