@@ -174,12 +174,22 @@ impl Discovery {
 
     /// Gets the Websocket connection URL which the authenticator will use to
     /// connect to the platform.
-    pub fn get_new_tunnel_uri(&self, eid: &Eid) -> Result<Uri, WebauthnCError> {
-        let tunnel_id = self.get_tunnel_id()?;
-        eid.get_new_tunnel_uri(tunnel_id).ok_or_else(|| {
-            error!("Unknown WebSocket tunnel URL for {:?}", eid);
-            WebauthnCError::NotSupported
-        })
+    pub fn get_new_tunnel_uri(&self, domain_id: u16) -> Result<Uri, WebauthnCError> {
+        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=170;drc=de9f16dcca1d5057ba55973fa85a5b27423d414f
+        get_domain(domain_id)
+            .and_then(|domain| {
+                let tunnel_id = hex::encode_upper(&self.get_tunnel_id().ok()?);
+                Uri::builder()
+                    .scheme("wss")
+                    .authority(domain)
+                    .path_and_query(format!("/cable/new/{}", tunnel_id))
+                    .build()
+                    .ok()
+            })
+            .ok_or_else(|| {
+                error!("Unknown WebSocket tunnel URL for {:?}", domain_id);
+                WebauthnCError::NotSupported
+            })
     }
 }
 
@@ -191,6 +201,17 @@ pub struct Eid {
 }
 
 impl Eid {
+    pub fn new(tunnel_server_id: u16, routing_id: RoutingId) -> Result<Self, WebauthnCError> {
+        let mut nonce: BleNonce = [0; size_of::<BleNonce>()];
+        rand_bytes(&mut nonce)?;
+
+        Ok(Self {
+            tunnel_server_id,
+            routing_id,
+            nonce,
+        })
+    }
+
     /// Converts this [Eid] into unencrypted bytes.
     fn to_bytes(&self) -> CableEid {
         let mut o: CableEid = [0; size_of::<CableEid>()];
@@ -325,23 +346,6 @@ impl Eid {
                 .scheme("wss")
                 .authority(domain)
                 .path_and_query(format!("/cable/contact/{}", routing_id))
-                .build()
-                .ok()
-        })
-    }
-
-    /// Gets the Websocket connection URI which the authenticator will use to
-    /// connect to the platform.
-    ///
-    /// `tunnel_id` is provided from [Discovery::get_tunnel_id].
-    fn get_new_tunnel_uri(&self, tunnel_id: TunnelId) -> Option<Uri> {
-        // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=170;drc=de9f16dcca1d5057ba55973fa85a5b27423d414f
-        self.get_domain().and_then(|domain| {
-            let tunnel_id = hex::encode_upper(tunnel_id);
-            Uri::builder()
-                .scheme("wss")
-                .authority(domain)
-                .path_and_query(format!("/cable/new/{}", tunnel_id))
                 .build()
                 .ok()
         })

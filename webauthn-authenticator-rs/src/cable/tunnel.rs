@@ -103,13 +103,10 @@ pub struct Tunnel {
 }
 
 impl Tunnel {
-    pub async fn connect(
+    pub(super) async fn connect(
         uri: &Uri,
-        psk: Psk,
-        local_identity: &EcKeyRef<Private>,
-    ) -> Result<Tunnel, WebauthnCError> {
+    ) -> Result<(WebSocketStream<MaybeTlsStream<TcpStream>>, Option<Vec<u8>>), WebauthnCError> {
         let mut request = IntoClientRequest::into_client_request(uri).unwrap();
-
         let headers = request.headers_mut();
         headers.insert(
             "Sec-WebSocket-Protocol",
@@ -123,7 +120,24 @@ impl Tunnel {
             error!("websocket error: {:?}", e);
             WebauthnCError::Internal
         })?;
+
         trace!(?response);
+        // Get the routing-id from the response header
+        let routing_id = response
+            .headers()
+            .get("X-caBLE-Routing-ID")
+            .and_then(|v| hex::decode(v.as_bytes()).ok());
+        trace!("Routing ID: {:02x?}", routing_id);
+
+        Ok((stream, routing_id))
+    }
+
+    pub async fn connect_initiator(
+        uri: &Uri,
+        psk: Psk,
+        local_identity: &EcKeyRef<Private>,
+    ) -> Result<Tunnel, WebauthnCError> {
+        let (mut stream, _) = Self::connect(uri).await?;
 
         // BuildInitialMessage
         // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=880;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29

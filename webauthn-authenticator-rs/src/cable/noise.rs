@@ -4,7 +4,7 @@ use openssl::{
     bn::BigNumContext,
     ec::{EcGroup, EcKey, EcKeyRef, EcPointRef, PointConversionForm},
     nid::Nid,
-    pkey::Private,
+    pkey::{Private, Public},
     symm::{decrypt_aead, encrypt_aead, Cipher},
 };
 
@@ -281,7 +281,7 @@ impl CableNoise {
     pub fn build_responder(
         local_identity: Option<&EcKeyRef<Private>>,
         psk: Psk,
-        peer_identity: Option<[u8; 65]>,
+        peer_identity: Option<&EcKeyRef<Public>>,
         message: &[u8],
     ) -> Result<(Crypter, Vec<u8>), WebauthnCError> {
         if message.len() < 65 {
@@ -305,7 +305,7 @@ impl CableNoise {
             let mut noise = Self::new(HandshakeType::KNpsk0)?;
             let prologue = [1];
             noise.mix_hash(&prologue);
-            noise.mix_hash(&peer_identity);
+            noise.mix_hash_point(peer_identity.public_key());
             noise
         } else {
             error!("build_initiator requires local_identity or peer_identity");
@@ -343,11 +343,10 @@ impl CableNoise {
         noise.mix_key(&shared_key_ee)?;
 
         if let Some(peer_identity) = peer_identity {
-            let peer_identity_point = bytes_to_public_key(&peer_identity)?;
             let mut shared_key_se = [0; 32];
             ecdh(
                 &noise.ephemeral_key,
-                &peer_identity_point,
+                &peer_identity,
                 &mut shared_key_se,
             )?;
             noise.mix_key(&shared_key_se)?;
@@ -395,14 +394,14 @@ mod test {
         let _ = tracing_subscriber::fmt::try_init();
         let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
         let identity_key = EcKey::generate(&group).unwrap();
-        let identity_pub = get_public_key_bytes(&identity_key).try_into().unwrap();
+        let identity_pub = EcKey::from_public_key(&group, identity_key.public_key()).unwrap();
         let psk = [0; size_of::<Psk>()];
 
         let (initiator_noise, initiator_msg) =
             CableNoise::build_initiator(Some(&identity_key), psk.to_owned(), None).unwrap();
 
         let (mut responder_crypt, responder_msg) =
-            CableNoise::build_responder(None, psk, Some(identity_pub), &initiator_msg).unwrap();
+            CableNoise::build_responder(None, psk, Some(&identity_pub), &initiator_msg).unwrap();
 
         let mut initiator_crypt = initiator_noise.process_response(&responder_msg).unwrap();
 

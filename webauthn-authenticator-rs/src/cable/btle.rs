@@ -4,6 +4,7 @@
 //! connection metadata by transmitting an encrypted service data payload.
 //!
 //! [Scanner] uses [btleplug] to watch for caBLE advertisements.
+use bluetooth_hci::types::Advertisement;
 use btleplug::{
     api::{Central, CentralEvent, Manager as _, ScanFilter},
     platform::Manager,
@@ -16,11 +17,17 @@ use crate::error::WebauthnCError;
 
 const GOOGLE_CABLE_SERVICE: Uuid = uuid!("0000fde2-0000-1000-8000-00805f9b34fb");
 const FIDO_CABLE_SERVICE: Uuid = uuid!("0000fff9-0000-1000-8000-00805f9b34fb");
+const FIDO_CABLE_SERVICE16: u16 = 0xfff9;
 
 fn get_scan_filter() -> ScanFilter {
     ScanFilter {
         services: vec![FIDO_CABLE_SERVICE, GOOGLE_CABLE_SERVICE],
     }
+}
+
+pub fn make_advert(payload: &[u8]) -> Advertisement {
+    trace!(?payload);
+    Advertisement::ServiceData16BitUuid(FIDO_CABLE_SERVICE16, payload)
 }
 
 /// caBLE Bluetooth Low Energy service data scanner.

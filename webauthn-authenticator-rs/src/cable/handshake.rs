@@ -24,7 +24,7 @@ use super::discovery::Discovery;
 #[derive(Serialize, Debug, Clone)]
 #[serde(into = "BTreeMap<u32, Value>", try_from = "BTreeMap<u32, Value>")]
 pub struct HandshakeV2 {
-    peer_identity: EcKey<Public>,
+    pub(super) peer_identity: EcKey<Public>,
     secret: [u8; 16],
     known_domains_count: u32,
     timestamp: SystemTime,

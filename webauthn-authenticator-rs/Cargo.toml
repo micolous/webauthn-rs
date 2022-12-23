@@ -55,6 +55,9 @@ tokio = { version = "1.22.0", features = ["sync", "test-util", "macros", "rt-mul
 base64 = "0.13"
 tokio-tungstenite = { version = "0.18.0", features = ["native-tls"] }
 hex = "0.4.3"
+serialport = { version = "4.2.0" }
+bluetooth-hci = { path = "../../bluetooth-hci" }
+serialport-hci = { path = "../../serialport-hci" }
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter", "std", "fmt"] }
