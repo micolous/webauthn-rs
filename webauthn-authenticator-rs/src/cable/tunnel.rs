@@ -35,7 +35,7 @@ use crate::{
         noise::CableNoise,
         Psk,
     },
-    ctap2::{commands::GetInfoResponse, CBORCommand, CtapAuthenticator},
+    ctap2::{commands::GetInfoResponse, CtapAuthenticator},
     error::CtapError,
     prelude::WebauthnCError,
     transport::Token,
@@ -121,7 +121,7 @@ impl Tunnel {
         headers.insert("Origin", HeaderValue::from_str(&origin).unwrap());
 
         trace!(?request);
-        let (mut stream, response) = connect_async(request).await.map_err(|e| {
+        let (stream, response) = connect_async(request).await.map_err(|e| {
             error!("websocket error: {:?}", e);
             WebauthnCError::Internal
         })?;
@@ -146,10 +146,9 @@ impl Tunnel {
 
         // BuildInitialMessage
         // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=880;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
-        let (mut noise, handshake_message) =
+        let (noise, handshake_message) =
             CableNoise::build_initiator(Some(local_identity), psk, None)?;
         trace!(">>> {:02x?}", &handshake_message);
-        //let s = stream.get_mut();
         stream
             .send(Message::Binary(handshake_message))
             .await
@@ -157,8 +156,6 @@ impl Tunnel {
 
         // Handshake sent, get response
         let resp = stream.next().await.unwrap().unwrap();
-        //let len = s.read(&mut msg).await.unwrap();
-        //trace!("<<< {:02x?}", &msg[..len]);
         trace!("<<< {:?}", resp);
         let mut crypter = if let Message::Binary(v) = resp {
             noise.process_response(&v)?
@@ -282,8 +279,6 @@ impl Tunnel {
         ui_callback: &'a U,
     ) -> Option<CtapAuthenticator<'a, Self, U>> {
         CtapAuthenticator::new_with_info(self.info.to_owned(), self, ui_callback)
-
-        // Sending GetInfo here means we get an explicit close message
     }
 
     pub(super) async fn send(&mut self, cmd: CableCommand) -> Result<(), WebauthnCError> {
@@ -335,7 +330,7 @@ impl Token for Tunnel {
         AuthenticatorTransport::Hybrid
     }
 
-    async fn transmit_raw<U>(&mut self, cbor: &[u8], ui: &U) -> Result<Vec<u8>, WebauthnCError>
+    async fn transmit_raw<U>(&mut self, cbor: &[u8], _ui: &U) -> Result<Vec<u8>, WebauthnCError>
     where
         U: UiCallback,
     {

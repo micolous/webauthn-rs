@@ -1,9 +1,8 @@
 use num_traits::ToPrimitive;
 use openssl::{
-    ec::{EcGroup, EcKey},
+    ec::EcKey,
     hash::MessageDigest,
-    nid::Nid,
-    pkey::{PKey, Private, Public},
+    pkey::{PKey, Private},
     rand::rand_bytes,
     sign::Signer,
 };

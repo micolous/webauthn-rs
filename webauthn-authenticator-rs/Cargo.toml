@@ -55,10 +55,12 @@ tokio = { version = "1.22.0", features = ["sync", "test-util", "macros", "rt-mul
 base64 = "0.13"
 tokio-tungstenite = { version = "0.18.0", features = ["native-tls"] }
 hex = "0.4.3"
-serialport = { version = "4.2.0" }
 bluetooth-hci = { git = "https://github.com/micolous/bluetooth-hci.git", rev = "04f98f734b0b9f0304e433335357307f63f6bc26" }
-serialport-hci = { git = "https://github.com/micolous/serialport-hci.git", rev = "7931ad32510ac162f9c4e1147bdd411e40cffa0e" }
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter", "std", "fmt"] }
 clap = { version = "^3.2", features = ["derive", "env"] }
+
+# cable_tunnel - used for connecting to Bluetooth HCI controller over serial
+serialport = { version = "4.2.0" }
+serialport-hci = { git = "https://github.com/micolous/serialport-hci.git", rev = "7931ad32510ac162f9c4e1147bdd411e40cffa0e" }

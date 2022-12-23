@@ -305,7 +305,7 @@ impl CableNoise {
             let mut noise = Self::new(HandshakeType::KNpsk0)?;
             let prologue = [1];
             noise.mix_hash(&prologue);
-            noise.mix_hash_point(peer_identity.public_key());
+            noise.mix_hash_point(peer_identity.public_key())?;
             noise
         } else {
             error!("build_initiator requires local_identity or peer_identity");
