@@ -72,32 +72,15 @@ pub trait CBORCommand: Serialize + Sized + std::fmt::Debug + Send {
 
     /// Converts a CTAP v2 command into a form suitable for transmission with
     /// short ISO/IEC 7816-4 APDUs (over NFC).
+    #[deprecated]
     fn to_short_apdus(&self) -> Result<Vec<ISO7816RequestAPDU>, serde_cbor::Error> {
         let cbor = self.cbor()?;
-        let chunks = cbor.chunks(FRAG_MAX).rev();
-        let mut o = Vec::with_capacity(chunks.len());
-        let mut last = true;
-
-        for chunk in chunks {
-            o.insert(
-                0,
-                ISO7816RequestAPDU {
-                    cla: if last { 0x80 } else { 0x90 },
-                    ins: 0x10,
-                    p1: 0x00,
-                    p2: 0x00,
-                    data: chunk.to_vec(),
-                    ne: if last { 256 } else { 0 },
-                },
-            );
-            last = false;
-        }
-
-        Ok(o)
+       Ok(to_short_apdus(&cbor))
     }
 
     /// Converts a CTAP v2 command into a form suitable for transmission with
     /// extended ISO/IEC 7816-4 APDUs (over NFC).
+    #[deprecated]
     fn to_extended_apdu(&self) -> Result<ISO7816RequestAPDU, serde_cbor::Error> {
         Ok(ISO7816RequestAPDU {
             cla: 0x80,
@@ -108,6 +91,31 @@ pub trait CBORCommand: Serialize + Sized + std::fmt::Debug + Send {
             ne: 65536,
         })
     }
+}
+
+/// Converts a CTAP v2 command into a form suitable for transmission with
+/// short ISO/IEC 7816-4 APDUs (over NFC).
+pub fn to_short_apdus(cbor: &[u8]) -> Vec<ISO7816RequestAPDU> {
+    let chunks = cbor.chunks(FRAG_MAX).rev();
+    let mut o = Vec::with_capacity(chunks.len());
+    let mut last = true;
+
+    for chunk in chunks {
+        o.insert(
+            0,
+            ISO7816RequestAPDU {
+                cla: if last { 0x80 } else { 0x90 },
+                ins: 0x10,
+                p1: 0x00,
+                p2: 0x00,
+                data: chunk.to_vec(),
+                ne: if last { 256 } else { 0 },
+            },
+        );
+        last = false;
+    }
+
+    o
 }
 
 fn value_to_vec_string(v: Value, loc: &str) -> Option<Vec<String>> {

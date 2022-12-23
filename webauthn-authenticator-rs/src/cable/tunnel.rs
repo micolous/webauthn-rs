@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
+use bluetooth_hci::types::Advertisement;
 use futures::{SinkExt, StreamExt};
 use openssl::{
     bn::BigNumContext,
@@ -27,7 +28,9 @@ use webauthn_rs_proto::AuthenticatorTransport;
 
 use crate::{
     cable::{
+        btle::make_advert,
         crypter::Crypter,
+        discovery::{Discovery, Eid},
         framing::{CableCommand, CablePostHandshake, MessageType},
         noise::CableNoise,
         Psk,
@@ -39,6 +42,8 @@ use crate::{
     ui::UiCallback,
     util::compute_sha256,
 };
+
+use super::framing::SHUTDOWN_COMMAND;
 
 /// Well-known domains.
 ///
@@ -199,6 +204,75 @@ impl Tunnel {
         Ok(t)
     }
 
+    pub async fn connect_authenticator(
+        discovery: &Discovery,
+        tunnel_server_id: u16,
+        peer_identity: &EcKeyRef<Public>,
+        info: GetInfoResponse,
+        mut advertising_callback: impl FnMut(Option<Advertisement>) -> Result<(), WebauthnCError>,
+    ) -> Result<Tunnel, WebauthnCError> {
+        let uri = discovery.get_new_tunnel_uri(tunnel_server_id)?;
+        let (mut stream, routing_id) = Self::connect(&uri).await?;
+        let eid = if let Some(routing_id) = routing_id {
+            Eid::new(
+                tunnel_server_id,
+                routing_id.try_into().map_err(|_| {
+                    error!("Incorrect routing-id header length");
+                    WebauthnCError::Internal
+                })?,
+            )?
+        } else {
+            error!("Missing or invalid routing-id header");
+            return Err(WebauthnCError::Internal);
+        };
+
+        let psk = discovery.get_psk(&eid)?;
+        let encrypted_eid = discovery.encrypt_advert(&eid)?;
+        let advert = make_advert(&encrypted_eid);
+        advertising_callback(Some(advert))?;
+
+        // Wait for initial message from initiator
+        trace!("Advertising started, waiting for initiator...");
+        let resp = stream.next().await.unwrap().unwrap();
+        trace!("<<< {:?}", resp);
+
+        advertising_callback(None)?;
+        let resp = if let Message::Binary(v) = resp {
+            v
+        } else {
+            error!("Unexpected websocket response type");
+            return Err(WebauthnCError::Unknown);
+        };
+
+        let (mut crypter, response) =
+            CableNoise::build_responder(None, psk, Some(peer_identity), &resp)?;
+        trace!("Sending response to initiator challenge");
+        trace!(">!> {:02x?}", response);
+        stream.send(Message::Binary(response)).await.unwrap();
+
+        // Send post-handshake message
+        let phm = CablePostHandshake {
+            info: info.to_owned(),
+            linking_info: None,
+        };
+        trace!("Sending post-handshake message");
+        trace!(">>> {:02x?}", &phm);
+        let phm = serde_cbor::to_vec(&phm).map_err(|_| WebauthnCError::Cbor)?;
+        crypter.use_new_construction();
+
+        let mut t = Self {
+            psk,
+            stream,
+            crypter,
+            info,
+        };
+
+        t.send_raw(&phm).await?;
+
+        // Now we're ready for our first command
+        Ok(t)
+    }
+
     /// Establishes a [CtapAuthenticator] connection for communicating with a
     /// caBLE authenticator using CTAP 2.x.
     ///
@@ -212,11 +286,15 @@ impl Tunnel {
         // Sending GetInfo here means we get an explicit close message
     }
 
-    async fn send(&mut self, cmd: CableCommand) -> Result<(), WebauthnCError> {
+    pub(super) async fn send(&mut self, cmd: CableCommand) -> Result<(), WebauthnCError> {
         // TODO: handle error
-        trace!("send: flushing before send");
-        self.stream.flush().await.unwrap();
+        // trace!("send: flushing before send");
+        // self.stream.flush().await.unwrap();
         let cmd = cmd.to_bytes();
+        self.send_raw(&cmd).await
+    }
+
+    async fn send_raw(&mut self, cmd: &[u8]) -> Result<(), WebauthnCError> {
         trace!(">>> {:02x?}", cmd);
         let encrypted = self.crypter.encrypt(&cmd)?;
         trace!("ENC {:02x?}", encrypted);
@@ -224,7 +302,7 @@ impl Tunnel {
         Ok(())
     }
 
-    async fn recv(&mut self) -> Result<CableCommand, WebauthnCError> {
+    pub(super) async fn recv(&mut self) -> Result<CableCommand, WebauthnCError> {
         // TODO: handle error
         let resp = self.stream.next().await.unwrap().unwrap();
 
@@ -235,7 +313,9 @@ impl Tunnel {
             return Err(WebauthnCError::Unknown);
         };
 
+        trace!("DEC {:02x?}", resp);
         let decrypted = self.crypter.decrypt(&resp)?;
+        trace!("<<< {:02x?}", decrypted);
         // TODO: protocol version
         Ok(CableCommand::from_bytes(1, &decrypted))
     }
@@ -255,16 +335,15 @@ impl Token for Tunnel {
         AuthenticatorTransport::Hybrid
     }
 
-    async fn transmit_raw<C, U>(&mut self, cmd: C, _ui: &U) -> Result<Vec<u8>, WebauthnCError>
+    async fn transmit_raw<U>(&mut self, cbor: &[u8], ui: &U) -> Result<Vec<u8>, WebauthnCError>
     where
-        C: CBORCommand,
         U: UiCallback,
     {
         let f = CableCommand {
             // TODO: handle protocol versions
             protocol_version: 1,
             message_type: MessageType::Ctap,
-            data: cmd.cbor().map_err(|_| WebauthnCError::Cbor)?,
+            data: cbor.to_vec(),
         };
         self.send(f).await?;
         let mut data = loop {
@@ -295,13 +374,7 @@ impl Token for Tunnel {
 
     async fn close(&mut self) -> Result<(), WebauthnCError> {
         // We don't care if this errors
-        self.send(CableCommand {
-            protocol_version: 1,
-            message_type: MessageType::Shutdown,
-            data: vec![],
-        })
-        .await
-        .ok();
+        self.send(SHUTDOWN_COMMAND).await.ok();
         self.stream.close(None).await.ok();
         Ok(())
     }

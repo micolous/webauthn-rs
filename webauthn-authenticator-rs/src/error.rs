@@ -233,6 +233,62 @@ impl From<u8> for CtapError {
     }
 }
 
+impl From<CtapError> for u8 {
+    fn from(e: CtapError) -> Self {
+        use CtapError::*;
+        match e {
+            Ok => 0x00,
+            Ctap1InvalidCommand => 0x01,
+            Ctap1InvalidParameter => 0x02,
+            Ctap1InvalidLength => 0x03,
+            Ctap1InvalidSeq => 0x04,
+            Ctap1Timeout => 0x05,
+            Ctap1ChannelBusy => 0x06,
+            Ctap1LockRequired => 0x0a,
+            Ctap1InvalidChannel => 0x0b,
+            Ctap2CborUnexpectedType => 0x11,
+            Ctap2InvalidCBOR => 0x12,
+            Ctap2MissingParameter => 0x14,
+            Ctap2LimitExceeded => 0x15,
+            Ctap2FingerprintDatabaseFull => 0x17,
+            Ctap2LargeBlobStorageFull => 0x18,
+            Ctap2CredentialExcluded => 0x19,
+            Ctap2Processing => 0x21,
+            Ctap2InvalidCredential => 0x22,
+            Ctap2UserActionPending => 0x23,
+            Ctap2OperationPending => 0x24,
+            Ctap2NoOperations => 0x25,
+            Ctap2UnsupportedAlgorithm => 0x26,
+            Ctap2OperationDenied => 0x27,
+            Ctap2KeyStoreFull => 0x28,
+            Ctap2UnsupportedOption => 0x2b,
+            Ctap2InvalidOption => 0x2c,
+            Ctap2KeepAliveCancel => 0x2d,
+            Ctap2NoCredentials => 0x2e,
+            Ctap2UserActionTimeout => 0x2f,
+            Ctap2NotAllowed => 0x30,
+            Ctap2PinInvalid => 0x31,
+            Ctap2PinBlocked => 0x32,
+            Ctap2PinAuthInvalid => 0x33,
+            Ctap2PinAuthBlocked => 0x34,
+            Ctap2PinNotSet => 0x35,
+            Ctap2PUATRequired => 0x36,
+            Ctap2PinPolicyViolation => 0x37,
+            Ctap2RequestTooLarge => 0x39,
+            Ctap2ActionTimeout => 0x3a,
+            Ctap2UserPresenceRequired => 0x3b,
+            Ctap2UserVerificationBlocked => 0x3c,
+            Ctap2IntegrityFailure => 0x3d,
+            Ctap2InvalidSubcommand => 0x3e,
+            Ctap2UserVerificationInvalid => 0x3f,
+            Ctap2UnauthorizedPermission => 0x40,
+            Ctap1Unspecified => 0x7f,
+            Ctap2LastError => 0xdf,
+            Unknown(e) => e,
+        }
+    }
+}
+
 impl From<CtapError> for WebauthnCError {
     fn from(e: CtapError) -> Self {
         Self::Ctap(e)

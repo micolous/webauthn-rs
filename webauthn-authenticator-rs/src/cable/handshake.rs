@@ -29,7 +29,7 @@ pub struct HandshakeV2 {
     known_domains_count: u32,
     timestamp: SystemTime,
     supports_linking_info: bool,
-    request_type: CableRequestType,
+    pub(super) request_type: CableRequestType,
     supports_non_discoverable_make_credential: bool,
 }
 

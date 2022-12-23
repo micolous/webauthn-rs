@@ -153,7 +153,7 @@ use self::{
     handshake::HandshakeV2,
     tunnel::Tunnel,
 };
-use crate::{ctap2::CtapAuthenticator, error::WebauthnCError, transport::Token, ui::UiCallback};
+use crate::{ctap2::{CtapAuthenticator, commands::{MakeCredentialRequest, GetAssertionRequest, GetInfoRequest}, CBORCommand}, error::{WebauthnCError, CtapError}, transport::Token, ui::UiCallback, cable::framing::{MessageType, SHUTDOWN_COMMAND}};
 
 type Psk = [u8; 32];
 
@@ -243,13 +243,13 @@ pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(
 /// support sending arbitrary Service Data advertisements.
 ///
 /// It requires direct HCI access to your Bluetooth radio.
-async fn share_cable_authenticator<'a, T, U, E, H, Event, Vendor, VE, VS>(
-    authenticator: CtapAuthenticator<'a, T, U>,
+pub async fn share_cable_authenticator<'a, U, E, H, Event, Vendor, VE, VS>(
+    token: &mut impl Token,
     url: &str,
     hci: &mut H,
+    ui_callback: &'a U,
 ) -> Result<(), WebauthnCError>
 where
-    T: Token,
     U: UiCallback + 'a,
     E: Debug,
     H: UartHci<E, Event, VE> + Hci<E, VS = VS>,
@@ -258,72 +258,145 @@ where
     Event: VendorEvent<Error = VE, Status = VS> + Debug,
     Vendor: bluetooth_hci::Vendor<Event = Event> + Debug,
 {
+    token.init().await?;
+    let info = token.transmit(GetInfoRequest {}, ui_callback).await?;
+
     let handshake = HandshakeV2::from_qr_url(url)?;
     drop(url);
     let discovery = handshake.to_discovery()?;
     let tunnel_server_id = 0;
 
-    // We need to connect to the tunnel server, which gives a routing_id
-    let uri = discovery.get_new_tunnel_uri(tunnel_server_id)?;
-    let (mut ws, routing_id) = Tunnel::connect(&uri).await?;
+    let mut tunnel = Tunnel::connect_authenticator(
+        &discovery,
+        tunnel_server_id,
+        &handshake.peer_identity,
+        info,
+        |advert| start_advert::<E, H, Vendor, VE, VS, Event>(hci, advert),
+    )
+    .await?;
 
-    let eid = if let Some(routing_id) = routing_id {
-        Eid::new(
-            tunnel_server_id,
-            routing_id
-                .try_into()
-                .map_err(|_| WebauthnCError::Internal)?,
-        )?
-    } else {
-        error!("missing routing-id header");
-        return Err(WebauthnCError::Internal);
-    };
-
-    let encrypted_eid = discovery.encrypt_advert(&eid)?;
-    let advert = make_advert(&encrypted_eid);
-    start_advert::<E, H, Vendor, VE, VS, Event>(hci, Some(advert))?;
-
-    // wait for message
-    let resp = futures::StreamExt::next(&mut ws).await.unwrap().unwrap();
-    trace!("<<< {:?}", resp);
-    let resp = if let tokio_tungstenite::tungstenite::Message::Binary(resp) = resp { resp } else {
-        error!("Unexpected message type");
-        return Err(WebauthnCError::Internal);
-    };
-
-    let (mut crypter, response) = noise::CableNoise::build_responder(None, discovery.get_psk(&eid)?, Some(&handshake.peer_identity), &resp)?;
-    ws.send(tokio_tungstenite::tungstenite::Message::Binary(response)).await.unwrap();
-
-    // post-handshake msg
-    let phm = framing::CablePostHandshake {
-        info: authenticator.get_info().to_owned(),
-        linking_info: None,
-    };
-
-    let phm = serde_cbor::to_vec(&phm).unwrap();
-    crypter.use_new_construction();
-    let phm_crypt = crypter.encrypt(&phm)?;
-    ws.send(tokio_tungstenite::tungstenite::Message::Binary(phm_crypt)).await.unwrap();
+    trace!("tunnel established");
     
-    // wait for message
-    let resp = futures::StreamExt::next(&mut ws).await.unwrap().unwrap();
-    trace!("<<< {:?}", resp);
-    let resp = if let tokio_tungstenite::tungstenite::Message::Binary(resp) = resp { resp } else {
-        error!("Unexpected message type");
-        return Err(WebauthnCError::Internal);
+    let resp = loop {
+        let msg = tunnel.recv().await?;
+
+        match msg.message_type {
+            MessageType::Shutdown => {
+                tunnel.close().await?;
+                return Ok(());
+            },
+            MessageType::Ctap => {
+                match (handshake.request_type, msg.data.get(0).map(|v| *v)) {
+                    (CableRequestType::MakeCredential, Some(MakeCredentialRequest::CMD)) |
+                    (CableRequestType::DiscoverableMakeCredential, Some(MakeCredentialRequest::CMD)) => {
+                        trace!("makecred");
+                        break token.transmit_raw(&msg.data, ui_callback).await;
+                    },
+                    (CableRequestType::GetAssertion, Some(GetAssertionRequest::CMD)) => {
+                        trace!("GetAssertion");
+                        break token.transmit_raw(&msg.data, ui_callback).await;
+                    },
+                    (c, v) => {
+                        error!("Unhandled command {:02x?} for {:?}", v, c);
+                        return Err(WebauthnCError::NotSupported);
+                    }
+
+                }
+            },
+            _ => {
+                error!("unhandled command: {:?}", msg);
+                return Err(WebauthnCError::NotSupported);
+            }
+
+        }
     };
-    let cmd = crypter.decrypt(&resp)?;
-    trace!("<!< {:02x?}", cmd);
 
-    // deframe command
-    let cmd = framing::CableCommand::from_bytes(1, &cmd);
-    trace!("<c< {:?}", cmd);
-    assert_eq!(cmd.message_type, framing::MessageType::Ctap);
+    // Re-insert the error code as needed.
+    let resp = match resp {
+        Err(e) => {
+            match e {
+                WebauthnCError::Ctap(c) => vec![c.into()],
+                _ => vec![CtapError::Ctap1InvalidParameter.into()],
+            }
+        },
+        Ok(mut resp) => {
+            resp.reserve(1);
+            resp.insert(0, CtapError::Ok.into());
+            resp
+        }
+    };
 
-    // send to authenticator
+    // Send the response to the command
+    tunnel.send(framing::CableCommand {
+        protocol_version: 1,
+        message_type: MessageType::Ctap,
+        data: resp,
+    }).await?;
 
+    // Hang up
+    tunnel.close().await?;
 
-    todo!()
+    /*
+       // We need to connect to the tunnel server, which gives a routing_id
+       let uri = discovery.get_new_tunnel_uri(tunnel_server_id)?;
+       let (mut ws, routing_id) = Tunnel::connect(&uri).await?;
+
+       let eid = if let Some(routing_id) = routing_id {
+           Eid::new(
+               tunnel_server_id,
+               routing_id
+                   .try_into()
+                   .map_err(|_| WebauthnCError::Internal)?,
+           )?
+       } else {
+           error!("missing routing-id header");
+           return Err(WebauthnCError::Internal);
+       };
+
+       let encrypted_eid = discovery.encrypt_advert(&eid)?;
+       let advert = make_advert(&encrypted_eid);
+       start_advert::<E, H, Vendor, VE, VS, Event>(hci, Some(advert))?;
+
+       // wait for message
+       let resp = futures::StreamExt::next(&mut ws).await.unwrap().unwrap();
+       trace!("<<< {:?}", resp);
+       let resp = if let tokio_tungstenite::tungstenite::Message::Binary(resp) = resp { resp } else {
+           error!("Unexpected message type");
+           return Err(WebauthnCError::Internal);
+       };
+
+       let (mut crypter, response) = noise::CableNoise::build_responder(None, discovery.get_psk(&eid)?, Some(&handshake.peer_identity), &resp)?;
+       ws.send(tokio_tungstenite::tungstenite::Message::Binary(response)).await.unwrap();
+
+       // post-handshake msg
+       let phm = framing::CablePostHandshake {
+           info: authenticator.get_info().to_owned(),
+           linking_info: None,
+       };
+
+       let phm = serde_cbor::to_vec(&phm).unwrap();
+       crypter.use_new_construction();
+       let phm_crypt = crypter.encrypt(&phm)?;
+       ws.send(tokio_tungstenite::tungstenite::Message::Binary(phm_crypt)).await.unwrap();
+
+       // wait for message
+       let resp = futures::StreamExt::next(&mut ws).await.unwrap().unwrap();
+       trace!("<<< {:?}", resp);
+       let resp = if let tokio_tungstenite::tungstenite::Message::Binary(resp) = resp { resp } else {
+           error!("Unexpected message type");
+           return Err(WebauthnCError::Internal);
+       };
+       let cmd = crypter.decrypt(&resp)?;
+       trace!("<!< {:02x?}", cmd);
+
+       // deframe command
+       let cmd = framing::CableCommand::from_bytes(1, &cmd);
+       trace!("<c< {:?}", cmd);
+       assert_eq!(cmd.message_type, framing::MessageType::Ctap);
+
+       // send to authenticator
+    */
+    Ok(())
 }
 
 fn start_advert<E, H, Vendor, VE, VS, Event>(
@@ -346,7 +419,6 @@ where
         types::{AdvertisingInterval, AdvertisingType},
         BdAddr,
     };
-    
 
     trace!("sending reset...");
     hci.reset().unwrap();
@@ -400,9 +472,9 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
     use serialport::FlowControl;
     use serialport_hci::{vendor::none::*, SerialController};
+    use std::time::Duration;
 
     use crate::transport::Transport;
 
@@ -445,17 +517,22 @@ mod test {
             .flow_control(FlowControl::None)
             .open()
             .unwrap();
-        let mut hci: SerialController<bluetooth_hci::host::uart::CommandHeader, Vendor> = SerialController::new(port);
+        let mut hci: SerialController<bluetooth_hci::host::uart::CommandHeader, Vendor> =
+            SerialController::new(port);
 
         let mut transport = crate::transport::AnyTransport::new().unwrap();
-        let token = transport.tokens().unwrap().pop().unwrap();
+        let mut token = transport.tokens().unwrap().pop().unwrap();
         let ui = crate::ui::Cli {};
-        let authenticator = CtapAuthenticator::new(token, &ui).await.unwrap();
 
         let url = "FIDO:/";
-        let r: () = share_cable_authenticator::<_, _, _, _, Event, Vendor, _, _>(authenticator, url, &mut hci)
-            .await
-            .unwrap();
+        let r: () = share_cable_authenticator::<_, _, _, Event, Vendor, _, _>(
+            &mut token,
+            url,
+            &mut hci,
+            &ui,
+        )
+        .await
+        .unwrap();
 
         // let adv = make_advert()
         // adv.copy_into_slice(&mut service_data);

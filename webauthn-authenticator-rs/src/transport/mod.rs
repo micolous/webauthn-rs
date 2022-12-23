@@ -68,7 +68,8 @@ pub trait Token: Sized + fmt::Debug + Sync + Send {
         R: CBORResponse,
         U: UiCallback,
     {
-        let resp = self.transmit_raw(cmd, ui).await?;
+        let cbor = cmd.cbor().map_err(|_| WebauthnCError::Cbor)?;
+        let resp = self.transmit_raw(&cbor, ui).await?;
 
         R::try_from(resp.as_slice()).map_err(|_| {
             //error!("error: {:?}", e);
@@ -78,12 +79,13 @@ pub trait Token: Sized + fmt::Debug + Sync + Send {
 
     /// Transmits a command on the underlying transport.
     ///
+    /// `cbor` is a CBOR-encoded command.
+    /// 
     /// Interfaces need to check for and return any transport-layer-specific
     /// error code [WebauthnCError::Ctap], but don't need to worry about
     /// deserialising CBOR.
-    async fn transmit_raw<C, U>(&mut self, cmd: C, ui: &U) -> Result<Vec<u8>, WebauthnCError>
+    async fn transmit_raw<U>(&mut self, cbor: &[u8], ui: &U) -> Result<Vec<u8>, WebauthnCError>
     where
-        C: CBORCommand,
         U: UiCallback;
 
     /// Cancels a pending request.

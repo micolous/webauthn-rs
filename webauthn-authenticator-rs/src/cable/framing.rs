@@ -42,6 +42,12 @@ impl From<u8> for MessageType {
     }
 }
 
+pub const SHUTDOWN_COMMAND: CableCommand = CableCommand {
+    protocol_version: 1,
+    message_type: MessageType::Shutdown,
+    data: vec![],
+};
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct CableCommand {
     pub protocol_version: u32,
