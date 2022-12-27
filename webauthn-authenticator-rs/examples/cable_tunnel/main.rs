@@ -3,10 +3,9 @@
 extern crate tracing;
 
 use bluetooth_hci::{
-    event::VendorEvent,
     host::{
-        uart::Hci as UartHci, AdvertisingFilterPolicy, AdvertisingParameters, Channels, Hci,
-        OwnAddressType,
+        uart::{CommandHeader, Hci as UartHci, Packet},
+        AdvertisingFilterPolicy, AdvertisingParameters, Channels, Hci, OwnAddressType,
     },
     types::{Advertisement, AdvertisingInterval, AdvertisingType},
     BdAddr, BdAddrType,
@@ -18,13 +17,10 @@ use serialport_hci::{
     vendor::none::{Event, Vendor},
     SerialController,
 };
-use std::{
-    fmt::Debug,
-    time::Duration,
-};
+use std::{fmt::Debug, time::Duration};
 
 use webauthn_authenticator_rs::{
-    cable::share_cable_authenticator,
+    cable::{share_cable_authenticator, Advertiser},
     error::WebauthnCError,
     transport::{AnyTransport, Transport},
     ui::Cli,
@@ -50,81 +46,87 @@ pub struct CliParser {
     pub cable_url: String,
 }
 
-fn start_advert<E, H, Vendor, VE, VS, Event>(
-    hci: &mut H,
-    advert: Option<Advertisement>,
-) -> Result<(), WebauthnCError>
-where
-    E: Debug,
-    H: UartHci<E, Event, VE> + Hci<E, VS = VS>,
-    VE: Debug,
-    VS: Debug,
-    Event: VendorEvent<Error = VE, Status = VS> + Debug,
-    Vendor: bluetooth_hci::Vendor<Event = Event> + Debug,
-{
-    trace!("sending reset...");
-    hci.reset().unwrap();
-    let mut r: bluetooth_hci::host::uart::Packet<_> = hci.read().unwrap();
-    trace!(?r);
+struct SerialHciAdvertiser {
+    hci: SerialController<CommandHeader, Vendor>,
+}
 
-    if advert.is_none() {
-        return Ok(());
+impl SerialHciAdvertiser {
+    fn new(serial_port: &str, baud_rate: u32) -> Self {
+        let port = serialport::new(serial_port, baud_rate)
+            .timeout(Duration::from_secs(2))
+            .flow_control(FlowControl::None)
+            .open()
+            .unwrap();
+        Self {
+            hci: SerialController::new(port),
+        }
     }
-    let advert = advert.unwrap();
 
-    hci.le_set_advertise_enable(false).unwrap();
-    r = hci.read().unwrap();
-    trace!(?r);
+    fn read(&mut self) -> Packet<Event> {
+        let r = self.hci.read().unwrap();
+        trace!("<<< {:?}", r);
+        r
+    }
+}
 
-    let mut service_data = [0; 38];
-    let len = advert.copy_into_slice(&mut service_data);
+impl Advertiser for SerialHciAdvertiser {
+    fn stop_advertising(&mut self) -> Result<(), WebauthnCError> {
+        trace!("sending reset...");
+        self.hci.reset().unwrap();
+        let _ = self.read();
 
-    let p = AdvertisingParameters {
-        advertising_interval: AdvertisingInterval::for_type(
-            AdvertisingType::NonConnectableUndirected,
-        )
-        .with_range(Duration::from_millis(100), Duration::from_millis(500))
-        .unwrap(),
-        own_address_type: OwnAddressType::Random,
-        peer_address: BdAddrType::Random(bluetooth_hci::BdAddr([0xc0; 6])),
-        advertising_channel_map: Channels::all(),
-        advertising_filter_policy: AdvertisingFilterPolicy::WhiteListConnectionAllowScan,
-    };
-    let mut addr = [0u8; 6];
-    addr[5] = 0xc0;
-    rand_bytes(&mut addr[..5])?;
+        self.hci.le_set_advertise_enable(false).unwrap();
+        let _ = self.read();
+        Ok(())
+    }
 
-    hci.le_set_random_address(BdAddr(addr)).unwrap();
-    r = hci.read().unwrap();
-    trace!(?r);
+    fn start_advertising(
+        &mut self,
+        service_uuid: u16,
+        payload: &[u8],
+    ) -> Result<(), WebauthnCError> {
+        self.stop_advertising()?;
+        let advert = Advertisement::ServiceData16BitUuid(service_uuid, payload);
+        let mut service_data = [0; 31];
+        let len = advert.copy_into_slice(&mut service_data);
 
-    hci.le_set_advertising_parameters(&p).unwrap();
-    r = hci.read().unwrap();
-    trace!(?r);
+        let p = AdvertisingParameters {
+            advertising_interval: AdvertisingInterval::for_type(
+                AdvertisingType::NonConnectableUndirected,
+            )
+            .with_range(Duration::from_millis(100), Duration::from_millis(500))
+            .unwrap(),
+            own_address_type: OwnAddressType::Random,
+            peer_address: BdAddrType::Random(bluetooth_hci::BdAddr([0xc0; 6])),
+            advertising_channel_map: Channels::all(),
+            advertising_filter_policy: AdvertisingFilterPolicy::WhiteListConnectionAllowScan,
+        };
+        let mut addr = [0u8; 6];
+        addr[5] = 0xc0;
+        rand_bytes(&mut addr[..5])?;
 
-    hci.le_set_advertising_data(&service_data[..len]).unwrap();
-    r = hci.read().unwrap();
-    trace!(?r);
+        self.hci.le_set_random_address(BdAddr(addr)).unwrap();
+        let _ = self.read();
 
-    hci.le_set_advertise_enable(true).unwrap();
-    r = hci.read().unwrap();
-    trace!(?r);
+        self.hci.le_set_advertising_parameters(&p).unwrap();
+        let _ = self.read();
 
-    Ok(())
+        self.hci
+            .le_set_advertising_data(&service_data[..len])
+            .unwrap();
+        let _ = self.read();
+
+        self.hci.le_set_advertise_enable(true).unwrap();
+        let _ = self.read();
+        Ok(())
+    }
 }
 
 #[tokio::main]
 async fn main() {
     let _ = tracing_subscriber::fmt::try_init();
     let opt = CliParser::parse();
-
-    let port = serialport::new(opt.serial_port, opt.baud_rate)
-        .timeout(Duration::from_secs(2))
-        .flow_control(FlowControl::None)
-        .open()
-        .unwrap();
-    let mut hci: SerialController<bluetooth_hci::host::uart::CommandHeader, Vendor> =
-        SerialController::new(port);
+    let mut advertiser = SerialHciAdvertiser::new(&opt.serial_port, opt.baud_rate);
 
     let mut transport = AnyTransport::new().unwrap();
     let mut token = transport.tokens().unwrap().pop().unwrap();
@@ -134,7 +136,7 @@ async fn main() {
         &mut token,
         opt.cable_url.trim(),
         opt.tunnel_server_id,
-        |advert| start_advert::<_, _, Vendor, _, _, Event>(&mut hci, advert),
+        &mut advertiser,
         &ui,
     )
     .await

@@ -140,7 +140,7 @@ mod tunnel;
 use std::fmt::Debug;
 
 pub use base10::DecodeError;
-use bluetooth_hci::types::Advertisement;
+pub use btle::Advertiser;
 
 use self::{
     btle::Scanner,
@@ -251,17 +251,15 @@ pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(
 /// * `tunnel_server_id` is the well-known tunnel server to use. Set this to 0
 ///   to use Google's tunnel server.
 ///
-/// * `advertising_callback` is a function which broadcasts an arbitrary
-///   Bluetooth low energy advertisement. The function is called with
-///   `Some(Advertisement)` to start advertising, and again with `None` to stop
-///   advertising.
+/// * `advertiser` is reference to an [Advertiser] for starting and stopping
+///   Bluetooth Low Energy advertisements.
 /// 
 /// * `ui_callback` trait for prompting for user interaction where needed.
 pub async fn share_cable_authenticator<'a, U>(
     token: &mut impl Token,
     url: &str,
     tunnel_server_id: u16,
-    advertising_callback: impl FnMut(Option<Advertisement>) -> Result<(), WebauthnCError>,
+    advertiser: &mut impl Advertiser,
     ui_callback: &'a U,
 ) -> Result<(), WebauthnCError>
 where
@@ -279,7 +277,7 @@ where
         tunnel_server_id,
         &handshake.peer_identity,
         info,
-        advertising_callback,
+        advertiser,
     )
     .await?;
 

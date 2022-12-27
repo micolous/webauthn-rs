@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-use bluetooth_hci::types::Advertisement;
 use futures::{SinkExt, StreamExt};
 use openssl::{
     bn::BigNumContext,
@@ -28,7 +27,6 @@ use webauthn_rs_proto::AuthenticatorTransport;
 
 use crate::{
     cable::{
-        btle::make_advert,
         crypter::Crypter,
         discovery::{Discovery, Eid},
         framing::{CableCommand, CablePostHandshake, MessageType},
@@ -43,7 +41,7 @@ use crate::{
     util::compute_sha256,
 };
 
-use super::framing::SHUTDOWN_COMMAND;
+use super::{framing::SHUTDOWN_COMMAND, Advertiser};
 
 /// Well-known domains.
 ///
@@ -206,7 +204,7 @@ impl Tunnel {
         tunnel_server_id: u16,
         peer_identity: &EcKeyRef<Public>,
         info: GetInfoResponse,
-        mut advertising_callback: impl FnMut(Option<Advertisement>) -> Result<(), WebauthnCError>,
+        advertiser: &mut impl Advertiser,
     ) -> Result<Tunnel, WebauthnCError> {
         let uri = discovery.get_new_tunnel_uri(tunnel_server_id)?;
         let (mut stream, routing_id) = Self::connect(&uri).await?;
@@ -225,15 +223,14 @@ impl Tunnel {
 
         let psk = discovery.get_psk(&eid)?;
         let encrypted_eid = discovery.encrypt_advert(&eid)?;
-        let advert = make_advert(&encrypted_eid);
-        advertising_callback(Some(advert))?;
+        advertiser.start_fido_advertising(&encrypted_eid)?;
 
         // Wait for initial message from initiator
         trace!("Advertising started, waiting for initiator...");
         let resp = stream.next().await.unwrap().unwrap();
         trace!("<<< {:?}", resp);
 
-        advertising_callback(None)?;
+        advertiser.stop_advertising()?;
         let resp = if let Message::Binary(v) = resp {
             v
         } else {
