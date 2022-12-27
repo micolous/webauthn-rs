@@ -23,7 +23,7 @@ use webauthn_authenticator_rs::{
     cable::{share_cable_authenticator, Advertiser},
     error::WebauthnCError,
     transport::{AnyTransport, Transport},
-    ui::Cli,
+    ui::Cli, ctap2::CtapAuthenticator, softtoken::SoftToken,
 };
 
 #[derive(Debug, clap::Parser)]
@@ -166,12 +166,18 @@ async fn main() {
     };
 
     let mut advertiser = SerialHciAdvertiser::new(&opt.serial_port, opt.baud_rate);
-    let mut transport = AnyTransport::new().unwrap();
-    let mut token = transport.tokens().unwrap().pop().unwrap();
     let ui = Cli {};
 
+    let (mut authenticator, _) = SoftToken::new().unwrap();
+
+    // let mut transport = AnyTransport::new().unwrap();
+    // let mut token = transport.tokens().unwrap().pop().unwrap();
+    // let mut authenticator = CtapAuthenticator::new(token, &ui).await.unwrap();
+    let info = authenticator.get_info().to_owned();
+
     share_cable_authenticator(
-        &mut token,
+        &mut authenticator,
+        info,
         cable_url.trim(),
         opt.tunnel_server_id,
         &mut advertiser,

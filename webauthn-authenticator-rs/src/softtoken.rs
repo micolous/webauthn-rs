@@ -1,3 +1,5 @@
+use crate::authenticator_hashed::AuthenticatorBackendHashedClientData;
+use crate::ctap2::GetInfoResponse;
 use crate::error::WebauthnCError;
 use crate::util::compute_sha256;
 use crate::AuthenticatorBackend;
@@ -9,6 +11,7 @@ use openssl::x509::{
 use openssl::{asn1, bn, ec, hash, nid, pkey, rand, sign};
 use serde_cbor::value::Value;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::iter;
 use uuid::Uuid;
@@ -200,6 +203,24 @@ impl SoftToken {
             ca,
         ))
     }
+
+    pub fn get_info(&mut self) -> GetInfoResponse {
+        GetInfoResponse {
+            versions: BTreeSet::from(["FIDO_2_0".to_string()]),
+            extensions: None,
+            aaguid: AAGUID.to_bytes_le().to_vec(),
+            options: None,
+            max_msg_size: None,
+            pin_protocols: None,
+            max_cred_count_in_list: None,
+            max_cred_id_len:None,
+            transports: Some(vec![
+                "internal".to_string(),
+            ]),
+            algorithms: None,
+            min_pin_length: None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -210,10 +231,10 @@ pub struct U2FSignData {
     flags: u8,
 }
 
-impl AuthenticatorBackend for SoftToken {
+impl AuthenticatorBackendHashedClientData for SoftToken {
     fn perform_register(
         &mut self,
-        origin: Url,
+        client_data_json_hash: Vec<u8>,
         options: PublicKeyCredentialCreationOptions,
         _timeout_ms: u32,
     ) -> Result<RegisterPublicKeyCredential, WebauthnCError> {
@@ -253,36 +274,6 @@ impl AuthenticatorBackend for SoftToken {
             //     Let authenticatorExtensionInput be the (CBOR) result of running extensionId’s client extension processing algorithm on clientExtensionInput. If the algorithm returned an error, continue.
             //     Set authenticatorExtensions[extensionId] to the base64url encoding of authenticatorExtensionInput.
         */
-
-        // Let collectedClientData be a new CollectedClientData instance whose fields are:
-        //    type
-        //        The string "webauthn.create".
-        //    challenge
-        //        The base64url encoding of options.challenge.
-        //    origin
-        //        The serialization of callerOrigin.
-
-        //    Not Supported Yet.
-        //    tokenBinding
-        //        The status of Token Binding between the client and the callerOrigin, as well as the Token Binding ID associated with callerOrigin, if one is available.
-        let collected_client_data = CollectedClientData {
-            type_: "webauthn.create".to_string(),
-            challenge: options.challenge.clone(),
-            origin,
-            token_binding: None,
-            cross_origin: None,
-            unknown_keys: BTreeMap::new(),
-        };
-
-        //  Let clientDataJSON be the JSON-serialized client data constructed from collectedClientData.
-        let client_data_json =
-            serde_json::to_string(&collected_client_data).map_err(|_| WebauthnCError::Json)?;
-
-        // Let clientDataHash be the hash of the serialized client data represented by clientDataJSON.
-        let client_data_json_hash = compute_sha256(client_data_json.as_bytes()).to_vec();
-
-        trace!("client_data_json -> {:x?}", client_data_json);
-        trace!("client_data_json_hash -> {:x?}", client_data_json_hash);
 
         // Not required.
         // If the options.signal is present and its aborted flag is set to true, return a DOMException whose name is "AbortError" and terminate this algorithm.
@@ -537,7 +528,7 @@ impl AuthenticatorBackend for SoftToken {
             raw_id: Base64UrlSafeData(key_handle),
             response: AuthenticatorAttestationResponseRaw {
                 attestation_object: Base64UrlSafeData(ao_bytes),
-                client_data_json: Base64UrlSafeData(client_data_json.as_bytes().to_vec()),
+                client_data_json: Base64UrlSafeData(vec![]),
                 transports: None,
             },
             type_: "public-key".to_string(),
@@ -550,7 +541,7 @@ impl AuthenticatorBackend for SoftToken {
 
     fn perform_auth(
         &mut self,
-        origin: Url,
+        client_data_json_hash: Vec<u8>,
         options: PublicKeyCredentialRequestOptions,
         timeout_ms: u32,
     ) -> Result<PublicKeyCredential, WebauthnCError> {
@@ -558,26 +549,6 @@ impl AuthenticatorBackend for SoftToken {
 
         // If the extensions member of options is present, then for each extensionId → clientExtensionInput of options.extensions:
         // ...
-
-        // Let collectedClientData be a new CollectedClientData instance whose fields are:
-        let collected_client_data = CollectedClientData {
-            type_: "webauthn.get".to_string(),
-            challenge: options.challenge.clone(),
-            origin,
-            token_binding: None,
-            cross_origin: None,
-            unknown_keys: BTreeMap::new(),
-        };
-
-        // Let clientDataJSON be the JSON-serialized client data constructed from collectedClientData.
-        let client_data_json =
-            serde_json::to_string(&collected_client_data).map_err(|_| WebauthnCError::Json)?;
-
-        // Let clientDataHash be the hash of the serialized client data represented by clientDataJSON.
-        let client_data_json_hash = compute_sha256(client_data_json.as_bytes()).to_vec();
-
-        trace!("client_data_json -> {:x?}", client_data_json);
-        trace!("client_data_json_hash -> {:x?}", client_data_json_hash);
 
         // This is where we deviate from the spec, since we aren't a browser.
 
@@ -615,7 +586,7 @@ impl AuthenticatorBackend for SoftToken {
             raw_id: Base64UrlSafeData(u2sd.key_handle.clone()),
             response: AuthenticatorAssertionResponseRaw {
                 authenticator_data: Base64UrlSafeData(authdata),
-                client_data_json: Base64UrlSafeData(client_data_json.as_bytes().to_vec()),
+                client_data_json: Base64UrlSafeData(vec![]),
                 signature: Base64UrlSafeData(u2sd.signature),
                 user_handle: None,
             },

@@ -149,14 +149,13 @@ use self::{
     tunnel::Tunnel,
 };
 use crate::{
-    cable::framing::MessageType,
+    cable::framing::{MessageType, RequestType},
     ctap2::{
-        commands::{GetAssertionRequest, GetInfoRequest, MakeCredentialRequest},
-        CBORCommand, CtapAuthenticator,
+        CtapAuthenticator, GetInfoResponse,
     },
     error::{CtapError, WebauthnCError},
     transport::Token,
-    ui::UiCallback,
+    ui::UiCallback, authenticator_hashed::AuthenticatorBackendWithRequests,
 };
 
 type Psk = [u8; 32];
@@ -256,7 +255,8 @@ pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(
 /// 
 /// * `ui_callback` trait for prompting for user interaction where needed.
 pub async fn share_cable_authenticator<'a, U>(
-    token: &mut impl Token,
+    backend: &mut impl AuthenticatorBackendWithRequests,
+    info: GetInfoResponse,
     url: &str,
     tunnel_server_id: u16,
     advertiser: &mut impl Advertiser,
@@ -265,8 +265,8 @@ pub async fn share_cable_authenticator<'a, U>(
 where
     U: UiCallback + 'a,
 {
-    token.init().await?;
-    let info = token.transmit(GetInfoRequest {}, ui_callback).await?;
+    // token.init().await?;
+    // let info = token.transmit(GetInfoRequest {}, ui_callback).await?;
 
     let handshake = HandshakeV2::from_qr_url(url)?;
     drop(url);
@@ -291,19 +291,20 @@ where
                 tunnel.close().await?;
                 return Ok(());
             }
-            MessageType::Ctap => match (handshake.request_type, msg.data.get(0).map(|v| *v)) {
-                (CableRequestType::MakeCredential, Some(MakeCredentialRequest::CMD))
+            MessageType::Ctap => match (handshake.request_type, msg.parse_request()) {
+                (CableRequestType::MakeCredential, RequestType::MakeCredential(mc))
                 | (
                     CableRequestType::DiscoverableMakeCredential,
-                    Some(MakeCredentialRequest::CMD),
+                    RequestType::MakeCredential(mc),
                 ) => {
                     trace!("makecred");
-                    break token.transmit_raw(&msg.data, ui_callback).await;
+                    break backend.perform_register(mc, 12345);
                 }
-                (CableRequestType::GetAssertion, Some(GetAssertionRequest::CMD)) => {
-                    trace!("GetAssertion");
-                    break token.transmit_raw(&msg.data, ui_callback).await;
-                }
+                // (CableRequestType::GetAssertion, Some(GetAssertionRequest::CMD)) => {
+                //     trace!("GetAssertion");
+                //     todo!();
+                //     // break token.transmit_raw(&msg.data, ui_callback).await;
+                // }
                 (c, v) => {
                     error!("Unhandled command {:02x?} for {:?}", v, c);
                     return Err(WebauthnCError::NotSupported);

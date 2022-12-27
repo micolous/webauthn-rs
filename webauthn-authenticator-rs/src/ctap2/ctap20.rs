@@ -5,14 +5,13 @@ use crate::{
     error::WebauthnCError,
     transport::Token,
     ui::UiCallback,
-    util::{check_pin, compute_sha256, creation_to_clientdata, get_to_clientdata},
-    AuthenticatorBackend,
+    util::check_pin,
+    authenticator_hashed::AuthenticatorBackendHashedClientData,
 };
 
 use base64urlsafedata::Base64UrlSafeData;
 use futures::executor::block_on;
 
-use url::Url;
 use webauthn_rs_proto::{
     AuthenticationExtensionsClientOutputs, AuthenticatorAssertionResponseRaw,
     AuthenticatorAttestationResponseRaw, PublicKeyCredential, RegisterPublicKeyCredential,
@@ -351,20 +350,14 @@ impl<'a, T: Token, U: UiCallback> Ctap20Authenticator<'a, T, U> {
     }
 }
 
-impl<'a, T: Token, U: UiCallback> AuthenticatorBackend for Ctap20Authenticator<'a, T, U> {
+impl<'a, T: Token, U: UiCallback> AuthenticatorBackendHashedClientData for Ctap20Authenticator<'a, T, U> {
     fn perform_register(
         &mut self,
-        origin: Url,
+        client_data_hash: Vec<u8>,
         options: webauthn_rs_proto::PublicKeyCredentialCreationOptions,
         _timeout_ms: u32,
     ) -> Result<webauthn_rs_proto::RegisterPublicKeyCredential, crate::prelude::WebauthnCError>
     {
-        let client_data = creation_to_clientdata(origin, options.challenge.clone());
-        let client_data: Vec<u8> = serde_json::to_string(&client_data)
-            .map_err(|_| WebauthnCError::Json)?
-            .into();
-        let client_data_hash = compute_sha256(&client_data).to_vec();
-
         let (pin_uv_auth_proto, pin_uv_auth_param) = block_on(self.get_pin_uv_auth_token(
             client_data_hash.as_slice(),
             Permissions::MAKE_CREDENTIAL,
@@ -422,7 +415,7 @@ impl<'a, T: Token, U: UiCallback> AuthenticatorBackend for Ctap20Authenticator<'
             extensions: RegistrationExtensionsClientOutputs::default(), // TODO
             response: AuthenticatorAttestationResponseRaw {
                 attestation_object: Base64UrlSafeData(raw),
-                client_data_json: Base64UrlSafeData(client_data),
+                client_data_json: Base64UrlSafeData(vec![]),
                 // All transports the token supports, as opposed to the
                 // transport which was actually used.
                 transports: self.info.get_transports(),
@@ -432,16 +425,11 @@ impl<'a, T: Token, U: UiCallback> AuthenticatorBackend for Ctap20Authenticator<'
 
     fn perform_auth(
         &mut self,
-        origin: Url,
+        client_data_hash: Vec<u8>,
         options: webauthn_rs_proto::PublicKeyCredentialRequestOptions,
         _timeout_ms: u32,
     ) -> Result<webauthn_rs_proto::PublicKeyCredential, crate::prelude::WebauthnCError> {
         trace!("trying to authenticate...");
-        let client_data = get_to_clientdata(origin, options.challenge.clone());
-        let client_data: Vec<u8> = serde_json::to_string(&client_data)
-            .map_err(|_| WebauthnCError::Json)?
-            .into();
-        let client_data_hash = compute_sha256(&client_data).to_vec();
 
         let (pin_uv_auth_proto, pin_uv_auth_param) = block_on(self.get_pin_uv_auth_token(
             client_data_hash.as_slice(),
@@ -489,7 +477,7 @@ impl<'a, T: Token, U: UiCallback> AuthenticatorBackend for Ctap20Authenticator<'
             raw_id,
             response: AuthenticatorAssertionResponseRaw {
                 authenticator_data,
-                client_data_json: Base64UrlSafeData(client_data),
+                client_data_json: Base64UrlSafeData(vec![]),
                 signature,
                 // TODO
                 user_handle: None,

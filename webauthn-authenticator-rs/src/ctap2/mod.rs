@@ -185,6 +185,7 @@ use std::ops::{Deref, DerefMut};
 use futures::stream::FuturesUnordered;
 use futures::{select, StreamExt};
 
+use crate::authenticator_hashed::AuthenticatorBackendHashedClientData;
 use crate::error::WebauthnCError;
 use crate::transport::Token;
 use crate::ui::UiCallback;
@@ -292,23 +293,23 @@ impl<'a, T: Token, U: UiCallback> DerefMut for CtapAuthenticator<'a, T, U> {
 }
 
 /// Wrapper for [Ctap20Authenticator]'s implementation of [AuthenticatorBackend].
-impl<'a, T: Token, U: UiCallback> AuthenticatorBackend for CtapAuthenticator<'a, T, U> {
+impl<'a, T: Token, U: UiCallback> AuthenticatorBackendHashedClientData for CtapAuthenticator<'a, T, U> {
     fn perform_register(
         &mut self,
-        origin: url::Url,
+        client_data_hash: Vec<u8>,
         options: webauthn_rs_proto::PublicKeyCredentialCreationOptions,
         timeout_ms: u32,
     ) -> Result<webauthn_rs_proto::RegisterPublicKeyCredential, WebauthnCError> {
-        Ctap20Authenticator::perform_register(self, origin, options, timeout_ms)
+        <Ctap20Authenticator<'a, T, U> as AuthenticatorBackendHashedClientData>::perform_register(self, client_data_hash, options, timeout_ms)
     }
 
     fn perform_auth(
         &mut self,
-        origin: url::Url,
+        client_data_hash: Vec<u8>,
         options: webauthn_rs_proto::PublicKeyCredentialRequestOptions,
         timeout_ms: u32,
     ) -> Result<webauthn_rs_proto::PublicKeyCredential, WebauthnCError> {
-        Ctap20Authenticator::perform_auth(self, origin, options, timeout_ms)
+        <Ctap20Authenticator<'a, T, U> as AuthenticatorBackendHashedClientData>::perform_auth(self, client_data_hash, options, timeout_ms)
     }
 }
 

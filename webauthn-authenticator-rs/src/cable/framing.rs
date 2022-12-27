@@ -11,7 +11,10 @@
 //! * Protocol 0: Padded map (todo)
 
 use crate::{
-    ctap2::{commands::value_to_vec_u8, CBORResponse, GetInfoResponse},
+    ctap2::{
+        commands::{value_to_vec_u8, MakeCredentialRequest},
+        CBORCommand, CBORResponse, GetInfoResponse,
+    },
     error::WebauthnCError,
 };
 use serde::Serialize;
@@ -55,6 +58,11 @@ pub struct CableCommand {
     pub data: Vec<u8>,
 }
 
+#[derive(Debug)]
+pub enum RequestType {
+    MakeCredential(MakeCredentialRequest),
+}
+
 impl CableCommand {
     pub fn to_bytes(&self) -> Vec<u8> {
         if self.protocol_version == 0 {
@@ -79,6 +87,15 @@ impl CableCommand {
             protocol_version,
             message_type,
             data,
+        }
+    }
+
+    pub fn parse_request(&self) -> RequestType {
+        match self.data[0] {
+            MakeCredentialRequest::CMD => RequestType::MakeCredential(
+                <MakeCredentialRequest as CBORResponse>::try_from(&self.data[1..]).unwrap(),
+            ),
+            _ => unimplemented!(),
         }
     }
 }
