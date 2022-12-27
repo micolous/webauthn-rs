@@ -27,9 +27,10 @@ use webauthn_rs_proto::AuthenticatorTransport;
 
 use crate::{
     cable::{
+        btle::{Advertiser, FIDO_CABLE_SERVICE_U16},
         crypter::Crypter,
         discovery::{Discovery, Eid},
-        framing::{CableCommand, CablePostHandshake, MessageType},
+        framing::{CableCommand, CablePostHandshake, MessageType, SHUTDOWN_COMMAND},
         noise::CableNoise,
         Psk,
     },
@@ -40,8 +41,6 @@ use crate::{
     ui::UiCallback,
     util::compute_sha256,
 };
-
-use super::{framing::SHUTDOWN_COMMAND, Advertiser};
 
 /// Well-known domains.
 ///
@@ -223,7 +222,7 @@ impl Tunnel {
 
         let psk = discovery.get_psk(&eid)?;
         let encrypted_eid = discovery.encrypt_advert(&eid)?;
-        advertiser.start_fido_advertising(&encrypted_eid)?;
+        advertiser.start_advertising(FIDO_CABLE_SERVICE_U16, &encrypted_eid)?;
 
         // Wait for initial message from initiator
         trace!("Advertising started, waiting for initiator...");

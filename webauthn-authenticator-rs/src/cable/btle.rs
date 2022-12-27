@@ -5,18 +5,42 @@
 //!
 //! [Scanner] uses [btleplug] to watch for caBLE advertisements.
 use btleplug::{
-    api::{Central, CentralEvent, Manager as _, ScanFilter},
+    api::{bleuuid::uuid_from_u16, Central, CentralEvent, Manager as _, ScanFilter},
     platform::Manager,
 };
 use futures::StreamExt;
 use tokio::sync::mpsc;
-use uuid::{uuid, Uuid};
+use uuid::Uuid;
 
 use crate::error::WebauthnCError;
 
-const GOOGLE_CABLE_SERVICE: Uuid = uuid!("0000fde2-0000-1000-8000-00805f9b34fb");
-const FIDO_CABLE_SERVICE: Uuid = uuid!("0000fff9-0000-1000-8000-00805f9b34fb");
-const FIDO_CABLE_SERVICE16: u16 = 0xfff9;
+/// Service Data UUID for caBLE assigned to Google (0xfde2).
+///
+/// This is transmitted by iOS 16 devices, and older versions of Chromium.
+///
+/// Prefer transmitting [FIDO_CABLE_SERVICE_U16].
+///
+/// Reference: [Bluetooth Assigned Numbers][], Section 3.11 (Member Services)
+///
+/// [Bluetooth Assigned Numbers]: https://www.bluetooth.com/specifications/assigned-numbers/
+const GOOGLE_CABLE_SERVICE: Uuid = uuid_from_u16(0xfde2);
+
+/// 16-bit Service Data UUID for caBLE assigned to FIDO2 (0xfff9).
+///
+/// This is used by newer versions of Chromium, and detectable by all (even
+/// iOS 16).
+///
+/// Reference: [Bluetooth Assigned Numbers][], Section 3.10 (SDO Services)
+///
+/// [Bluetooth Assigned Numbers]: https://www.bluetooth.com/specifications/assigned-numbers/
+pub(super) const FIDO_CABLE_SERVICE_U16: u16 = 0xfff9;
+
+/// Service Data UUID for caBLE assigned to FIDO2 (0xfff9).
+///
+/// Reference: [Bluetooth Assigned Numbers][], Section 3.10 (SDO Services)
+///
+/// [Bluetooth Assigned Numbers]: https://www.bluetooth.com/specifications/assigned-numbers/
+const FIDO_CABLE_SERVICE: Uuid = uuid_from_u16(FIDO_CABLE_SERVICE_U16);
 
 fn get_scan_filter() -> ScanFilter {
     ScanFilter {
@@ -24,13 +48,28 @@ fn get_scan_filter() -> ScanFilter {
     }
 }
 
+/// Bluetooth Low Energy advertising trait.
+///
+/// A caBLE authenticator needs to be able to send arbitrary service data
+/// advertisements to be discoverable by the initiator (platform).
 pub trait Advertiser {
-    fn start_advertising(&mut self, service_uuid: u16, payload: &[u8]) -> Result<(), WebauthnCError>;
-    fn stop_advertising(&mut self) -> Result<(), WebauthnCError>;
+    /// Start sending service data advertisements.
+    ///
+    /// Arguments:
+    /// * `service_uuid`: a 16-bit service UUID to send advertising data for.
+    /// * `payload`: the advertisement payload.
+    ///
+    /// Advertisements are of the type "Service Data - 16-bit UUID" (0x16).
+    ///
+    /// This should continue until [stop_advertising] is called.
+    fn start_advertising(
+        &mut self,
+        service_uuid: u16,
+        payload: &[u8],
+    ) -> Result<(), WebauthnCError>;
 
-    fn start_fido_advertising(&mut self, payload: &[u8]) -> Result<(), WebauthnCError> {
-        self.start_advertising(FIDO_CABLE_SERVICE16, payload)
-    }
+    /// Stop sending service data advertisements.
+    fn stop_advertising(&mut self) -> Result<(), WebauthnCError>;
 }
 
 /// caBLE Bluetooth Low Energy service data scanner.
@@ -69,6 +108,8 @@ impl Scanner {
                     mut service_data,
                 } = event
                 {
+                    // Service data advertisement events always use the 128-bit
+                    // form, even though they're transmitted in 16-bit form.
                     if let Some(d) = service_data.remove(&FIDO_CABLE_SERVICE) {
                         if let Err(_) = tx.send(d).await {
                             return;

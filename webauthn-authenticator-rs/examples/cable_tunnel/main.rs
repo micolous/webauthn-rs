@@ -10,7 +10,7 @@ use bluetooth_hci::{
     types::{Advertisement, AdvertisingInterval, AdvertisingType},
     BdAddr, BdAddrType,
 };
-use clap::Parser;
+use clap::{Parser, ArgGroup};
 use openssl::rand::rand_bytes;
 use serialport::FlowControl;
 use serialport_hci::{
@@ -28,6 +28,11 @@ use webauthn_authenticator_rs::{
 
 #[derive(Debug, clap::Parser)]
 #[clap(about = "caBLE tunneler tool")]
+#[clap(group(
+    ArgGroup::new("url")
+        .required(true)
+        .args(&["cable-url", "qr-image"])
+))]
 pub struct CliParser {
     /// Serial port where Bluetooth HCI controller is connected to.
     #[clap(short, long)]
@@ -43,7 +48,11 @@ pub struct CliParser {
 
     /// `FIDO:/` URL from the initiator (QR code)
     #[clap(short, long)]
-    pub cable_url: String,
+    pub cable_url: Option<String>,
+
+    /// Image file containing a FIDO QR code.
+    #[clap(short, long)]
+    pub qr_image: Option<String>,
 }
 
 struct SerialHciAdvertiser {
@@ -126,15 +135,44 @@ impl Advertiser for SerialHciAdvertiser {
 async fn main() {
     let _ = tracing_subscriber::fmt::try_init();
     let opt = CliParser::parse();
-    let mut advertiser = SerialHciAdvertiser::new(&opt.serial_port, opt.baud_rate);
+    let cable_url = if let Some(u) = opt.cable_url {
+        u
+    } else if let Some(img) = opt.qr_image {
+        let img = image::open(img).unwrap();
+        // Optimised for screenshots from the device.
+        let img = img.adjust_contrast(9000.0);
 
+        let decoder = bardecoder::default_decoder();
+        let fido_url = decoder
+            .decode(&img)
+            .into_iter()
+            .filter_map(|r| {
+                trace!(?r);
+                r.ok()
+            })
+            .find(|u| {
+                trace!("Found QR code: {:?}", u);
+                let u = u.to_ascii_uppercase();
+                u.starts_with("FIDO:/")
+            });
+        match fido_url {
+            Some(u) => u,
+            None => {
+                panic!("Could not find any FIDO URLs in the image");
+            }
+        }
+    } else {
+        unreachable!();
+    };
+
+    let mut advertiser = SerialHciAdvertiser::new(&opt.serial_port, opt.baud_rate);
     let mut transport = AnyTransport::new().unwrap();
     let mut token = transport.tokens().unwrap().pop().unwrap();
     let ui = Cli {};
 
     share_cable_authenticator(
         &mut token,
-        opt.cable_url.trim(),
+        cable_url.trim(),
         opt.tunnel_server_id,
         &mut advertiser,
         &ui,
