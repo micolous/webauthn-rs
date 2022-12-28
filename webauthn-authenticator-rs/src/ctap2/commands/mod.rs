@@ -235,6 +235,14 @@ impl CBORResponse for NoResponse {
     }
 }
 
+fn map_int_keys(m: BTreeMap<Value, Value>) -> Result<BTreeMap<u32, Value>, WebauthnCError> {
+    m.into_iter().map(|(k, v)| { 
+        let k = value_to_u32(&k, "map_int_keys").ok_or(WebauthnCError::Internal)?;
+
+        Ok((k, v))
+    }).collect()
+}
+
 // TODO: switch to #derive
 #[macro_export]
 macro_rules! deserialize_cbor {
@@ -247,8 +255,25 @@ macro_rules! deserialize_cbor {
                         $crate::error::WebauthnCError::Cbor
                     })
                 } else {
-                    serde_cbor::from_slice(&i).map_err(|e| {
+                    // Convert to Value (Value::Map)
+                    let v = serde_cbor::from_slice::<'_, serde_cbor::Value>(&i).map_err(|e| {
                         error!("deserialise: {:?}", e);
+                        $crate::error::WebauthnCError::Cbor
+                    })?;
+
+                    // Extract the BTreeMap
+                    let v = if let serde_cbor::Value::Map(v) = v {
+                        Ok(v)
+                    } else {
+                        error!("deserialise: unexpected CBOR type {:?}", v);
+                        Err($crate::error::WebauthnCError::Cbor)
+                    }?;
+
+                    // Convert BTreeMap<Value, Value> into BTreeMap<u32, Value>
+                    let v = $crate::ctap2::commands::map_int_keys(v)?;
+
+                    TryFrom::try_from(v).map_err(|_| {
+                        error!("deserialising structure");
                         $crate::error::WebauthnCError::Cbor
                     })
                 }

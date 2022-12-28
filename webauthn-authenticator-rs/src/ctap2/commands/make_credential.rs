@@ -46,9 +46,20 @@ impl CBORCommand for MakeCredentialRequest {
 /// `authenticatorMakeCredential` response type.
 ///
 /// Reference: <https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#authenticatormakecredential-response-structure>
-// Note: this needs to have the same names as AttestationObjectInner
+/// 
+/// ## Implementation notes
+///
+/// This needs to be (de)serialisable to/from both `Map<u32, Value>` **and**
+/// `Map<String, Value>`:
+/// 
+/// * The authenticator itself uses a map with `u32` keys. This is needed to get
+///   the value from from the authenticator, and to re-serialise values for
+///   caBLE (via `AuthenticatorBackendWithRequests`)
+///
+/// * `AuthenticatorAttestationResponseRaw` uses a map with `String` keys, which
+///   need the same names as `AttestationObjectInner`.
 #[derive(Deserialize, Serialize, Debug, Clone, Default, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", try_from = "BTreeMap<u32, Value>", into = "BTreeMap<u32, Value>")]
+#[serde(rename_all = "camelCase")]
 pub struct MakeCredentialResponse {
     /// The attestation statement format identifier.
     pub fmt: Option<String>,
@@ -264,7 +275,6 @@ impl TryFrom<BTreeMap<u32, Value>> for MakeCredentialResponse {
         })
     }
 }
-
 
 crate::deserialize_cbor!(MakeCredentialRequest);
 crate::deserialize_cbor!(MakeCredentialResponse);
