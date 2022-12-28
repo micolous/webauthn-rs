@@ -4,12 +4,14 @@ use base64urlsafedata::Base64UrlSafeData;
 use serde_cbor::{ser::to_vec_packed, Value};
 use url::Url;
 use webauthn_rs_proto::{
-    PublicKeyCredential, PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
-    RegisterPublicKeyCredential,
+    PublicKeyCredential, PublicKeyCredentialCreationOptions, PublicKeyCredentialDescriptor,
+    PublicKeyCredentialRequestOptions, RegisterPublicKeyCredential,
 };
 
 use crate::{
-    ctap2::commands::{MakeCredentialRequest, MakeCredentialResponse},
+    ctap2::commands::{
+        GetAssertionRequest, GetAssertionResponse, MakeCredentialRequest, MakeCredentialResponse,
+    },
     error::WebauthnCError,
     util::{compute_sha256, creation_to_clientdata, get_to_clientdata},
     AuthenticatorBackend,
@@ -96,6 +98,12 @@ pub trait AuthenticatorBackendWithRequests {
         request: MakeCredentialRequest,
         timeout_ms: u32,
     ) -> Result<Vec<u8>, WebauthnCError>;
+
+    fn perform_auth(
+        &mut self,
+        request: GetAssertionRequest,
+        timeout_ms: u32,
+    ) -> Result<Vec<u8>, WebauthnCError>;
 }
 
 impl<T: AuthenticatorBackendHashedClientData> AuthenticatorBackendWithRequests for T {
@@ -118,7 +126,7 @@ impl<T: AuthenticatorBackendHashedClientData> AuthenticatorBackendWithRequests f
         };
         let client_data_hash = request.client_data_hash;
 
-        let mut cred: RegisterPublicKeyCredential =
+        let cred: RegisterPublicKeyCredential =
             self.perform_register(client_data_hash, options, timeout_ms)?;
 
         // attestation_object is a MakeCredentialResponse, with string keys
@@ -129,17 +137,49 @@ impl<T: AuthenticatorBackendHashedClientData> AuthenticatorBackendWithRequests f
 
         // Write value with u32 keys
         let resp: BTreeMap<u32, Value> = resp.into();
-        cred.response.attestation_object =
-            Base64UrlSafeData(to_vec_packed(&resp).map_err(|_| WebauthnCError::Cbor)?);
+        to_vec_packed(&resp).map_err(|_| WebauthnCError::Cbor)
+    }
 
-        Ok(cred.response.attestation_object.0)
+    fn perform_auth(
+        &mut self,
+        request: GetAssertionRequest,
+        timeout_ms: u32,
+    ) -> Result<Vec<u8>, WebauthnCError> {
+        let options = PublicKeyCredentialRequestOptions {
+            challenge: Base64UrlSafeData(vec![]),
+            timeout: Some(timeout_ms),
+            rp_id: request.rp_id,
+            allow_credentials: request.allow_list,
+            // TODO
+            user_verification: webauthn_rs_proto::UserVerificationPolicy::Preferred,
+            extensions: None,
+        };
+
+        let cred = self.perform_auth(request.client_data_hash, options, timeout_ms)?;
+        let resp = GetAssertionResponse {
+            credential: Some(PublicKeyCredentialDescriptor {
+                type_: cred.type_,
+                id: cred.raw_id,
+                transports: None,
+            }),
+            auth_data: Some(cred.response.authenticator_data.0),
+            signature: Some(cred.response.signature.0),
+            number_of_credentials: None,
+            user_selected: None,
+            large_blob_key: None,
+        };
+
+        // Write value with u32 keys
+        let resp: BTreeMap<u32, Value> = resp.into();
+        to_vec_packed(&resp).map_err(|_| WebauthnCError::Cbor)
     }
 }
 
 #[cfg(test)]
 mod test {
     use openssl::{hash::MessageDigest, rand::rand_bytes, sign::Verifier, x509::X509};
-    use webauthn_rs_proto::{PubKeyCredParams, RelyingParty, User};
+    use webauthn_rs_core::proto::COSEKey;
+    use webauthn_rs_proto::{AllowCredentials, PubKeyCredParams, RelyingParty, User};
 
     use crate::{
         ctap2::{commands::value_to_vec_u8, CBORResponse},
@@ -149,7 +189,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn perform_register_with_command() {
+    fn perform_register_auth_with_command() {
         let _ = tracing_subscriber::fmt::try_init();
         let (mut soft_token, _) = SoftToken::new().unwrap();
         let mut client_data_hash = vec![0; 32];
@@ -205,7 +245,7 @@ mod test {
         // Try to deserialise the MakeCredentialResponse again
         let response =
             <MakeCredentialResponse as CBORResponse>::try_from(response.as_slice()).unwrap();
-        // trace!(?response);
+        trace!(?response);
 
         // Run packed attestation verification
         // https://www.w3.org/TR/webauthn-2/#sctn-packed-attestation
@@ -214,6 +254,7 @@ mod test {
         } else {
             panic!("unexpected type");
         };
+        trace!(?att_stmt);
         let signature = value_to_vec_u8(
             att_stmt.remove(&Value::Text("sig".to_string())).unwrap(),
             "att_stmt.sig",
@@ -234,6 +275,7 @@ mod test {
         // Reconstruct verification data (auth_data + client_data_hash)
         let mut verification_data =
             value_to_vec_u8(response.auth_data.unwrap(), "verification_data").unwrap();
+        let auth_data_len = verification_data.len();
         verification_data.reserve(client_data_hash.len());
         verification_data.extend_from_slice(&client_data_hash);
 
@@ -241,5 +283,53 @@ mod test {
         assert!(verifier
             .verify_oneshot(&signature, &verification_data)
             .unwrap());
+
+        // https://www.w3.org/TR/webauthn-2/#attestation-object
+        let cred_id_off = /* rp_id_hash */ 32 + /* flags */ 1 + /* counter */ 4 + /* aaguid */ 16;
+        let cred_id_len = u16::from_be_bytes(
+            (&verification_data[cred_id_off..cred_id_off + 2])
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let cred_id = Base64UrlSafeData(
+            (&verification_data[cred_id_off + 2..cred_id_off + 2 + cred_id_len]).to_vec(),
+        );
+
+        // Future assertions are signed with this COSEKey
+        let cose_key: Value = serde_cbor::from_slice(&verification_data[cred_id_off + 2 + cred_id_len..auth_data_len]).unwrap();
+        let cose_key = COSEKey::try_from(&cose_key).unwrap();
+
+        rand_bytes(&mut client_data_hash).unwrap();
+        let request = GetAssertionRequest {
+            client_data_hash: client_data_hash.clone(),
+            rp_id: "example.com".to_string(),
+            allow_list: vec![AllowCredentials {
+                type_: "public-key".to_string(),
+                id: cred_id.to_owned(),
+                transports: None,
+            }],
+            options: None,
+            pin_uv_auth_param: None,
+            pin_uv_auth_proto: None,
+        };
+        trace!(?request);
+
+        let response =
+            AuthenticatorBackendWithRequests::perform_auth(&mut soft_token, request, 10000)
+                .unwrap();
+        let response =
+            <GetAssertionResponse as CBORResponse>::try_from(response.as_slice()).unwrap();
+        trace!(?response);
+
+        // Check correct matching credential
+        assert_eq!(response.credential.unwrap().id, cred_id);
+
+        // Check the signature
+        let signature = response.signature.unwrap();
+        let mut verification_data = response.auth_data.unwrap();
+        verification_data.reserve(client_data_hash.len());
+        verification_data.extend_from_slice(&client_data_hash);
+
+        assert!(cose_key.verify_signature(&signature, &verification_data).unwrap());
     }
 }

@@ -667,6 +667,7 @@ impl U2FToken for SoftToken {
             .copied()
             .collect();
 
+        trace!("Signing: {:?}", verification_data.as_slice());
         let signature = signer
             .update(verification_data.as_slice())
             .and_then(|_| signer.sign_to_vec())?;

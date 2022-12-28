@@ -75,7 +75,7 @@ pub trait CBORCommand: Serialize + Sized + std::fmt::Debug + Send {
     #[deprecated]
     fn to_short_apdus(&self) -> Result<Vec<ISO7816RequestAPDU>, serde_cbor::Error> {
         let cbor = self.cbor()?;
-       Ok(to_short_apdus(&cbor))
+        Ok(to_short_apdus(&cbor))
     }
 
     /// Converts a CTAP v2 command into a form suitable for transmission with
@@ -152,26 +152,32 @@ fn value_to_set_string(v: Value, loc: &str) -> Option<BTreeSet<String>> {
     }
 }
 
-fn value_to_vec_u32(v: Value, loc: &str) -> Option<Vec<u32>> {
+fn value_to_vec(v: Value, loc: &str) -> Option<Vec<Value>> {
     if let Value::Array(v) = v {
-        let x = v
-            .into_iter()
-            .filter_map(|i| {
-                if let Value::Integer(i) = i {
-                    u32::try_from(i)
-                        .map_err(|_| error!("Invalid value inside {}: {:?}", loc, i))
-                        .ok()
-                } else {
-                    error!("Invalid type for {}: {:?}", loc, i);
-                    None
-                }
-            })
-            .collect();
-        Some(x)
+        Some(v)
     } else {
         error!("Invalid type for {}: {:?}", loc, v);
         None
     }
+}
+
+fn value_to_map(v: Value, loc: &str) -> Option<BTreeMap<Value, Value>> {
+    if let Value::Map(v) = v {
+        Some(v)
+    } else {
+        error!("Invalid type for {}: {:?}", loc, v);
+        None
+    }
+}
+
+fn value_to_vec_u32(v: Value, loc: &str) -> Option<Vec<u32>> {
+    value_to_vec(v, loc).and_then(|v| {
+        let x = v
+            .into_iter()
+            .filter_map(|i| value_to_u32(&i, loc))
+            .collect();
+        Some(x)
+    })
 }
 
 pub(crate) fn value_to_u32(v: &Value, loc: &str) -> Option<u32> {
@@ -236,11 +242,13 @@ impl CBORResponse for NoResponse {
 }
 
 fn map_int_keys(m: BTreeMap<Value, Value>) -> Result<BTreeMap<u32, Value>, WebauthnCError> {
-    m.into_iter().map(|(k, v)| { 
-        let k = value_to_u32(&k, "map_int_keys").ok_or(WebauthnCError::Internal)?;
+    m.into_iter()
+        .map(|(k, v)| {
+            let k = value_to_u32(&k, "map_int_keys").ok_or(WebauthnCError::Internal)?;
 
-        Ok((k, v))
-    }).collect()
+            Ok((k, v))
+        })
+        .collect()
 }
 
 // TODO: switch to #derive
