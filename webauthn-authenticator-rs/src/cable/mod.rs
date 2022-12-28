@@ -282,6 +282,7 @@ where
     .await?;
 
     trace!("tunnel established");
+    let timeout_ms = 30000;
 
     let resp = loop {
         let msg = tunnel.recv().await?;
@@ -291,20 +292,17 @@ where
                 tunnel.close().await?;
                 return Ok(());
             }
-            MessageType::Ctap => match (handshake.request_type, msg.parse_request()) {
+            MessageType::Ctap => match (handshake.request_type, msg.parse_request()?) {
                 (CableRequestType::MakeCredential, RequestType::MakeCredential(mc))
                 | (
                     CableRequestType::DiscoverableMakeCredential,
                     RequestType::MakeCredential(mc),
                 ) => {
-                    trace!("makecred");
-                    break backend.perform_register(mc, 12345);
+                    break backend.perform_register(mc, timeout_ms);
                 }
-                // (CableRequestType::GetAssertion, Some(GetAssertionRequest::CMD)) => {
-                //     trace!("GetAssertion");
-                //     todo!();
-                //     // break token.transmit_raw(&msg.data, ui_callback).await;
-                // }
+                (CableRequestType::GetAssertion, RequestType::GetAssertion(ga)) => {
+                    break backend.perform_auth(ga, timeout_ms);
+                }
                 (c, v) => {
                     error!("Unhandled command {:02x?} for {:?}", v, c);
                     return Err(WebauthnCError::NotSupported);

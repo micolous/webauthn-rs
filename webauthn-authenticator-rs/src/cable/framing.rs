@@ -12,7 +12,7 @@
 
 use crate::{
     ctap2::{
-        commands::{value_to_vec_u8, MakeCredentialRequest},
+        commands::{value_to_vec_u8, MakeCredentialRequest, GetAssertionRequest},
         CBORCommand, CBORResponse, GetInfoResponse,
     },
     error::WebauthnCError,
@@ -61,6 +61,7 @@ pub struct CableCommand {
 #[derive(Debug)]
 pub enum RequestType {
     MakeCredential(MakeCredentialRequest),
+    GetAssertion(GetAssertionRequest),
 }
 
 impl CableCommand {
@@ -90,12 +91,15 @@ impl CableCommand {
         }
     }
 
-    pub fn parse_request(&self) -> RequestType {
+    pub fn parse_request(&self) -> Result<RequestType, WebauthnCError> {
         match self.data[0] {
-            MakeCredentialRequest::CMD => RequestType::MakeCredential(
-                <MakeCredentialRequest as CBORResponse>::try_from(&self.data[1..]).unwrap(),
-            ),
-            _ => unimplemented!(),
+            MakeCredentialRequest::CMD => Ok(RequestType::MakeCredential(
+                <MakeCredentialRequest as CBORResponse>::try_from(&self.data[1..])?
+            )),
+            GetAssertionRequest::CMD => Ok(RequestType::GetAssertion(
+                <GetAssertionRequest as CBORResponse>::try_from(&self.data[1..])?
+            )),
+            _ => Err(WebauthnCError::NotSupported),
         }
     }
 }
