@@ -168,11 +168,11 @@ async fn main() {
     let mut advertiser = SerialHciAdvertiser::new(&opt.serial_port, opt.baud_rate);
     let ui = Cli {};
 
-    let (mut authenticator, _) = SoftToken::new().unwrap();
+    // let (mut authenticator, _) = SoftToken::new().unwrap();
 
-    // let mut transport = AnyTransport::new().unwrap();
-    // let mut token = transport.tokens().unwrap().pop().unwrap();
-    // let mut authenticator = CtapAuthenticator::new(token, &ui).await.unwrap();
+    let mut transport = AnyTransport::new().unwrap();
+    let token = transport.tokens().unwrap().pop().unwrap();
+    let mut authenticator = CtapAuthenticator::new(token, &ui).await.unwrap();
     let info = authenticator.get_info().to_owned();
 
     share_cable_authenticator(
