@@ -189,7 +189,6 @@ use crate::authenticator_hashed::AuthenticatorBackendHashedClientData;
 use crate::error::WebauthnCError;
 use crate::transport::Token;
 use crate::ui::UiCallback;
-use crate::AuthenticatorBackend;
 
 pub use self::commands::EnrollSampleStatus;
 use self::commands::GetInfoRequest;

@@ -18,7 +18,6 @@ extern crate tracing;
 extern crate num_derive;
 
 use crate::error::WebauthnCError;
-use ctap2::GetInfoResponse;
 use url::Url;
 
 use webauthn_rs_proto::{

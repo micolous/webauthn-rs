@@ -17,13 +17,13 @@ use serialport_hci::{
     vendor::none::{Event, Vendor},
     SerialController,
 };
-use std::{fmt::Debug, time::Duration};
+use std::{fmt::Debug, time::Duration, io::{Read, Seek, SeekFrom, Write}, fs::OpenOptions};
 
 use webauthn_authenticator_rs::{
     cable::{share_cable_authenticator, Advertiser},
     error::WebauthnCError,
     transport::{AnyTransport, Transport},
-    ui::Cli, ctap2::CtapAuthenticator, softtoken::SoftToken,
+    ui::Cli, ctap2::{CtapAuthenticator, GetInfoResponse}, softtoken::SoftToken,
 };
 
 #[derive(Debug, clap::Parser)]
@@ -53,6 +53,10 @@ pub struct CliParser {
     /// Image file containing a FIDO QR code.
     #[clap(short, long)]
     pub qr_image: Option<String>,
+
+    /// Path to serialized SoftToken
+    #[clap(long)]
+    pub softtoken_path: Option<String>,
 }
 
 struct SerialHciAdvertiser {
@@ -168,21 +172,52 @@ async fn main() {
     let mut advertiser = SerialHciAdvertiser::new(&opt.serial_port, opt.baud_rate);
     let ui = Cli {};
 
+    if let Some(p) = opt.softtoken_path {
+        let mut f = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(false)
+            .open(p).unwrap();
+        let mut buffer = Vec::new();
+        f.read_to_end(&mut buffer).unwrap();
+        let mut softtoken = SoftToken::from_cbor(&buffer).unwrap();
+        let info = softtoken.get_info();
+
+        share_cable_authenticator(
+            &mut softtoken,
+            info,
+            cable_url.trim(),
+            opt.tunnel_server_id,
+            &mut advertiser,
+            &ui,
+        )
+        .await
+        .unwrap();
+
+        // Overwrite state
+        let buffer = softtoken.to_cbor().unwrap();
+        f.seek(SeekFrom::Start(0)).unwrap();
+        f.set_len(0).unwrap();
+        f.write_all(&buffer).unwrap();
+        f.flush().unwrap();
+    } else {
+        let mut transport = AnyTransport::new().unwrap();
+        let token = transport.tokens().unwrap().pop().unwrap();
+        let mut authenticator = CtapAuthenticator::new(token, &ui).await.unwrap();
+        let info = authenticator.get_info().to_owned();
+        
+        share_cable_authenticator(
+            &mut authenticator,
+            info,
+            cable_url.trim(),
+            opt.tunnel_server_id,
+            &mut advertiser,
+            &ui,
+        )
+        .await
+        .unwrap();
+    };
+
     // let (mut authenticator, _) = SoftToken::new().unwrap();
 
-    let mut transport = AnyTransport::new().unwrap();
-    let token = transport.tokens().unwrap().pop().unwrap();
-    let mut authenticator = CtapAuthenticator::new(token, &ui).await.unwrap();
-    let info = authenticator.get_info().to_owned();
-
-    share_cable_authenticator(
-        &mut authenticator,
-        info,
-        cable_url.trim(),
-        opt.tunnel_server_id,
-        &mut advertiser,
-        &ui,
-    )
-    .await
-    .unwrap();
 }

@@ -1,4 +1,4 @@
-use crate::authenticator_hashed::AuthenticatorBackendHashedClientData;
+use crate::{authenticator_hashed::AuthenticatorBackendHashedClientData, ctap2::commands::value_to_vec_u8};
 use crate::ctap2::GetInfoResponse;
 use crate::error::WebauthnCError;
 use crate::util::compute_sha256;
@@ -7,6 +7,7 @@ use openssl::x509::{
     X509NameBuilder, X509Ref, X509ReqBuilder, X509,
 };
 use openssl::{asn1, bn, ec, hash, nid, pkey, rand, sign};
+use serde::{Serialize, Deserialize};
 use serde_cbor::value::Value;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -25,13 +26,54 @@ use webauthn_rs_proto::{
 
 pub const AAGUID: Uuid = uuid::uuid!("0fb9bcbc-a0d4-4042-bbb0-559bc1631e28");
 
+#[derive(Serialize, Deserialize)]
 pub struct SoftToken {
+    #[serde(with = "PKeyPrivateDef")]
     _ca_key: pkey::PKey<pkey::Private>,
+    #[serde(with = "X509Def")]
     _ca_cert: X509,
+    #[serde(with = "PKeyPrivateDef")]
     intermediate_key: pkey::PKey<pkey::Private>,
+    #[serde(with = "X509Def")]
     intermediate_cert: X509,
     tokens: HashMap<Vec<u8>, Vec<u8>>,
     counter: u32,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "pkey::PKey<pkey::Private>")]
+struct PKeyPrivateDef {
+    #[serde(getter = "private_key_to_der")]
+    der: Value,
+}
+
+fn private_key_to_der(k: &pkey::PKeyRef<pkey::Private>) -> Value {
+    Value::Bytes(k.private_key_to_der().unwrap())
+}
+
+impl From<PKeyPrivateDef> for pkey::PKey<pkey::Private> {
+    fn from(def: PKeyPrivateDef) -> Self {
+        let b = value_to_vec_u8(def.der, "der").unwrap();
+        Self::private_key_from_der(&b).unwrap()
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "X509")]
+struct X509Def {
+    #[serde(getter = "x509_to_der")]
+    der: Value,
+}
+
+fn x509_to_der(k: &X509Ref) -> Value {
+    Value::Bytes(k.to_der().unwrap())
+}
+
+impl From<X509Def> for X509 {
+    fn from(def: X509Def) -> Self {
+        let b = value_to_vec_u8(def.der, "der").unwrap();
+        Self::from_der(&b).unwrap()
+    }
 }
 
 fn build_ca() -> Result<(pkey::PKey<pkey::Private>, X509), openssl::error::ErrorStack> {
@@ -202,7 +244,7 @@ impl SoftToken {
         ))
     }
 
-    pub fn get_info(&mut self) -> GetInfoResponse {
+    pub fn get_info(&self) -> GetInfoResponse {
         GetInfoResponse {
             versions: BTreeSet::from(["FIDO_2_0".to_string()]),
             extensions: None,
@@ -218,6 +260,20 @@ impl SoftToken {
             algorithms: None,
             min_pin_length: None,
         }
+    }
+
+    pub fn to_cbor(&self) -> Result<Vec<u8>, WebauthnCError> {
+        serde_cbor::ser::to_vec(self).map_err(|e| {
+            error!("SoftToken.to_cbor: {:?}", e);
+            WebauthnCError::Cbor
+        })
+    }
+
+    pub fn from_cbor(v: &[u8]) -> Result<Self, WebauthnCError> {
+        serde_cbor::from_slice(v).map_err(|e| {
+            error!("SoftToken::from_cbor: {:?}", e);
+            WebauthnCError::Cbor
+        })
     }
 }
 
