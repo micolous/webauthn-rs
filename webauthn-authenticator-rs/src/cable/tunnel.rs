@@ -32,7 +32,7 @@ use crate::{
         discovery::{Discovery, Eid},
         framing::{CableFrame, CablePostHandshake, MessageType, SHUTDOWN_COMMAND},
         noise::CableNoise,
-        Psk,
+        Psk, CableState,
     },
     ctap2::{commands::GetInfoResponse, CtapAuthenticator},
     error::CtapError,
@@ -138,11 +138,14 @@ impl Tunnel {
         uri: &Uri,
         psk: Psk,
         local_identity: &EcKeyRef<Private>,
+        ui: &impl UiCallback,
     ) -> Result<Tunnel, WebauthnCError> {
+        ui.cable_status_update(CableState::ConnectingToTunnelServer);
         let (mut stream, _) = Self::connect(uri).await?;
 
         // BuildInitialMessage
         // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=880;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
+        ui.cable_status_update(CableState::Handshaking);
         let (noise, handshake_message) =
             CableNoise::build_initiator(Some(local_identity), psk, None)?;
         trace!(">>> {:02x?}", &handshake_message);
@@ -152,8 +155,10 @@ impl Tunnel {
             .unwrap();
 
         // Handshake sent, get response
+        ui.cable_status_update(CableState::WaitingForAuthenticatorResponse);
         let resp = stream.next().await.unwrap().unwrap();
         trace!("<<< {:?}", resp);
+        ui.cable_status_update(CableState::Handshaking);
         let mut crypter = if let Message::Binary(v) = resp {
             noise.process_response(&v)?
         } else {
@@ -162,10 +167,13 @@ impl Tunnel {
         };
 
         // Waiting for post-handshake message
+        ui.cable_status_update(CableState::WaitingForAuthenticatorResponse);
         trace!("Waiting for post-handshake message...");
         let resp = stream.next().await.unwrap().unwrap();
         trace!("Post-handshake message:");
         trace!("<<< {:?}", resp);
+        ui.cable_status_update(CableState::Handshaking);
+
         let v = if let Message::Binary(v) = resp {
             v
         } else {
@@ -204,9 +212,12 @@ impl Tunnel {
         peer_identity: &EcKeyRef<Public>,
         info: GetInfoResponse,
         advertiser: &mut impl Advertiser,
+        ui: &impl UiCallback,
     ) -> Result<Tunnel, WebauthnCError> {
         let uri = discovery.get_new_tunnel_uri(tunnel_server_id)?;
+        ui.cable_status_update(CableState::ConnectingToTunnelServer);
         let (mut stream, routing_id) = Self::connect(&uri).await?;
+
         let eid = if let Some(routing_id) = routing_id {
             Eid::new(
                 tunnel_server_id,
@@ -223,13 +234,15 @@ impl Tunnel {
         let psk = discovery.get_psk(&eid)?;
         let encrypted_eid = discovery.encrypt_advert(&eid)?;
         advertiser.start_advertising(FIDO_CABLE_SERVICE_U16, &encrypted_eid)?;
-
+        
         // Wait for initial message from initiator
         trace!("Advertising started, waiting for initiator...");
+        ui.cable_status_update(CableState::WaitingForInitiatorConnection);
         let resp = stream.next().await.unwrap().unwrap();
         trace!("<<< {:?}", resp);
 
         advertiser.stop_advertising()?;
+        ui.cable_status_update(CableState::Handshaking);
         let resp = if let Message::Binary(v) = resp {
             v
         } else {
@@ -326,7 +339,7 @@ impl Token for Tunnel {
         AuthenticatorTransport::Hybrid
     }
 
-    async fn transmit_raw<U>(&mut self, cbor: &[u8], _ui: &U) -> Result<Vec<u8>, WebauthnCError>
+    async fn transmit_raw<U>(&mut self, cbor: &[u8], ui: &U) -> Result<Vec<u8>, WebauthnCError>
     where
         U: UiCallback,
     {
@@ -337,6 +350,7 @@ impl Token for Tunnel {
             data: cbor.to_vec(),
         };
         self.send(f).await?;
+        ui.cable_status_update(CableState::WaitingForAuthenticatorResponse);
         let mut data = loop {
             let resp = self.recv().await?;
             if resp.message_type == MessageType::Ctap {
@@ -347,6 +361,7 @@ impl Token for Tunnel {
             }
         };
         self.close().await?;
+        ui.cable_status_update(CableState::Processing);
 
         let err = CtapError::from(data.remove(0));
         if !err.is_ok() {

@@ -137,7 +137,7 @@ mod handshake;
 mod noise;
 mod tunnel;
 
-use std::fmt::Debug;
+use std::{fmt::Debug, collections::BTreeMap};
 
 pub use base10::DecodeError;
 pub use btle::Advertiser;
@@ -196,6 +196,37 @@ impl CableRequestType {
     }
 }
 
+/// States that a caBLE connection can be in for
+/// [UiCallback::cable_status_update].
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum CableState {
+    /// The initiator or authenticator is connecting to the tunnel server.
+    ConnectingToTunnelServer,
+
+    /// The authenticator is waiting for the initiator to connect to the tunnel
+    /// server, and send a challenge.
+    WaitingForInitiatorConnection,
+
+    /// The initiator or authenticator is establishing an encrypted channel.
+    Handshaking,
+
+    /// The authenticator is waiting for the initiator to respond.
+    WaitingForInitiatorResponse,
+
+    /// The authenticator is waiting for a command from the initiator.
+    WaitingForInitiatorCommand,
+
+    /// The initiator or authenticator is processing what it received from the
+    /// other side.
+    Processing,
+
+    /// The initiator has sent a message to the authenticator, and waiting for
+    /// a response. This may be that the device is waiting for some sort of
+    /// user verification action (like entering PIN or biometrics) to complete
+    /// the operation.
+    WaitingForAuthenticatorResponse,
+}
+
 /// Establishes a connection to a caBLE authenticator using QR codes, Bluetooth
 /// Low Energy and a Websocket tunnel.
 ///
@@ -232,7 +263,7 @@ pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(
     let psk = disco.get_psk(&eid)?;
 
     let connect_url = disco.get_connect_uri(&eid)?;
-    let tun = Tunnel::connect_initiator(&connect_url, psk, disco.local_identity.as_ref()).await?;
+    let tun = Tunnel::connect_initiator(&connect_url, psk, disco.local_identity.as_ref(), ui_callback).await?;
 
     tun.get_authenticator(ui_callback).ok_or_else(|| {
         error!("no supported protocol versions!");
@@ -255,7 +286,7 @@ pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(
 /// * `ui_callback` trait for prompting for user interaction where needed.
 pub async fn share_cable_authenticator<'a, U>(
     backend: &mut impl AuthenticatorBackendHashedClientData,
-    info: GetInfoResponse,
+    mut info: GetInfoResponse,
     url: &str,
     tunnel_server_id: u16,
     advertiser: &mut impl Advertiser,
@@ -264,9 +295,21 @@ pub async fn share_cable_authenticator<'a, U>(
 where
     U: UiCallback + 'a,
 {
-    // TODO: Because AuthenticatorBackendWithRequests does PIN/UV auth for us,
-    // we need to remove anything from GetInfoResponse which suggests that the
-    // remote side attempt to do PIN/UV.
+    // Because AuthenticatorBackendWithRequests does PIN/UV auth for us, we need
+    // to remove anything from GetInfoResponse that would suggest the remote
+    // side should attempt PIN/UV auth.
+    //
+    // Chromium and Safari appear to ignore these options, but we actually do
+    // this properly. For now, we're just going to set this to "known" values.
+    info.options = Some(BTreeMap::from([
+        // Possibly a lie.
+        ("uv".to_string(), true),
+    ]));
+    info.pin_protocols = None;
+    let transports = info.transports.get_or_insert(Default::default());
+    transports.push("cable".to_string());
+    transports.push("hybrid".to_string());
+
     let handshake = HandshakeV2::from_qr_url(url)?;
     drop(url);
     let discovery = handshake.to_discovery()?;
@@ -277,6 +320,7 @@ where
         &handshake.peer_identity,
         info,
         advertiser,
+        ui_callback,
     )
     .await?;
 
@@ -284,8 +328,10 @@ where
     let timeout_ms = 30000;
 
     let resp = loop {
+        ui_callback.cable_status_update(CableState::WaitingForInitiatorCommand);
         let msg = tunnel.recv().await?;
 
+        ui_callback.cable_status_update(CableState::Processing);
         match msg.message_type {
             MessageType::Shutdown => {
                 tunnel.close().await?;

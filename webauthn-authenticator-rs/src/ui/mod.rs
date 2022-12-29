@@ -2,7 +2,7 @@ use qrcode::{render::unicode::Dense1x2, QrCode};
 use std::fmt::Debug;
 use std::io::{stderr, Write};
 
-use crate::cable::CableRequestType;
+use crate::cable::{CableRequestType, CableState};
 use crate::ctap2::EnrollSampleStatus;
 
 pub trait UiCallback: Sync + Send + Debug {
@@ -34,6 +34,8 @@ pub trait UiCallback: Sync + Send + Debug {
     ///
     /// This method will be called synchronously, and must not block.
     fn dismiss_qr_code(&self);
+
+    fn cable_status_update(&self, state: CableState);
 }
 
 /// Basic CLI [UiCallback] implementation.
@@ -89,5 +91,9 @@ impl UiCallback for Cli {
 
     fn dismiss_qr_code(&self) {
         println!("caBLE authenticator detected, connecting...");
+    }
+
+    fn cable_status_update(&self, state: CableState) {
+        println!("caBLE status: {:?}", state);
     }
 }
