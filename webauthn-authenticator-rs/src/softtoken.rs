@@ -2,8 +2,6 @@ use crate::authenticator_hashed::AuthenticatorBackendHashedClientData;
 use crate::ctap2::GetInfoResponse;
 use crate::error::WebauthnCError;
 use crate::util::compute_sha256;
-use crate::AuthenticatorBackend;
-use crate::Url;
 use openssl::x509::{
     extension::{AuthorityKeyIdentifier, BasicConstraints, KeyUsage, SubjectKeyIdentifier},
     X509NameBuilder, X509Ref, X509ReqBuilder, X509,
@@ -20,7 +18,7 @@ use base64urlsafedata::Base64UrlSafeData;
 
 use webauthn_rs_proto::{
     AllowCredentials, AuthenticationExtensionsClientOutputs, AuthenticatorAssertionResponseRaw,
-    AuthenticatorAttachment, AuthenticatorAttestationResponseRaw, CollectedClientData,
+    AuthenticatorAttachment, AuthenticatorAttestationResponseRaw,
     PublicKeyCredential, PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
     RegisterPublicKeyCredential, RegistrationExtensionsClientOutputs, UserVerificationPolicy,
 };
