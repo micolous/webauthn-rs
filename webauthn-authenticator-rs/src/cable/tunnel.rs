@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use openssl::{
     bn::BigNumContext,
-    ec::{EcGroup, EcKey, EcKeyRef, EcPoint, EcPointRef, PointConversionForm},
+    ec::{EcGroup, EcKey, EcKeyRef, EcPoint},
     nid::Nid,
     pkey::{PKey, Private, Public},
     pkey_ctx::PkeyCtx,
@@ -384,12 +384,6 @@ impl Token for Tunnel {
         self.stream.close(None).await.ok();
         Ok(())
     }
-}
-
-fn point_to_bytes(point: &EcPointRef) -> Result<Vec<u8>, WebauthnCError> {
-    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
-    let mut ctx = BigNumContext::new()?;
-    Ok(point.to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?)
 }
 
 pub fn bytes_to_public_key(buf: &[u8]) -> Result<EcKey<Public>, WebauthnCError> {

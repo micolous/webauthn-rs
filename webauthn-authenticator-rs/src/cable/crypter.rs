@@ -132,6 +132,7 @@ impl Crypter {
         nonce
     }
 
+    #[cfg(test)]
     /// Returns `true` if the `other` [Crypter] uses "remote side" (swapped)
     /// read and write keys.
     ///

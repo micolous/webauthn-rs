@@ -27,7 +27,7 @@ type EidKey = [u8; 32 + 32];
 type CableEid = [u8; 16];
 type TunnelId = [u8; 16];
 
-const BASE64URL: base64::Config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
+// const BASE64URL: base64::Config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
 
 #[derive(FromPrimitive, ToPrimitive, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -338,17 +338,18 @@ impl Eid {
         })
     }
 
-    fn get_contact_uri(&self) -> Option<Uri> {
-        self.get_domain().and_then(|domain| {
-            let routing_id = base64::encode_config(&self.routing_id, BASE64URL);
-            Uri::builder()
-                .scheme("wss")
-                .authority(domain)
-                .path_and_query(format!("/cable/contact/{}", routing_id))
-                .build()
-                .ok()
-        })
-    }
+    // TODO: needed for pairing
+    // fn get_contact_uri(&self) -> Option<Uri> {
+    //     self.get_domain().and_then(|domain| {
+    //         let routing_id = base64::encode_config(&self.routing_id, BASE64URL);
+    //         Uri::builder()
+    //             .scheme("wss")
+    //             .authority(domain)
+    //             .path_and_query(format!("/cable/contact/{}", routing_id))
+    //             .build()
+    //             .ok()
+    //     })
+    // }
 }
 
 #[cfg(test)]

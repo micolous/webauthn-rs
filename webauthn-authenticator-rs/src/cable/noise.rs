@@ -369,7 +369,7 @@ mod test {
     use super::*;
     #[test]
     fn hkdf_chromium() {
-        // Compare hkdf using values debug-logged from Chormium
+        // Compare hkdf using values debug-logged from Chromium
         let _ = tracing_subscriber::fmt::try_init();
         let ck = [
             0x30, 0x7a, 0x70, 0x6e, 0x63, 0x38, 0x2e, 0x8e, 0x9d, 0x46, 0xcc, 0xdb, 0xc, 0xeb,

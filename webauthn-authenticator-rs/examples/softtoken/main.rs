@@ -1,10 +1,9 @@
 extern crate tracing;
 
 use std::fs::OpenOptions;
-use std::io::{stdin, stdout, Write};
-use std::time::Duration;
+use std::io::Write;
 
-use clap::{ArgAction, ArgGroup, Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use webauthn_authenticator_rs::softtoken::SoftToken;
 
 #[derive(Debug, clap::Parser)]

@@ -333,7 +333,7 @@ impl Token for NFCCard {
         false
     }
 
-    async fn transmit_raw<U>(&mut self, cmd: &[u8], ui: &U) -> Result<Vec<u8>, WebauthnCError>
+    async fn transmit_raw<U>(&mut self, cmd: &[u8], _ui: &U) -> Result<Vec<u8>, WebauthnCError>
     where
         U: UiCallback,
     {

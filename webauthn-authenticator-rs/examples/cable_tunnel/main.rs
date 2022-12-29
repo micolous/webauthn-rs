@@ -10,20 +10,27 @@ use bluetooth_hci::{
     types::{Advertisement, AdvertisingInterval, AdvertisingType},
     BdAddr, BdAddrType,
 };
-use clap::{Parser, ArgGroup};
+use clap::{ArgGroup, Parser};
 use openssl::rand::rand_bytes;
 use serialport::FlowControl;
 use serialport_hci::{
     vendor::none::{Event, Vendor},
     SerialController,
 };
-use std::{fmt::Debug, time::Duration, io::{Read, Seek, SeekFrom, Write}, fs::OpenOptions};
+use std::{
+    fmt::Debug,
+    fs::OpenOptions,
+    io::{Read, Seek, SeekFrom, Write},
+    time::Duration,
+};
 
 use webauthn_authenticator_rs::{
     cable::{share_cable_authenticator, Advertiser},
+    ctap2::CtapAuthenticator,
     error::WebauthnCError,
+    softtoken::SoftToken,
     transport::{AnyTransport, Transport},
-    ui::Cli, ctap2::{CtapAuthenticator, GetInfoResponse}, softtoken::SoftToken,
+    ui::Cli,
 };
 
 #[derive(Debug, clap::Parser)]
@@ -177,7 +184,8 @@ async fn main() {
             .read(true)
             .write(true)
             .create(false)
-            .open(p).unwrap();
+            .open(p)
+            .unwrap();
         let mut buffer = Vec::new();
         f.read_to_end(&mut buffer).unwrap();
         let mut softtoken = SoftToken::from_cbor(&buffer).unwrap();
@@ -205,7 +213,7 @@ async fn main() {
         let token = transport.tokens().unwrap().pop().unwrap();
         let mut authenticator = CtapAuthenticator::new(token, &ui).await.unwrap();
         let info = authenticator.get_info().to_owned();
-        
+
         share_cable_authenticator(
             &mut authenticator,
             info,
@@ -219,5 +227,4 @@ async fn main() {
     };
 
     // let (mut authenticator, _) = SoftToken::new().unwrap();
-
 }
