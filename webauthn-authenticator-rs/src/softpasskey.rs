@@ -1,7 +1,8 @@
 use crate::authenticator_hashed::AuthenticatorBackendHashedClientData;
+use crate::crypto::get_group;
 use crate::error::WebauthnCError;
 use crate::util::compute_sha256;
-use openssl::{bn, ec, hash, nid, pkey, rand, sign};
+use openssl::{bn, ec, hash, pkey, rand, sign};
 use serde_cbor::value::Value;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -201,7 +202,7 @@ impl AuthenticatorBackendHashedClientData for SoftPasskey {
         rand::rand_bytes(key_handle.as_mut_slice())?;
 
         // Create a new key.
-        let ecgroup = ec::EcGroup::from_curve_name(nid::Nid::X9_62_PRIME256V1)?;
+        let ecgroup = get_group()?;
 
         let eckey = ec::EcKey::generate(&ecgroup)?;
 

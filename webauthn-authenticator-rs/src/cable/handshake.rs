@@ -1,7 +1,6 @@
 use openssl::{
     bn::BigNumContext,
-    ec::{EcGroup, EcKey, EcKeyRef, EcPoint, PointConversionForm},
-    nid::Nid,
+    ec::{EcKey, EcKeyRef, EcPoint, PointConversionForm},
     pkey::Public,
 };
 use serde::Serialize;
@@ -12,14 +11,12 @@ use std::{
 };
 
 use crate::{
-    cable::{base10, CableRequestType},
+    cable::{base10, discovery::Discovery, CableRequestType},
     ctap2::commands::{
         value_to_bool, value_to_string, value_to_u32, value_to_u64, value_to_vec_u8,
     },
-    error::WebauthnCError,
+    error::WebauthnCError, crypto::get_group,
 };
-
-use super::discovery::Discovery;
 
 #[derive(Serialize, Debug, Clone)]
 #[serde(into = "BTreeMap<u32, Value>", try_from = "BTreeMap<u32, Value>")]
@@ -145,7 +142,7 @@ impl TryFrom<BTreeMap<u32, Value>> for HandshakeV2 {
 }
 
 fn compress_public_key(key: &EcKeyRef<Public>) -> Result<Vec<u8>, WebauthnCError> {
-    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
+    let group = get_group()?;
     let mut ctx = BigNumContext::new()?;
     Ok(key
         .public_key()
@@ -153,7 +150,7 @@ fn compress_public_key(key: &EcKeyRef<Public>) -> Result<Vec<u8>, WebauthnCError
 }
 
 fn decompress_public_key(bytes: [u8; 33]) -> Result<EcKey<Public>, WebauthnCError> {
-    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
+    let group = get_group()?;
     let mut ctx = BigNumContext::new()?;
     let point = EcPoint::from_bytes(&group, &bytes, &mut ctx)?;
     Ok(EcKey::from_public_key(&group, &point)?)

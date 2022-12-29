@@ -193,7 +193,6 @@ use crate::ui::UiCallback;
 pub use self::commands::EnrollSampleStatus;
 use self::commands::GetInfoRequest;
 pub use self::commands::{CBORCommand, CBORResponse, GetInfoResponse};
-pub(crate) use self::pin_uv::{decrypt, encrypt, hkdf_sha_256, regenerate};
 pub use self::{ctap20::Ctap20Authenticator, ctap21::Ctap21Authenticator};
 
 /// Abstraction for different versions of the CTAP2 protocol.

@@ -1,13 +1,16 @@
-use crate::{authenticator_hashed::AuthenticatorBackendHashedClientData, ctap2::commands::value_to_vec_u8};
-use crate::ctap2::GetInfoResponse;
-use crate::error::WebauthnCError;
-use crate::util::compute_sha256;
+use crate::{
+    authenticator_hashed::AuthenticatorBackendHashedClientData,
+    crypto::get_group,
+    ctap2::commands::{value_to_vec_u8, GetInfoResponse},
+    error::WebauthnCError,
+    util::compute_sha256,
+};
 use openssl::x509::{
     extension::{AuthorityKeyIdentifier, BasicConstraints, KeyUsage, SubjectKeyIdentifier},
     X509NameBuilder, X509Ref, X509ReqBuilder, X509,
 };
-use openssl::{asn1, bn, ec, hash, nid, pkey, rand, sign};
-use serde::{Serialize, Deserialize};
+use openssl::{asn1, bn, ec, hash, pkey, rand, sign};
+use serde::{Deserialize, Serialize};
 use serde_cbor::value::Value;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -19,8 +22,8 @@ use base64urlsafedata::Base64UrlSafeData;
 
 use webauthn_rs_proto::{
     AllowCredentials, AuthenticationExtensionsClientOutputs, AuthenticatorAssertionResponseRaw,
-    AuthenticatorAttachment, AuthenticatorAttestationResponseRaw,
-    PublicKeyCredential, PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
+    AuthenticatorAttachment, AuthenticatorAttestationResponseRaw, PublicKeyCredential,
+    PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
     RegisterPublicKeyCredential, RegistrationExtensionsClientOutputs, UserVerificationPolicy,
 };
 
@@ -76,8 +79,8 @@ impl From<X509Def> for X509 {
     }
 }
 
-fn build_ca() -> Result<(pkey::PKey<pkey::Private>, X509), openssl::error::ErrorStack> {
-    let ecgroup = ec::EcGroup::from_curve_name(nid::Nid::X9_62_PRIME256V1)?;
+fn build_ca() -> Result<(pkey::PKey<pkey::Private>, X509), WebauthnCError> {
+    let ecgroup = get_group()?;
     let eckey = ec::EcKey::generate(&ecgroup)?;
     let ca_key = pkey::PKey::from_ec_key(eckey)?;
     let mut x509_name = X509NameBuilder::new()?;
@@ -127,8 +130,8 @@ fn build_ca() -> Result<(pkey::PKey<pkey::Private>, X509), openssl::error::Error
 fn build_intermediate(
     ca_key: &pkey::PKeyRef<pkey::Private>,
     ca_cert: &X509Ref,
-) -> Result<(pkey::PKey<pkey::Private>, X509), openssl::error::ErrorStack> {
-    let ecgroup = ec::EcGroup::from_curve_name(nid::Nid::X9_62_PRIME256V1)?;
+) -> Result<(pkey::PKey<pkey::Private>, X509), WebauthnCError> {
+    let ecgroup = get_group()?;
     let eckey = ec::EcKey::generate(&ecgroup)?;
     let int_key = pkey::PKey::from_ec_key(eckey)?;
 
@@ -253,10 +256,8 @@ impl SoftToken {
             max_msg_size: None,
             pin_protocols: None,
             max_cred_count_in_list: None,
-            max_cred_id_len:None,
-            transports: Some(vec![
-                "internal".to_string(),
-            ]),
+            max_cred_id_len: None,
+            transports: Some(vec!["internal".to_string()]),
             algorithms: None,
             min_pin_length: None,
         }
@@ -437,7 +438,7 @@ impl AuthenticatorBackendHashedClientData for SoftToken {
         rand::rand_bytes(key_handle.as_mut_slice())?;
 
         // Create a new key.
-        let ecgroup = ec::EcGroup::from_curve_name(nid::Nid::X9_62_PRIME256V1)?;
+        let ecgroup = get_group()?;
 
         let eckey = ec::EcKey::generate(&ecgroup)?;
 

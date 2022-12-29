@@ -2,27 +2,25 @@ use std::mem::size_of;
 
 use openssl::{
     bn::BigNumContext,
-    ec::{EcGroup, EcKey, EcKeyRef, EcPointRef, PointConversionForm},
-    nid::Nid,
+    ec::{EcKey, EcKeyRef, EcPointRef, PointConversionForm},
     pkey::{Private, Public},
     symm::{decrypt_aead, encrypt_aead, Cipher},
 };
 
-use crate::{ctap2::hkdf_sha_256, prelude::WebauthnCError, util::compute_sha256_2};
-
-use super::{
-    crypter::Crypter,
-    tunnel::{bytes_to_public_key, ecdh},
-    Psk,
+use crate::{
+    crypto::{ecdh, get_group, hkdf_sha_256, regenerate},
+    prelude::WebauthnCError,
+    util::compute_sha256_2,
 };
 
-pub fn get_public_key_bytes(private_key: &EcKeyRef<Private>) -> Vec<u8> {
-    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
-    let mut ctx = BigNumContext::new().unwrap();
-    private_key
+use super::{crypter::Crypter, tunnel::bytes_to_public_key, Psk};
+
+pub fn get_public_key_bytes(private_key: &EcKeyRef<Private>) -> Result<Vec<u8>, WebauthnCError> {
+    let group = get_group()?;
+    let mut ctx = BigNumContext::new()?;
+    Ok(private_key
         .public_key()
-        .to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)
-        .unwrap()
+        .to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?)
 }
 
 // implementing Cable's version of noise from scratch
@@ -50,8 +48,7 @@ impl CableNoise {
             HandshakeType::NKpsk0 => *NOISE_NK_PROTOCOL,
         };
 
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
-        let ephemeral_key = EcKey::generate(&group)?;
+        let ephemeral_key = regenerate()?;
 
         Ok(Self {
             chaining_key,
@@ -68,7 +65,7 @@ impl CableNoise {
     }
 
     fn mix_hash_point(&mut self, point: &EcPointRef) -> Result<(), WebauthnCError> {
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
+        let group = get_group()?;
         let mut ctx = BigNumContext::new()?;
         let point = point.to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?;
         self.mix_hash(&point);
@@ -132,8 +129,7 @@ impl CableNoise {
             &self.h[..],
             &ct[..msg_len],
             &ct[msg_len..],
-        )
-        .unwrap();
+        )?;
         trace!("decrypted: {:?}", decrypted);
         self.mix_hash(ct);
         Ok(decrypted)
@@ -159,7 +155,7 @@ impl CableNoise {
 
     fn get_ephemeral_key_public_bytes(&self) -> Result<[u8; 65], WebauthnCError> {
         let mut o = [0; 65];
-        let v = get_public_key_bytes(self.ephemeral_key.as_ref());
+        let v = get_public_key_bytes(self.ephemeral_key.as_ref())?;
         if v.len() != o.len() {
             error!("unexpected public key length {} != {}", v.len(), o.len());
             return Err(WebauthnCError::Internal);
@@ -210,7 +206,11 @@ impl CableNoise {
             // TODO: test
             let peer_identity_point = bytes_to_public_key(&peer_identity)?;
             let mut es_key = [0; 32];
-            ecdh(&noise.ephemeral_key, &peer_identity_point, &mut es_key)?;
+            ecdh(
+                noise.ephemeral_key.to_owned(),
+                peer_identity_point,
+                &mut es_key,
+            )?;
             noise.mix_key(&es_key)?;
         }
 
@@ -244,14 +244,18 @@ impl CableNoise {
 
         let peer_key = bytes_to_public_key(peer_point_bytes)?;
         let mut shared_key_ee = [0; 32];
-        ecdh(&self.ephemeral_key, &peer_key, &mut shared_key_ee)?;
+        ecdh(
+            self.ephemeral_key.to_owned(),
+            peer_key.to_owned(),
+            &mut shared_key_ee,
+        )?;
         self.mix_hash(peer_point_bytes);
         self.mix_key(peer_point_bytes)?;
         self.mix_key(&shared_key_ee)?;
 
         if let Some(local_identity) = &self.local_identity {
             let mut shared_key_se = [0; 32];
-            ecdh(&local_identity, &peer_key, &mut shared_key_se)?;
+            ecdh(local_identity.to_owned(), peer_key, &mut shared_key_se)?;
             self.mix_key(&shared_key_se)?;
         }
 
@@ -320,7 +324,11 @@ impl CableNoise {
 
         if let Some(local_identity) = local_identity {
             let mut es_key = [0; 32];
-            ecdh(&local_identity, &peer_point, &mut es_key)?;
+            ecdh(
+                local_identity.to_owned(),
+                peer_point.to_owned(),
+                &mut es_key,
+            )?;
             noise.mix_key(&es_key)?;
         }
 
@@ -339,14 +347,18 @@ impl CableNoise {
         noise.mix_key(&ephemeral_key_public_bytes)?;
 
         let mut shared_key_ee = [0; 32];
-        ecdh(&noise.ephemeral_key, &peer_point, &mut shared_key_ee)?;
+        ecdh(
+            noise.ephemeral_key.to_owned(),
+            peer_point,
+            &mut shared_key_ee,
+        )?;
         noise.mix_key(&shared_key_ee)?;
 
         if let Some(peer_identity) = peer_identity {
             let mut shared_key_se = [0; 32];
             ecdh(
-                &noise.ephemeral_key,
-                &peer_identity,
+                noise.ephemeral_key.to_owned(),
+                peer_identity.to_owned(),
                 &mut shared_key_se,
             )?;
             noise.mix_key(&shared_key_se)?;
@@ -366,6 +378,8 @@ impl CableNoise {
 
 #[cfg(test)]
 mod test {
+    use crate::crypto::get_group;
+
     use super::*;
     #[test]
     fn hkdf_chromium() {
@@ -392,7 +406,7 @@ mod test {
     #[test]
     fn noise() {
         let _ = tracing_subscriber::fmt::try_init();
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
+        let group = get_group().unwrap();
         let identity_key = EcKey::generate(&group).unwrap();
         let identity_pub = EcKey::from_public_key(&group, identity_key.public_key()).unwrap();
         let psk = [0; size_of::<Psk>()];

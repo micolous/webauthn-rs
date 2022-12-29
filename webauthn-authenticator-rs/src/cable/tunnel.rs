@@ -7,10 +7,8 @@ use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use openssl::{
     bn::BigNumContext,
-    ec::{EcGroup, EcKey, EcKeyRef, EcPoint},
-    nid::Nid,
-    pkey::{PKey, Private, Public},
-    pkey_ctx::PkeyCtx,
+    ec::{EcKey, EcKeyRef, EcPoint},
+    pkey::{Private, Public},
 };
 use serde_cbor::Value;
 use tokio::net::TcpStream;
@@ -39,7 +37,7 @@ use crate::{
     prelude::WebauthnCError,
     transport::Token,
     ui::UiCallback,
-    util::compute_sha256,
+    util::compute_sha256, crypto::get_group,
 };
 
 /// Well-known domains.
@@ -387,24 +385,10 @@ impl Token for Tunnel {
 }
 
 pub fn bytes_to_public_key(buf: &[u8]) -> Result<EcKey<Public>, WebauthnCError> {
-    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
+    let group = get_group()?;
     let mut ctx = BigNumContext::new()?;
     let point = EcPoint::from_bytes(&group, &buf, &mut ctx)?;
     Ok(EcKey::from_public_key(&group, &point)?)
-}
-
-pub fn ecdh(
-    private_key: &EcKeyRef<Private>,
-    peer_key: &EcKeyRef<Public>,
-    output: &mut [u8],
-) -> Result<(), WebauthnCError> {
-    let peer_key = PKey::from_ec_key(peer_key.to_owned())?;
-    let pkey = PKey::from_ec_key(private_key.to_owned())?;
-    let mut ctx = PkeyCtx::new(&pkey)?;
-    ctx.derive_init()?;
-    ctx.derive_set_peer(&peer_key)?;
-    ctx.derive(Some(output))?;
-    Ok(())
 }
 
 #[cfg(test)]

@@ -36,6 +36,7 @@ pub mod prelude {
 }
 
 mod authenticator_hashed;
+mod crypto;
 pub mod ctap2;
 pub mod error;
 pub mod softpasskey;

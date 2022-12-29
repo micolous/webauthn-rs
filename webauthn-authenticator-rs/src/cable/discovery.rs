@@ -13,7 +13,7 @@ use tokio_tungstenite::tungstenite::http::Uri;
 use super::{btle::*, handshake::*, tunnel::get_domain};
 use crate::{
     cable::{CableRequestType, Psk},
-    ctap2::{decrypt, encrypt, hkdf_sha_256, regenerate},
+    crypto::{decrypt, encrypt, hkdf_sha_256, regenerate},
     error::WebauthnCError,
 };
 
