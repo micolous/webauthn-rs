@@ -301,7 +301,10 @@ impl NFCCard {
 
         let card = reader
             .ctx
-            .connect(reader_name, ShareMode::Shared, Protocols::ANY)?;
+            .connect(reader_name, ShareMode::Exclusive, Protocols::ANY).map_err(|e| {
+                error!("Error connecting to card: {:?}", e);
+                e
+            })?;
 
         Ok(NFCCard {
             card: Mutex::new(card),
@@ -368,7 +371,7 @@ impl Token for NFCCard {
         let resp = transmit(
             guard.deref(),
             &select_by_df_name(&APPLET_DF),
-            &ISO7816LengthForm::ExtendedOnly,
+            &ISO7816LengthForm::ShortOnly,
         )?;
 
         if !resp.is_ok() {

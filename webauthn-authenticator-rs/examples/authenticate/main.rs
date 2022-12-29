@@ -157,13 +157,17 @@ async fn main() {
     let cred = wan.register_credential(&r, &reg_state, None).unwrap();
 
     trace!(?cred);
+    drop(u);
+    let mut buf = String::new();
+    println!("WARNING: Some NFC keys need to be power-cycled before you can authenticate.");
+    println!("Press ENTER to authenticate, or Ctrl-C to abort");
+    stdout().flush().ok();
+    stdin().read_line(&mut buf).expect("Cannot read stdin");
 
     loop {
-        if provider == Provider::Cable {
-            u = provider
-                .connect_provider(CableRequestType::GetAssertion, &ui)
-                .await;
-        }
+        u = provider
+            .connect_provider(CableRequestType::GetAssertion, &ui)
+            .await;
         let (chal, auth_state) = wan
             .generate_challenge_authenticate(
                 vec![cred.clone()],
@@ -194,6 +198,8 @@ async fn main() {
 
             info!("auth_res -> {:x?}", auth_res);
         }
+
+        drop(u);
         let mut buf = String::new();
         println!("Press ENTER to try again, or Ctrl-C to abort");
         stdout().flush().ok();
