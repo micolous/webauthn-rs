@@ -137,7 +137,7 @@ mod handshake;
 mod noise;
 mod tunnel;
 
-use std::{fmt::Debug, collections::BTreeMap};
+use std::{collections::BTreeMap, fmt::Debug};
 
 pub use base10::DecodeError;
 pub use btle::Advertiser;
@@ -259,6 +259,7 @@ pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(
             WebauthnCError::NoSelectedToken
         })?;
     ui_callback.dismiss_qr_code();
+    drop(scanner);
 
     let psk = disco.get_psk(&eid)?;
 

@@ -1,3 +1,4 @@
+//! Structures for device discovery over BTLE.
 use num_traits::ToPrimitive;
 use openssl::{
     ec::EcKey,
@@ -6,7 +7,6 @@ use openssl::{
     rand::rand_bytes,
     sign::Signer,
 };
-/// Structures for device discovery over BTLE.
 use std::mem::size_of;
 use tokio_tungstenite::tungstenite::http::Uri;
 
@@ -139,7 +139,9 @@ impl Discovery {
             }
             let mut advert: BleAdvert = [0; size_of::<BleAdvert>()];
             advert.copy_from_slice(a.as_ref());
+
             if let Some(eid) = self.decrypt_advert(advert)? {
+                rx.close();
                 return Ok(Some(eid));
             }
         }

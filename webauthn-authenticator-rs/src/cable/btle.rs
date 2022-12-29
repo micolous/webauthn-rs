@@ -103,6 +103,10 @@ impl Scanner {
 
         tokio::spawn(async move {
             while let Some(event) = events.next().await {
+                if tx.is_closed() {
+                    break;
+                }
+
                 if let CentralEvent::ServiceDataAdvertisement {
                     id: _,
                     mut service_data,
@@ -112,13 +116,13 @@ impl Scanner {
                     // form, even though they're transmitted in 16-bit form.
                     if let Some(d) = service_data.remove(&FIDO_CABLE_SERVICE) {
                         if let Err(_) = tx.send(d).await {
-                            return;
+                            break;
                         }
                     }
 
                     if let Some(d) = service_data.remove(&GOOGLE_CABLE_SERVICE) {
                         if let Err(_) = tx.send(d).await {
-                            return;
+                            break;
                         }
                     }
                 }
