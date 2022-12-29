@@ -17,7 +17,6 @@ mod atr;
 mod tlv;
 
 pub use self::atr::*;
-use super::ctap2::*;
 use crate::transport::iso7816::*;
 use crate::transport::*;
 

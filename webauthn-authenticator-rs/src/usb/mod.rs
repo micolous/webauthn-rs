@@ -9,7 +9,6 @@
 mod framing;
 mod responses;
 
-use crate::ctap2::*;
 use crate::error::WebauthnCError;
 use crate::transport::*;
 use crate::ui::UiCallback;

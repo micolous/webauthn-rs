@@ -196,6 +196,7 @@ impl TryFrom<&U2FHIDFrame> for Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ctap2::CBORResponse;
     use crate::ctap2::commands::GetInfoResponse;
 
     #[test]

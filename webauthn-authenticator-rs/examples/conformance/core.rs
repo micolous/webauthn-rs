@@ -1,5 +1,5 @@
 use pcsc::Scope;
-use webauthn_authenticator_rs::ctap2::{commands::*, *};
+use webauthn_authenticator_rs::ctap2::commands::*;
 use webauthn_authenticator_rs::nfc::*;
 use webauthn_authenticator_rs::transport::iso7816::*;
 

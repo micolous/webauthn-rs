@@ -98,7 +98,7 @@ pub fn get_domain(domain_id: u16) -> Option<String> {
 /// * the command must be specified in the [HandshakeV2][super::handshake::HandshakeV2] QR code
 /// * the remote side "hangs up" after a single command
 pub struct Tunnel {
-    psk: Psk,
+    // psk: Psk,
     stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
     crypter: Crypter,
     info: GetInfoResponse,
@@ -197,7 +197,7 @@ impl Tunnel {
         let info = frame.info;
 
         let t = Self {
-            psk,
+            // psk,
             stream,
             crypter,
             info,
@@ -267,7 +267,7 @@ impl Tunnel {
         crypter.use_new_construction();
 
         let mut t = Self {
-            psk,
+            // psk,
             stream,
             crypter,
             info,
