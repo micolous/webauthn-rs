@@ -45,14 +45,33 @@ impl From<u8> for MessageType {
     }
 }
 
-pub const SHUTDOWN_COMMAND: CableCommand = CableCommand {
+pub const SHUTDOWN_COMMAND: CableFrame = CableFrame {
     protocol_version: 1,
     message_type: MessageType::Shutdown,
     data: vec![],
 };
 
+/// caBLE request and response framing.
+/// 
+/// These frames are encrypted ([Crypter][crate::cable::crypter::Crypter])
+/// and sent as binary Websocket messages.
+///
+/// ## Protocol description
+///
+/// ### Version 0
+/// 
+/// All frames are of the type [MessageType::Ctap], and the wire format is the
+/// same as CTAP 2.0.
+/// 
+/// ### Version 1
+/// 
+/// Version 1 adds an initial [MessageType] byte before the payload (`data`):
+/// 
+/// * [MessageType::Shutdown]: no payload
+/// * [MessageType::Ctap]: payload is CTAP 2.0 command / response
+/// * [MessageType::Update]: payload is linking information (not implemented)
 #[derive(Debug, PartialEq, Eq)]
-pub struct CableCommand {
+pub struct CableFrame {
     pub protocol_version: u32,
     pub message_type: MessageType,
     pub data: Vec<u8>,
@@ -64,7 +83,7 @@ pub enum RequestType {
     GetAssertion(GetAssertionRequest),
 }
 
-impl CableCommand {
+impl CableFrame {
     pub fn to_bytes(&self) -> Vec<u8> {
         if self.protocol_version == 0 {
             return self.data.to_owned();
@@ -91,7 +110,14 @@ impl CableCommand {
         }
     }
 
+    /// Parses the [CableFrame] (from an initiator) as a CBOR request type.
+    /// 
+    /// Returns [WebauthnCError::NotSupported] on unknown command types, or if
+    /// `message_type` is not [MessageType::Ctap].
     pub fn parse_request(&self) -> Result<RequestType, WebauthnCError> {
+        if self.message_type != MessageType::Ctap {
+            return Err(WebauthnCError::NotSupported);
+        }
         match self.data[0] {
             MakeCredentialRequest::CMD => Ok(RequestType::MakeCredential(
                 <MakeCredentialRequest as CBORResponse>::try_from(&self.data[1..])?

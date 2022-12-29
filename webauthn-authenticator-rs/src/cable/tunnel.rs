@@ -30,7 +30,7 @@ use crate::{
         btle::{Advertiser, FIDO_CABLE_SERVICE_U16},
         crypter::Crypter,
         discovery::{Discovery, Eid},
-        framing::{CableCommand, CablePostHandshake, MessageType, SHUTDOWN_COMMAND},
+        framing::{CableFrame, CablePostHandshake, MessageType, SHUTDOWN_COMMAND},
         noise::CableNoise,
         Psk,
     },
@@ -277,7 +277,7 @@ impl Tunnel {
         CtapAuthenticator::new_with_info(self.info.to_owned(), self, ui_callback)
     }
 
-    pub(super) async fn send(&mut self, cmd: CableCommand) -> Result<(), WebauthnCError> {
+    pub(super) async fn send(&mut self, cmd: CableFrame) -> Result<(), WebauthnCError> {
         // TODO: handle error
         // trace!("send: flushing before send");
         // self.stream.flush().await.unwrap();
@@ -293,7 +293,7 @@ impl Tunnel {
         Ok(())
     }
 
-    pub(super) async fn recv(&mut self) -> Result<CableCommand, WebauthnCError> {
+    pub(super) async fn recv(&mut self) -> Result<CableFrame, WebauthnCError> {
         // TODO: handle error
         let resp = self.stream.next().await.unwrap().unwrap();
 
@@ -308,7 +308,7 @@ impl Tunnel {
         let decrypted = self.crypter.decrypt(&resp)?;
         trace!("<<< {:02x?}", decrypted);
         // TODO: protocol version
-        Ok(CableCommand::from_bytes(1, &decrypted))
+        Ok(CableFrame::from_bytes(1, &decrypted))
     }
 }
 
@@ -330,7 +330,7 @@ impl Token for Tunnel {
     where
         U: UiCallback,
     {
-        let f = CableCommand {
+        let f = CableFrame {
             // TODO: handle protocol versions
             protocol_version: 1,
             message_type: MessageType::Ctap,

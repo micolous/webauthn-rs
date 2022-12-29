@@ -142,20 +142,22 @@ use std::fmt::Debug;
 pub use base10::DecodeError;
 pub use btle::Advertiser;
 
-use self::{
-    btle::Scanner,
-    discovery::Discovery,
-    handshake::HandshakeV2,
-    tunnel::Tunnel,
-};
 use crate::{
-    cable::framing::{MessageType, RequestType},
-    ctap2::{
-        CtapAuthenticator, GetInfoResponse,
+    authenticator_hashed::{
+        perform_auth_with_request, perform_register_with_request,
+        AuthenticatorBackendHashedClientData,
     },
+    cable::{
+        btle::Scanner,
+        discovery::Discovery,
+        framing::{MessageType, RequestType},
+        handshake::HandshakeV2,
+        tunnel::Tunnel,
+    },
+    ctap2::{CtapAuthenticator, GetInfoResponse},
     error::{CtapError, WebauthnCError},
     transport::Token,
-    ui::UiCallback, authenticator_hashed::AuthenticatorBackendWithRequests,
+    ui::UiCallback,
 };
 
 type Psk = [u8; 32];
@@ -240,22 +242,19 @@ pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(
 
 /// Share an authenicator using caBLE.
 ///
-/// * `token` is a [Token] implementation.
-/// 
-///   In future this may change to use [crate::AuthenticatorBackend] instead
-///   (which would support PIN/UV auth properly)
+/// * `backend` is a [AuthenticatorBackendHashedClientData] implementation.
 ///
 /// * `url` is a `FIDO:/` URL from the initator's QR code.
-/// 
+///
 /// * `tunnel_server_id` is the well-known tunnel server to use. Set this to 0
 ///   to use Google's tunnel server.
 ///
 /// * `advertiser` is reference to an [Advertiser] for starting and stopping
 ///   Bluetooth Low Energy advertisements.
-/// 
+///
 /// * `ui_callback` trait for prompting for user interaction where needed.
 pub async fn share_cable_authenticator<'a, U>(
-    backend: &mut impl AuthenticatorBackendWithRequests,
+    backend: &mut impl AuthenticatorBackendHashedClientData,
     info: GetInfoResponse,
     url: &str,
     tunnel_server_id: u16,
@@ -265,9 +264,9 @@ pub async fn share_cable_authenticator<'a, U>(
 where
     U: UiCallback + 'a,
 {
-    // token.init().await?;
-    // let info = token.transmit(GetInfoRequest {}, ui_callback).await?;
-
+    // TODO: Because AuthenticatorBackendWithRequests does PIN/UV auth for us,
+    // we need to remove anything from GetInfoResponse which suggests that the
+    // remote side attempt to do PIN/UV.
     let handshake = HandshakeV2::from_qr_url(url)?;
     drop(url);
     let discovery = handshake.to_discovery()?;
@@ -294,14 +293,12 @@ where
             }
             MessageType::Ctap => match (handshake.request_type, msg.parse_request()?) {
                 (CableRequestType::MakeCredential, RequestType::MakeCredential(mc))
-                | (
-                    CableRequestType::DiscoverableMakeCredential,
-                    RequestType::MakeCredential(mc),
-                ) => {
-                    break backend.perform_register(mc, timeout_ms);
+                | (CableRequestType::DiscoverableMakeCredential, RequestType::MakeCredential(mc)) =>
+                {
+                    break perform_register_with_request(backend, mc, timeout_ms);
                 }
                 (CableRequestType::GetAssertion, RequestType::GetAssertion(ga)) => {
-                    break backend.perform_auth(ga, timeout_ms);
+                    break perform_auth_with_request(backend, ga, timeout_ms);
                 }
                 (c, v) => {
                     error!("Unhandled command {:02x?} for {:?}", v, c);
@@ -330,7 +327,7 @@ where
 
     // Send the response to the command
     tunnel
-        .send(framing::CableCommand {
+        .send(framing::CableFrame {
             protocol_version: 1,
             message_type: MessageType::Ctap,
             data: resp,
