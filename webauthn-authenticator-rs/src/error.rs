@@ -17,6 +17,7 @@ pub enum WebauthnCError {
     ApduTransmission,
     InvalidAlgorithm,
     InvalidAssertion,
+    InvalidAttestation,
     MessageTooLarge,
     MessageTooShort,
     /// Message was an unexpected length

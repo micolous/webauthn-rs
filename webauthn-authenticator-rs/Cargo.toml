@@ -8,6 +8,9 @@ description = "Webauthn Authenticator Client Library"
 # documentation = "https://docs.rs/kanidm/latest/kanidm/"
 repository = "https://github.com/kanidm/webauthn-rs"
 
+[package.metadata.docs.rs]
+all-features = true
+
 [features]
 nfc_raw_transmit = ["nfc"]
 u2fhid = ["authenticator"]
@@ -20,11 +23,9 @@ cable = ["bluetooth", "hex", "tokio", "tokio-tungstenite", "qrcode"]
 nfc = ["pcsc"]
 usb = ["hidapi"]
 win10 = ["windows"]
+macos = ["icrate", "dispatch"]
 
-default = []
-
-[package.metadata.docs.rs]
-all-features = true
+default = ["macos"]
 
 [dependencies]
 base64urlsafedata = { version = "0.1", path = "../base64urlsafedata" }
@@ -63,6 +64,8 @@ btleplug = { git = "https://github.com/deviceplug/btleplug.git", rev = "bb3212df
 tokio = { version = "1.22.0", features = ["sync", "test-util", "macros", "rt-multi-thread", "time"], optional = true }
 tokio-tungstenite = { version = "0.18.0", features = ["native-tls"], optional = true }
 hex = { version = "0.4.3", optional = true }
+icrate = { version = "0.0.1", optional = true, features = ["AuthenticationServices", "AppKit", "Foundation"] }
+dispatch = { version = "0.2.0", optional = true }
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter", "std", "fmt"] }

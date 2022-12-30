@@ -61,6 +61,9 @@ pub mod u2fhid;
 #[cfg(feature = "win10")]
 pub mod win10;
 
+#[cfg(feature = "macos")]
+pub mod macos;
+
 pub use crate::authenticator_hashed::{
     perform_auth_with_request, perform_register_with_request, AuthenticatorBackendHashedClientData,
 };
