@@ -186,7 +186,7 @@ mod test {
     use webauthn_rs_proto::{PubKeyCredParams, PublicKeyCredentialDescriptor, RelyingParty, User};
 
     use crate::{
-        cable::framing::{CableFrame, MessageType},
+        cable::framing::{CableFrame, CableFrameType},
         ctap2::{commands::MakeCredentialRequest, CBORCommand},
     };
 
@@ -301,7 +301,7 @@ mod test {
 
         let req = CableFrame {
             protocol_version: 1,
-            message_type: MessageType::Ctap,
+            message_type: CableFrameType::Ctap,
             data: req.cbor().unwrap(),
         };
 
@@ -385,6 +385,6 @@ mod test {
         let pt = peer_crypter.decrypt(&ct).unwrap();
         assert_eq!(pt, r);
         let msg = CableFrame::from_bytes(1, &pt);
-        assert_eq!(msg.message_type, MessageType::Ctap);
+        assert_eq!(msg.message_type, CableFrameType::Ctap);
     }
 }

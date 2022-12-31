@@ -1,14 +1,4 @@
-//! ## Message framing
-//!
-//! ### Post-handshake message
-//!
-//! <https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/fido_tunnel_device.cc;l=368-395;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29>
-//!
-//! * Two protocol versions here, protocol 1 and protocol 0.
-//! * Protocol 1 has a CBOR map:
-//!   * 1: GetInfoResponse bytes
-//!   * 2: linking info (optional)
-//! * Protocol 0: Padded map (todo)
+//! caBLE message framing types
 
 use crate::{
     ctap2::{
@@ -26,16 +16,19 @@ use std::collections::BTreeMap;
 /// Not used for protocol version 0
 #[repr(u8)]
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum MessageType {
+pub enum CableFrameType {
+    /// caBLE shutdown message
     Shutdown = 0,
+    /// CTAP 2.x command
     Ctap = 1,
+    /// Linking information
     Update = 2,
     Unknown,
 }
 
-impl From<u8> for MessageType {
+impl From<u8> for CableFrameType {
     fn from(v: u8) -> Self {
-        use MessageType::*;
+        use CableFrameType::*;
         match v {
             0 => Shutdown,
             1 => Ctap,
@@ -47,7 +40,7 @@ impl From<u8> for MessageType {
 
 pub const SHUTDOWN_COMMAND: CableFrame = CableFrame {
     protocol_version: 1,
-    message_type: MessageType::Shutdown,
+    message_type: CableFrameType::Shutdown,
     data: vec![],
 };
 
@@ -73,7 +66,7 @@ pub const SHUTDOWN_COMMAND: CableFrame = CableFrame {
 #[derive(Debug, PartialEq, Eq)]
 pub struct CableFrame {
     pub protocol_version: u32,
-    pub message_type: MessageType,
+    pub message_type: CableFrameType,
     pub data: Vec<u8>,
 }
 
@@ -95,10 +88,10 @@ impl CableFrame {
     }
 
     pub fn from_bytes(protocol_version: u32, i: &[u8]) -> Self {
-        let message_type: MessageType = if protocol_version > 0 {
+        let message_type: CableFrameType = if protocol_version > 0 {
             i[0].into()
         } else {
-            MessageType::Ctap
+            CableFrameType::Ctap
         };
 
         let data = if protocol_version == 0 { i } else { &i[1..] }.to_vec();
@@ -110,12 +103,12 @@ impl CableFrame {
         }
     }
 
-    /// Parses the [CableFrame] (from an initiator) as a CBOR request type.
+    /// Parses a [CableFrame] (from an initiator) as a CBOR request type.
     /// 
     /// Returns [WebauthnCError::NotSupported] on unknown command types, or if
-    /// `message_type` is not [MessageType::Ctap].
+    /// `message_type` is not [CableFrameType::Ctap].
     pub fn parse_request(&self) -> Result<RequestType, WebauthnCError> {
-        if self.message_type != MessageType::Ctap {
+        if self.message_type != CableFrameType::Ctap {
             return Err(WebauthnCError::NotSupported);
         }
         match self.data[0] {
@@ -130,6 +123,15 @@ impl CableFrame {
     }
 }
 
+/// Message sent by the authenticator after completing the CableNoise handshake.
+/// 
+/// <https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/fido_tunnel_device.cc;l=368-395;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29>
+///
+/// * Two protocol versions here, protocol 1 and protocol 0.
+/// * Protocol 1 has a CBOR map:
+///   * 1: GetInfoResponse bytes
+///   * 2: linking info (optional)
+/// * Protocol 0: Padded map (not implemented)
 #[derive(Debug, Clone, Serialize)]
 #[serde(try_from = "BTreeMap<u32, Value>", into = "BTreeMap<u32, Value>")]
 pub struct CablePostHandshake {

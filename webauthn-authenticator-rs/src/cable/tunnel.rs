@@ -28,7 +28,7 @@ use crate::{
         btle::{Advertiser, FIDO_CABLE_SERVICE_U16},
         crypter::Crypter,
         discovery::{Discovery, Eid},
-        framing::{CableFrame, CablePostHandshake, MessageType, SHUTDOWN_COMMAND},
+        framing::{CableFrame, CablePostHandshake, CableFrameType, SHUTDOWN_COMMAND},
         noise::CableNoise,
         Psk, CableState,
     },
@@ -344,14 +344,14 @@ impl Token for Tunnel {
         let f = CableFrame {
             // TODO: handle protocol versions
             protocol_version: 1,
-            message_type: MessageType::Ctap,
+            message_type: CableFrameType::Ctap,
             data: cbor.to_vec(),
         };
         self.send(f).await?;
         ui.cable_status_update(CableState::WaitingForAuthenticatorResponse);
         let mut data = loop {
             let resp = self.recv().await?;
-            if resp.message_type == MessageType::Ctap {
+            if resp.message_type == CableFrameType::Ctap {
                 break resp.data;
             } else {
                 // TODO: handle these.

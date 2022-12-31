@@ -150,7 +150,7 @@ use crate::{
     cable::{
         btle::Scanner,
         discovery::Discovery,
-        framing::{MessageType, RequestType},
+        framing::{CableFrameType, RequestType},
         handshake::HandshakeV2,
         tunnel::Tunnel,
     },
@@ -334,11 +334,11 @@ where
 
         ui_callback.cable_status_update(CableState::Processing);
         match msg.message_type {
-            MessageType::Shutdown => {
+            CableFrameType::Shutdown => {
                 tunnel.close().await?;
                 return Ok(());
             }
-            MessageType::Ctap => match (handshake.request_type, msg.parse_request()?) {
+            CableFrameType::Ctap => match (handshake.request_type, msg.parse_request()?) {
                 (CableRequestType::MakeCredential, RequestType::MakeCredential(mc))
                 | (CableRequestType::DiscoverableMakeCredential, RequestType::MakeCredential(mc)) =>
                 {
@@ -376,7 +376,7 @@ where
     tunnel
         .send(framing::CableFrame {
             protocol_version: 1,
-            message_type: MessageType::Ctap,
+            message_type: CableFrameType::Ctap,
             data: resp,
         })
         .await?;
