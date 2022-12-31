@@ -70,6 +70,9 @@ enum Provider {
     /// [webauthn_authenticator_rs::cable] documentation for more information.
     Cable,
 
+    #[cfg(feature = "macos")]
+    Macos,
+
     #[cfg(feature = "u2fhid")]
     /// Mozilla webauthn-authenticator-rs provider, supporting USB HID only.
     Mozilla,
@@ -114,6 +117,8 @@ impl Provider {
                     })
                     .unwrap(),
             ),
+            #[cfg(feature = "macos")]
+            Provider::Macos => Box::new(webauthn_authenticator_rs::macos::Macos::default()),
             #[cfg(feature = "u2fhid")]
             Provider::Mozilla => Box::new(webauthn_authenticator_rs::u2fhid::U2FHid::default()),
             #[cfg(feature = "win10")]
