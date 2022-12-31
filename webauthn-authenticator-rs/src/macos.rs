@@ -9,7 +9,10 @@ use icrate::objc2::rc::{Owned, Ownership, Shared};
 use icrate::objc2::runtime::{Class, Protocol};
 use icrate::objc2::{declare_class, extern_protocol, msg_send, msg_send_id, Encode};
 use icrate::objc2::{rc::Id, ClassType, ConformsTo, ProtocolType};
-use icrate::AppKit::{NSApplication, NSWindow};
+use icrate::AppKit::{
+    NSApp, NSApplication, NSBackingStoreBuffered, NSColor, NSWindow, NSWindowStyleMaskClosable,
+    NSWindowStyleMaskMiniaturizable, NSWindowStyleMaskResizable, NSWindowStyleMaskTitled,
+};
 use icrate::AuthenticationServices::{
     ASAuthorization, ASAuthorizationController, ASAuthorizationControllerDelegate,
     ASAuthorizationControllerPresentationContextProviding, ASAuthorizationCredential,
@@ -18,7 +21,7 @@ use icrate::AuthenticationServices::{
     ASAuthorizationSecurityKeyPublicKeyCredentialProvider, ASCOSEAlgorithmIdentifierES256,
     ASPresentationAnchor, ASPublicKeyCredential,
 };
-use icrate::Foundation::{NSArray, NSData, NSObject, NSRunLoop, NSString};
+use icrate::Foundation::{CGPoint, CGSize, NSArray, NSData, NSObject, NSRect, NSRunLoop, NSString};
 use webauthn_rs_proto::{
     AuthenticatorAssertionResponseRaw, AuthenticatorAttestationResponseRaw, PublicKeyCredential,
     PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
@@ -29,9 +32,9 @@ pub struct Macos {}
 
 impl Default for Macos {
     fn default() -> Self {
-        trace!("starting runloop");
-        unsafe { NSRunLoop::currentRunLoop().run() };
-        trace!("started runloop");
+        // trace!("starting runloop");
+        // unsafe { NSRunLoop::currentRunLoop().run() };
+        // trace!("started runloop");
         Self {}
     }
 }
@@ -129,9 +132,26 @@ declare_class!(
         ) -> *mut ASPresentationAnchor {
             // TODO: this is a hacky workaround until we can return [Id<_,_>]  from within the [cdeclare_class!] macro
             trace!("giving presentation anchor");
-            let window = NSApplication::sharedApplication()
-                .mainWindow()
-                .expect("application didn't have a main window");
+            let window = match NSApplication::sharedApplication().mainWindow() {
+                Some(window) => window,
+                None => {
+                    trace!("had no main application window, providing one now");
+                    let obj = NSWindow::alloc();
+                    icrate::AppKit::NSWindow::initWithContentRect_styleMask_backing_defer(
+                        obj,
+                        NSRect::new(CGPoint::ZERO, CGSize::new(300., 300.)),
+                        NSWindowStyleMaskTitled
+                            | NSWindowStyleMaskClosable
+                            | NSWindowStyleMaskResizable
+                            | NSWindowStyleMaskMiniaturizable,
+                        NSBackingStoreBuffered,
+                        false,
+                    )
+                }
+            };
+            window.center();
+            window.setBackgroundColor(Some(&NSColor::whiteColor()));
+            window.orderFrontRegardless();
             Id::as_mut_ptr(&mut Id::from_shared(Id::into_super(Id::into_super(window))))
         }
     }
@@ -217,6 +237,14 @@ impl AuthenticatorBackend for Macos {
         };
 
         unsafe { auth_controller.performRequests() };
+
+        trace!("going to start runloop");
+
+        #[cfg(feature = "macos")]
+        {
+            trace!("going to run application");
+            unsafe { NSApplication::sharedApplication().run() };
+        }
 
         trace!("about to wait for semaphore");
 

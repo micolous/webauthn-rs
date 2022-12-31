@@ -6,6 +6,7 @@ use std::io::{stdin, stdout, Write};
 
 use clap::{Args, Parser, Subcommand};
 use futures::executor::block_on;
+use icrate::AppKit::NSApplication;
 use webauthn_authenticator_rs::ctap2::CtapAuthenticator;
 use webauthn_authenticator_rs::prelude::{Url, WebauthnCError};
 use webauthn_authenticator_rs::softtoken::{SoftToken, SoftTokenFile};
@@ -192,7 +193,13 @@ async fn main() {
             )
             .unwrap();
 
-        let r = u
+    // #[cfg(feature = "macos")]
+    // {
+    //     trace!("going to run application");
+    //     unsafe { NSApplication::sharedApplication().run() };
+    // }
+
+    let r = u
             .perform_auth(
                 Url::parse("https://localhost:8080").unwrap(),
                 chal.public_key,
