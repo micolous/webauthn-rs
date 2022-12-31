@@ -21,7 +21,9 @@ use icrate::AuthenticationServices::{
     ASAuthorizationSecurityKeyPublicKeyCredentialProvider, ASCOSEAlgorithmIdentifierES256,
     ASPresentationAnchor, ASPublicKeyCredential,
 };
-use icrate::Foundation::{CGPoint, CGSize, NSArray, NSData, NSObject, NSRect, NSRunLoop, NSString};
+use icrate::Foundation::{
+    CGPoint, CGSize, NSArray, NSData, NSError, NSObject, NSRect, NSRunLoop, NSString,
+};
 use webauthn_rs_proto::{
     AuthenticatorAssertionResponseRaw, AuthenticatorAttestationResponseRaw, PublicKeyCredential,
     PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
@@ -110,6 +112,17 @@ declare_class!(
                 Some(authorization.credential()),
             );
             self.semaphore.signal();
+        }
+
+        #[allow(non_snake_case)]
+        #[method(authorizationController:didCompleteWithError:)]
+        unsafe fn authorizationController_didCompleteWithError(
+            &self,
+            _controller: &ASAuthorizationController,
+            error: &NSError,
+        ) {
+            trace!("authorizationController:didCompleteWithError");
+            trace!("{error}");
         }
     }
 );
@@ -241,10 +254,8 @@ impl AuthenticatorBackend for Macos {
         trace!("going to start runloop");
 
         #[cfg(feature = "macos")]
-        {
-            trace!("going to run application");
-            unsafe { NSApplication::sharedApplication().run() };
-        }
+        trace!("going to run application");
+        unsafe { NSApplication::sharedApplication().run() };
 
         trace!("about to wait for semaphore");
 

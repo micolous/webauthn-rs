@@ -193,12 +193,6 @@ async fn main() {
             )
             .unwrap();
 
-    // #[cfg(feature = "macos")]
-    // {
-    //     trace!("going to run application");
-    //     unsafe { NSApplication::sharedApplication().run() };
-    // }
-
     let r = u
             .perform_auth(
                 Url::parse("https://localhost:8080").unwrap(),
