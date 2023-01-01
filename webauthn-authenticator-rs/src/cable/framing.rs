@@ -12,7 +12,7 @@ use crate::{
 ///
 /// Not used for protocol version 0
 #[repr(u8)]
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CableFrameType {
     /// caBLE shutdown message
     Shutdown = 0,

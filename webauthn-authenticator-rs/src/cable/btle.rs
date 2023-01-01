@@ -134,3 +134,7 @@ impl Scanner {
         Ok(rx)
     }
 }
+
+impl Drop for Scanner {
+    fn drop(&mut self) {}
+}

@@ -119,7 +119,7 @@ impl CipherState {
                 k,
                 Some(&nonce),
                 aad,
-                padded.as_ref().map(Vec::as_slice).unwrap_or(pt),
+                padded.as_deref().unwrap_or(pt),
                 &mut tag,
             )?;
             encrypted.reserve(16);
