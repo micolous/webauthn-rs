@@ -27,10 +27,9 @@ use webauthn_rs_proto::AuthenticatorTransport;
 use crate::{
     cable::{
         btle::{Advertiser, FIDO_CABLE_SERVICE_U16},
-        crypter::Crypter,
         discovery::{Discovery, Eid},
         framing::{CableFrame, CableFrameType, SHUTDOWN_COMMAND},
-        noise::CableNoise,
+        noise::{CableNoise, Crypter},
         CableState, Psk,
     },
     crypto::get_group,
@@ -118,7 +117,10 @@ impl Tunnel {
             HeaderValue::from_static("fido.cable"),
         );
         let origin = format!("wss://{}", uri.host().unwrap_or_default());
-        headers.insert("Origin", HeaderValue::from_str(&origin).map_err(|_| WebauthnCError::Internal)?);
+        headers.insert(
+            "Origin",
+            HeaderValue::from_str(&origin).map_err(|_| WebauthnCError::Internal)?,
+        );
 
         trace!(?request);
         let (stream, response) = connect_async(request).await.map_err(|e| {
@@ -152,9 +154,7 @@ impl Tunnel {
         let (noise, handshake_message) =
             CableNoise::build_initiator(Some(local_identity), psk, None)?;
         trace!(">>> {:02x?}", &handshake_message);
-        stream
-            .send(Message::Binary(handshake_message))
-            .await?;
+        stream.send(Message::Binary(handshake_message)).await?;
 
         // Handshake sent, get response
         ui.cable_status_update(CableState::WaitingForAuthenticatorResponse);
@@ -365,7 +365,7 @@ impl Token for Tunnel {
                     return Err(WebauthnCError::Closed);
                 }
             };
-            
+
             if resp.message_type == CableFrameType::Ctap {
                 break resp.data;
             } else {
@@ -443,7 +443,7 @@ impl TryFrom<BTreeMap<u32, Value>> for CablePostHandshake {
 impl From<CablePostHandshake> for BTreeMap<u32, Value> {
     fn from(h: CablePostHandshake) -> Self {
         let mut o = BTreeMap::new();
-        
+
         if let Ok(info) = to_vec_packed(&h.info) {
             o.insert(0x01, Value::Bytes(info));
         }

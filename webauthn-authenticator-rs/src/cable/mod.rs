@@ -130,7 +130,6 @@
 #[allow(rustdoc::private_intra_doc_links)]
 mod base10;
 mod btle;
-mod crypter;
 mod discovery;
 mod framing;
 mod handshake;

@@ -64,6 +64,8 @@ pub enum WebauthnCError {
     /// has been closed.
     Closed,
     WebsocketError(String),
+    /// The value of the nonce for this object has exceeded the limit.
+    NonceOverflow,
 }
 
 #[cfg(feature = "nfc")]
