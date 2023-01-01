@@ -126,7 +126,7 @@ impl<T: AuthenticatorBackendHashedClientData> AuthenticatorBackend for T {
 /// not be identical to what the authenticator actually returned, as it is
 /// subject to deserialisation and conversion to and from another structure used
 /// by [AuthenticatorBackend].
-pub(crate) fn perform_register_with_request(
+pub fn perform_register_with_request(
     backend: &mut impl AuthenticatorBackendHashedClientData,
     request: MakeCredentialRequest,
     timeout_ms: u32,
@@ -168,7 +168,7 @@ pub(crate) fn perform_register_with_request(
 /// not be identical to what the authenticator actually returned, as it is
 /// subject to deserialisation and conversion to and from another structure used
 /// by [AuthenticatorBackend].
-pub(crate) fn perform_auth_with_request(
+pub fn perform_auth_with_request(
     backend: &mut impl AuthenticatorBackendHashedClientData,
     request: GetAssertionRequest,
     timeout_ms: u32,

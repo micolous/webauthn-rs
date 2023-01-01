@@ -54,6 +54,7 @@ pub enum WebauthnCError {
     /// The card reported as a PC/SC storage card, rather than a smart card.
     StorageCard,
     InvalidCableUrl,
+    #[cfg(feature = "cable")]
     Base10(crate::cable::DecodeError),
     BluetoothError(String),
     NoBluetoothAdapter,
@@ -95,12 +96,14 @@ impl From<openssl::error::ErrorStack> for WebauthnCError {
     }
 }
 
+#[cfg(feature = "cable")]
 impl From<crate::cable::DecodeError> for WebauthnCError {
     fn from(v: crate::cable::DecodeError) -> Self {
         Self::Base10(v)
     }
 }
 
+#[cfg(feature = "bluetooth")]
 impl From<btleplug::Error> for WebauthnCError {
     fn from(v: btleplug::Error) -> Self {
         Self::BluetoothError(v.to_string())

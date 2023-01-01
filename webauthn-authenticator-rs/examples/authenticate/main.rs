@@ -4,7 +4,6 @@ extern crate tracing;
 use std::io::{stdin, stdout, Write};
 
 use futures::executor::block_on;
-use webauthn_authenticator_rs::cable::connect_cable_authenticator;
 use webauthn_authenticator_rs::ctap2::CtapAuthenticator;
 use webauthn_authenticator_rs::prelude::Url;
 use webauthn_authenticator_rs::softtoken::SoftToken;
@@ -40,10 +39,12 @@ fn select_transport<'a, U: UiCallback>(ui: &'a U) -> impl AuthenticatorBackend +
 enum Provider {
     SoftToken,
     CTAP,
+    #[cfg(feature = "cable")]
     Cable,
 }
 
 impl Provider {
+    #[allow(unused_variables)]
     async fn connect_provider<'a, U: UiCallback>(
         &self,
         request_type: CableRequestType,
@@ -52,7 +53,8 @@ impl Provider {
         match self {
             Provider::SoftToken => Box::new(SoftToken::new().unwrap().0),
             Provider::CTAP => Box::new(select_transport(ui)),
-            Provider::Cable => Box::new(connect_cable(request_type, ui).await),
+            #[cfg(feature = "cable")]
+            Provider::Cable => Box::new(webauthn_authenticator_rs::cable::connect_cable_authenticator(request_type, ui).await.unwrap()),
         }
     }
 
@@ -61,16 +63,10 @@ impl Provider {
         match self {
             SoftToken => "SoftToken",
             CTAP => "CTAP",
+            #[cfg(feature = "cable")]
             Cable => "Cable",
         }
     }
-}
-
-async fn connect_cable<'a, U: UiCallback>(
-    request_type: CableRequestType,
-    ui: &'a U,
-) -> impl AuthenticatorBackend + 'a {
-    connect_cable_authenticator(request_type, ui).await.unwrap()
 }
 
 fn select_provider() -> Provider {
@@ -85,7 +81,12 @@ fn select_provider() -> Provider {
     // providers.push(("Windows 10", |_| {
     //     Box::new(webauthn_authenticator_rs::win10::Win10::default())
     // }));
-    let providers = [Provider::SoftToken, Provider::CTAP, Provider::Cable];
+    let providers = [
+        Provider::SoftToken, 
+        Provider::CTAP, 
+        #[cfg(feature = "cable")]
+        Provider::Cable,
+    ];
 
     if providers.is_empty() {
         panic!("oops, no providers available in this build!");

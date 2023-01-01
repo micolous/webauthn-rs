@@ -42,11 +42,11 @@ pub mod error;
 pub mod softpasskey;
 pub mod softtoken;
 pub mod transport;
-pub mod ui;
 pub mod types;
+pub mod ui;
 mod util;
 
-// TODO: feature
+#[cfg(feature = "cable")]
 pub mod cable;
 
 #[cfg(feature = "nfc")]
@@ -60,6 +60,10 @@ pub mod u2fhid;
 
 #[cfg(feature = "win10")]
 pub mod win10;
+
+pub use crate::authenticator_hashed::{
+    perform_auth_with_request, perform_register_with_request, AuthenticatorBackendHashedClientData,
+};
 
 pub struct WebauthnAuthenticator<T>
 where

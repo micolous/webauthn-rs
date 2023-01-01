@@ -1,3 +1,4 @@
+#[cfg(feature = "qrcode")]
 use qrcode::{render::unicode::Dense1x2, QrCode};
 use std::fmt::Debug;
 use std::io::{stderr, Write};
@@ -71,13 +72,6 @@ impl UiCallback for Cli {
     }
 
     fn cable_qr_code(&self, request_type: CableRequestType, url: String) {
-        let qr = QrCode::new(&url).unwrap();
-
-        let code = qr
-            .render::<Dense1x2>()
-            .dark_color(Dense1x2::Light)
-            .light_color(Dense1x2::Dark)
-            .build();
         match request_type {
             CableRequestType::DiscoverableMakeCredential | CableRequestType::MakeCredential => {
                 println!("Scan the QR code with your mobile device to create a new credential with caBLE:");
@@ -87,7 +81,24 @@ impl UiCallback for Cli {
             }
         }
         println!("This feature requires Android with Google Play, or iOS 16 or later.");
-        println!("{}", code);
+
+        #[cfg(feature = "qrcode")]
+        {
+            let qr = QrCode::new(&url).unwrap();
+
+            let code = qr
+                .render::<Dense1x2>()
+                .dark_color(Dense1x2::Light)
+                .light_color(Dense1x2::Dark)
+                .build();
+
+            println!("{}", code);
+        }
+
+        #[cfg(not(feature = "qrcode"))]
+        {
+            println!("QR code support not available in this build!")
+        }
         println!("{}", url);
     }
 
