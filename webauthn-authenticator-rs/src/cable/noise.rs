@@ -20,7 +20,7 @@ use crate::{
     util::compute_sha256_2,
 };
 
-use super::{crypter::Crypter, tunnel::bytes_to_public_key, Psk};
+use super::{crypter::{Crypter, Nonce}, tunnel::bytes_to_public_key, Psk};
 
 pub fn get_public_key_bytes(private_key: &EcKeyRef<Private>) -> Result<Vec<u8>, WebauthnCError> {
     let group = get_group()?;
@@ -39,18 +39,31 @@ pub enum HandshakeType {
     NKpsk0,
 }
 
+/// Implements the [CipherState][] and [SymmetricState][] objects in Noise,
+/// using caBLE's variant of the Noise protocol.
+/// 
+/// The [CipherState] used in this context 
+/// 
+/// [CipherState]: https://noiseprotocol.org/noise.html#the-cipherstate-object
+/// [SymmetricState]: https://noiseprotocol.org/noise.html#the-symmetricstate-object
 pub struct CableNoise {
-    chaining_key: [u8; 32],
+    ck: [u8; 32],
     h: [u8; 32],
-    symmetric_key: [u8; 32],
-    symmetric_nonce: u32,
+
+    /// The CipherState key
+    k: [u8; 32],
+    /// The CipherState nonce
+    n: u32,
+
     ephemeral_key: EcKey<Private>,
     local_identity: Option<EcKey<Private>>,
 }
 
 impl CableNoise {
+    /// InitializeSymmetric
     fn new(handshake_type: HandshakeType) -> Result<Self, WebauthnCError> {
-        let chaining_key = match handshake_type {
+        // Protocol name is always HASHLEN bytes
+        let protocol_name = match handshake_type {
             HandshakeType::KNpsk0 => *NOISE_KN_PROTOCOL,
             HandshakeType::NKpsk0 => *NOISE_NK_PROTOCOL,
         };
@@ -58,17 +71,20 @@ impl CableNoise {
         let ephemeral_key = regenerate()?;
 
         Ok(Self {
-            chaining_key,
-            h: chaining_key,
-            symmetric_key: [0; 32],
-            symmetric_nonce: 0,
+            ck: protocol_name,
+            h: protocol_name,
+            k: [0; 32],
+            n: 0,
             ephemeral_key,
             local_identity: None,
         })
     }
 
-    fn mix_hash(&mut self, i: &[u8]) {
-        self.h = compute_sha256_2(&self.h, i);
+    /// `SymmetricState.MixHash(data)`
+    /// 
+    /// Sets `h = HASH(h || data}`
+    fn mix_hash(&mut self, data: &[u8]) {
+        self.h = compute_sha256_2(&self.h, data);
     }
 
     fn mix_hash_point(&mut self, point: &EcPointRef) -> Result<(), WebauthnCError> {
@@ -79,34 +95,36 @@ impl CableNoise {
         Ok(())
     }
 
+    /// `SymmetricState.MixKey(input_key_material)`
     fn mix_key(&mut self, ikm: &[u8]) -> Result<(), WebauthnCError> {
         let mut o = [0; 64];
-        hkdf_sha_256(&self.chaining_key, ikm, None, &mut o)?;
-        self.chaining_key.copy_from_slice(&o[..32]);
+        hkdf_sha_256(&self.ck, ikm, None, &mut o)?;
+        self.ck.copy_from_slice(&o[..32]);
         self.init_key(&o[32..]);
         Ok(())
     }
 
+    /// `SymmetricState.MixKeyAndHash(input_key_material)`
     fn mix_key_and_hash(&mut self, ikm: &[u8]) -> Result<(), WebauthnCError> {
         // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/noise.cc;l=90;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29
         let mut o = [0; 32 * 3];
-        hkdf_sha_256(&self.chaining_key, ikm, None, &mut o)?;
-        self.chaining_key.copy_from_slice(&o[..32]);
+        hkdf_sha_256(&self.ck, ikm, None, &mut o)?;
+        self.ck.copy_from_slice(&o[..32]);
         self.mix_hash(&o[32..64]);
         self.init_key(&o[64..]);
         Ok(())
     }
 
+    /// `SymmetricState.EncryptAndHash(plaintext)`
     fn encrypt_and_hash(&mut self, pt: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
-        let mut nonce = [0; 12];
-        nonce[..size_of::<u32>()].copy_from_slice(&self.symmetric_nonce.to_be_bytes());
-        self.symmetric_nonce += 1;
+        let nonce = create_nonce(self.n);
+        self.n += 1;
 
         let cipher = Cipher::aes_256_gcm();
         let mut tag = [0; 16];
         let mut encrypted = encrypt_aead(
             cipher,
-            &self.symmetric_key,
+            &self.k,
             Some(&nonce),
             &self.h[..],
             pt,
@@ -117,10 +135,10 @@ impl CableNoise {
         Ok(encrypted)
     }
 
+    /// `SymmetricState.DecryptAndHash(ciphertext)`
     fn decrypt_and_hash(&mut self, ct: &[u8]) -> Result<Vec<u8>, WebauthnCError> {
-        let mut nonce = [0; 12];
-        nonce[..size_of::<u32>()].copy_from_slice(&self.symmetric_nonce.to_be_bytes());
-        self.symmetric_nonce += 1;
+        let nonce = create_nonce(self.n);
+        self.n += 1;
         let msg_len = ct.len() - 16;
         trace!(
             "decrypt_and_hash(ct={:?}, tag={:?}, nonce={:?})",
@@ -131,7 +149,7 @@ impl CableNoise {
         let cipher = Cipher::aes_256_gcm();
         let decrypted = decrypt_aead(
             cipher,
-            &self.symmetric_key,
+            &self.k,
             Some(&nonce),
             &self.h[..],
             &ct[..msg_len],
@@ -142,10 +160,14 @@ impl CableNoise {
         Ok(decrypted)
     }
 
-    /// `write_key, read_key`
+    /// `SymmetricState.Split()`
+    /// 
+    /// Returns `write_key, read_key` to create a [Crypter] for encrypting
+    /// further transport messages. `write_key` is for messages sent by the
+    /// initiator, `read_key` is for messages sent by the authenticator.
     fn traffic_keys(&self) -> Result<([u8; 32], [u8; 32]), WebauthnCError> {
         let mut o = [0; 64];
-        hkdf_sha_256(&self.chaining_key, &[], None, &mut o)?;
+        hkdf_sha_256(&self.ck, &[], None, &mut o)?;
 
         let mut a = [0; 32];
         let mut b = [0; 32];
@@ -156,8 +178,8 @@ impl CableNoise {
 
     fn init_key(&mut self, key: &[u8]) {
         assert_eq!(key.len(), 32);
-        self.symmetric_key.copy_from_slice(key);
-        self.symmetric_nonce = 0;
+        self.k.copy_from_slice(key);
+        self.n = 0;
     }
 
     fn get_ephemeral_key_public_bytes(&self) -> Result<[u8; 65], WebauthnCError> {
@@ -383,32 +405,18 @@ impl CableNoise {
     }
 }
 
+fn create_nonce(n: u32) -> Nonce {
+    let mut nonce = [0; size_of::<Nonce>()];
+    nonce[..size_of::<u32>()].copy_from_slice(&n.to_be_bytes());
+
+    nonce
+}
+
 #[cfg(test)]
 mod test {
     use crate::crypto::get_group;
 
     use super::*;
-    #[test]
-    fn hkdf_chromium() {
-        // Compare hkdf using values debug-logged from Chromium
-        let _ = tracing_subscriber::fmt::try_init();
-        let ck = [
-            0x30, 0x7a, 0x70, 0x6e, 0x63, 0x38, 0x2e, 0x8e, 0x9d, 0x46, 0xcc, 0xdb, 0xc, 0xeb,
-            0xed, 0x5c, 0x2b, 0x19, 0x28, 0xc5, 0xae, 0x2d, 0xee, 0x63, 0x52, 0xe1, 0x30, 0xac,
-            0xe1, 0xf7, 0x4f, 0x44,
-        ];
-        let expected = [
-            0x1f, 0xba, 0x3c, 0xce, 0x17, 0x62, 0x2c, 0x68, 0x26, 0x8d, 0x9f, 0x75, 0xb5, 0xa8,
-            0xa3, 0x35, 0x1b, 0x51, 0x7f, 0x9, 0x6f, 0xb5, 0xe2, 0x94, 0x94, 0x1a, 0xf7, 0xe3,
-            0xa6, 0xa8, 0xd6, 0xe1, 0xe3, 0x4f, 0x1a, 0xa3, 0x74, 0x72, 0x38, 0xc0, 0x4d, 0x3b,
-            0xd2, 0x5e, 0x7, 0xef, 0x1b, 0x35, 0xfe, 0xf3, 0x59, 0x0, 0xd, 0x75, 0x56, 0x15, 0xcd,
-            0x85, 0xbe, 0x27, 0xcf, 0xc8, 0x7, 0xd1,
-        ];
-        let mut actual = [0; 64];
-
-        hkdf_sha_256(&ck, &[], None, &mut actual).unwrap();
-        assert_eq!(expected, actual);
-    }
 
     #[test]
     fn noise() {

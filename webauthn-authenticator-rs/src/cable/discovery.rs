@@ -17,7 +17,7 @@ use crate::{
     error::WebauthnCError,
 };
 
-type BleAdvert = [u8; 16 + 4];
+type BleAdvert = [u8; size_of::<CableEid>() + 4];
 type RoutingId = [u8; 3];
 type BleNonce = [u8; 10];
 type QrSecret = [u8; 16];
@@ -70,7 +70,7 @@ impl Discovery {
     /// Creates a [Discovery] for a given `request_type` and `qr_secret`.
     ///
     /// This method generates a random `local_identity`, and is suitable for use
-    /// by an authenticator.  See [HandshakeV2.to_discovery] for a public API.
+    /// by an authenticator.  See [HandshakeV2::to_discovery] for a public API.
     pub(super) fn new_with_qr_secret(
         request_type: CableRequestType,
         qr_secret: QrSecret,
@@ -102,8 +102,8 @@ impl Discovery {
     /// `eid_key`.
     ///
     /// Returns `Ok(None)` when the advertisement was encrypted using a
-    /// different key.
-    pub fn decrypt_advert(&self, advert: BleAdvert) -> Result<Option<Eid>, WebauthnCError> {
+    /// different key, or if the advertisement length was incorrct.
+    pub fn decrypt_advert<'a>(&self, advert: impl TryInto<&'a BleAdvert>) -> Result<Option<Eid>, WebauthnCError> {
         Eid::decrypt_advert(advert, &self.eid_key)
     }
 
@@ -127,6 +127,8 @@ impl Discovery {
         HandshakeV2::new(self.request_type, public_key, self.qr_secret)
     }
 
+    /// Waits on a [Scanner] to return a BTLE advertisement which can be
+    /// decrypted by data this [Discovery]
     pub async fn wait_for_matching_response(
         &self,
         scanner: &Scanner,
@@ -134,13 +136,7 @@ impl Discovery {
         let mut rx = scanner.scan().await?;
         while let Some(a) = rx.recv().await {
             trace!("advert: {:?}", a);
-            if a.len() != size_of::<BleAdvert>() {
-                continue;
-            }
-            let mut advert: BleAdvert = [0; size_of::<BleAdvert>()];
-            advert.copy_from_slice(a.as_ref());
-
-            if let Some(eid) = self.decrypt_advert(advert)? {
+            if let Some(eid) = self.decrypt_advert(a.as_slice())? {
                 rx.close();
                 return Ok(Some(eid));
             }
@@ -149,15 +145,15 @@ impl Discovery {
         Ok(None)
     }
 
-    /// Gets the tunnel ID associated with this [Discovery]
-    pub fn get_tunnel_id(&self) -> Result<TunnelId, WebauthnCError> {
+    /// Derives the tunnel ID associated with this [Discovery]
+    pub fn derive_tunnel_id(&self) -> Result<TunnelId, WebauthnCError> {
         let mut tunnel_id: TunnelId = [0; size_of::<TunnelId>()];
         DerivedValueType::TunnelID.derive(&self.qr_secret, &[], &mut tunnel_id)?;
         Ok(tunnel_id)
     }
 
-    /// Gets the pre-shared key associated with this [Discovery]
-    pub fn get_psk(&self, eid: &Eid) -> Result<Psk, WebauthnCError> {
+    /// Derives the pre-shared key for an [Eid] targetting this [Discovery]
+    pub fn derive_psk(&self, eid: &Eid) -> Result<Psk, WebauthnCError> {
         let mut psk: Psk = [0; size_of::<Psk>()];
         DerivedValueType::Psk.derive(&self.qr_secret, &eid.to_bytes(), &mut psk)?;
         Ok(psk)
@@ -166,7 +162,7 @@ impl Discovery {
     /// Gets the Websocket connection URI which the platform will use to connect
     /// to the authenticator.
     pub fn get_connect_uri(&self, eid: &Eid) -> Result<Uri, WebauthnCError> {
-        let tunnel_id = self.get_tunnel_id()?;
+        let tunnel_id = self.derive_tunnel_id()?;
         eid.get_connect_uri(tunnel_id).ok_or_else(|| {
             error!("Unknown WebSocket tunnel URL for {:?}", eid);
             WebauthnCError::NotSupported
@@ -179,7 +175,7 @@ impl Discovery {
         // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=170;drc=de9f16dcca1d5057ba55973fa85a5b27423d414f
         get_domain(domain_id)
             .and_then(|domain| {
-                let tunnel_id = hex::encode_upper(&self.get_tunnel_id().ok()?);
+                let tunnel_id = hex::encode_upper(&self.derive_tunnel_id().ok()?);
                 Uri::builder()
                     .scheme("wss")
                     .authority(domain)
@@ -232,11 +228,24 @@ impl Eid {
     }
 
     /// Parses an [Eid] from unencrypted bytes.
-    fn from_bytes(eid: &CableEid) -> Result<Self, WebauthnCError> {
-        if eid.len() != size_of::<CableEid>() {
-            return Err(WebauthnCError::InvalidMessageLength);
+    ///
+    /// `eid` must be 16 bytes long.
+    ///
+    /// Returns `None` on other errors. This generally means the [CableEid] was
+    /// encrypted with a different key, because it was intended for a different
+    /// initiator.
+    fn from_bytes<'a>(eid: impl TryInto<&'a CableEid>) -> Option<Self> {
+        let eid: &'a CableEid = eid.try_into().ok()?;
+        let mut p = 0;
+        if eid[p] != 0 {
+            warn!(
+                "reserved bits not 0 in decrypted caBLE advertisement, got 0x{:02x}",
+                eid[p]
+            );
+            return None;
         }
-        let mut p = 1;
+
+        p += 1;
         let mut nonce: BleNonce = [0; size_of::<BleNonce>()];
         let mut q = p + size_of::<BleNonce>();
         nonce.copy_from_slice(&eid[p..q]);
@@ -248,31 +257,41 @@ impl Eid {
 
         p = q;
         q += size_of::<u16>();
-        let tunnel_server_id = u16::from_le_bytes(
-            eid[p..q]
-                .try_into()
-                .map_err(|_| WebauthnCError::InvalidMessageLength)?,
-        );
+        let tunnel_server_id = u16::from_le_bytes(eid[p..q].try_into().ok()?);
 
-        Ok(Self {
+        let eid = Self {
             nonce,
             routing_id,
             tunnel_server_id,
-        })
+        };
+
+        // Invalid tunnel server ID is a parse failure
+        eid.get_domain().is_some().then_some(eid)
     }
 
-    /// Decrypts and parses a BLE advertisement with a given key.
+    /// Decrypts and parses a BTLE advertisement with a given key.
     ///
-    /// Returns `Ok(None)` if `advert` was not decryptable with `key`, or the
-    /// resulting payload was invalid.
-    fn decrypt_advert(advert: BleAdvert, key: &EidKey) -> Result<Option<Eid>, WebauthnCError> {
+    /// Returns `Ok(None)` if `advert` was the wrong length, `advert` was not
+    /// decryptable (or signed) with `key`, the resulting payload was invalid.
+    /// 
+    /// See [Discovery::decrypt_advert] for a public API.
+    fn decrypt_advert<'a>(advert: impl TryInto<&'a BleAdvert>, key: &EidKey) -> Result<Option<Eid>, WebauthnCError> {
+        let advert: &BleAdvert = match advert.try_into() {
+            Ok(a) => a,
+            Err(_) => {
+                // We want to return `None" rather than error here, because BTLE
+                // adverts may be any length. This lets us ignore junk
+                // advertisements sent with caBLE UUIDs.
+                warn!("Incorrect caBLE advertisement length");
+                return Ok(None);
+            },
+        };
+
         trace!("Decrypting {:?} with key {:?}", advert, key);
         let signing_key = PKey::hmac(&key[32..64])?;
         let mut signer = Signer::new(MessageDigest::sha256(), &signing_key)?;
+        let calculated_hmac = signer.sign_oneshot_to_vec(&advert[..16])?;
 
-        let mut calculated_hmac: [u8; 32] = [0; 32];
-        signer.update(&advert[..16])?;
-        signer.sign(&mut calculated_hmac)?;
         if calculated_hmac[..4] != advert[16..20] {
             warn!("incorrect HMAC when decrypting caBLE advertisement");
             return Ok(None);
@@ -280,28 +299,7 @@ impl Eid {
 
         // HMAC checks out, try to decrypt
         let plaintext = decrypt(&key[..32], None, &advert[..16])?;
-        let plaintext: Option<CableEid> = plaintext.try_into().ok();
-
-        Ok(match plaintext {
-            Some(plaintext) => {
-                if plaintext[0] != 0 {
-                    warn!("reserved bits not 0 in decrypted caBLE advertisement");
-                    return Ok(None);
-                }
-
-                let eid = Eid::from_bytes(&plaintext)?;
-                if eid.get_domain().is_none() {
-                    return Ok(None);
-                }
-
-                trace!(?eid);
-                Some(eid)
-            }
-            None => {
-                warn!("decrypt fail");
-                None
-            }
-        })
+        Ok(Eid::from_bytes(plaintext.as_slice()))
     }
 
     /// Converts this [Eid] into an encrypted payload for BLE advertisements.
@@ -312,12 +310,12 @@ impl Eid {
         let mut crypted: BleAdvert = [0; size_of::<BleAdvert>()];
         crypted[..size_of::<CableEid>()].copy_from_slice(&c);
 
+        // Sign the advertisement with HMAC-SHA-256
         let signing_key = PKey::hmac(&key[32..64])?;
         let mut signer = Signer::new(MessageDigest::sha256(), &signing_key)?;
+        let calculated_hmac = signer.sign_oneshot_to_vec(&crypted[..16])?;
 
-        let mut calculated_hmac: [u8; 32] = [0; 32];
-        signer.update(&crypted[..16])?;
-        signer.sign(&mut calculated_hmac)?;
+        // Take the first 4 bytes of the signature
         crypted[size_of::<CableEid>()..].copy_from_slice(&calculated_hmac[..4]);
 
         Ok(crypted)
@@ -366,6 +364,41 @@ mod test {
     use super::*;
 
     #[test]
+    fn eid_from_bytes() {
+        let mut eid = [
+            // Reserved byte
+            0, //
+            // Nonce
+            9, 139, 115, 107, 54, 169, 140, 185, 164, 47, //
+            // Routing ID
+            9, 10, 11, //
+            // Tunnel ID
+            255, 1,
+        ];
+        let expected = Eid {
+            tunnel_server_id: 0x01FF,
+            routing_id: [9, 10, 11],
+            nonce: [9, 139, 115, 107, 54, 169, 140, 185, 164, 47],
+        };
+        assert_eq!(Some(expected), Eid::from_bytes(&eid));
+
+        // Reading wrong lengths should fail
+        for x in 0..15 {
+            assert!(Eid::from_bytes(&eid[..x]).is_none());
+        }
+        assert!(Eid::from_bytes(&[0; 17][..]).is_none());
+
+        // Setting tunnel server ID to invalid value should fail
+        eid[15] = 0;
+        assert!(Eid::from_bytes(&eid).is_none());
+
+        // Setting reserved byte should fail
+        eid[15] = 1;
+        eid[0] = 1;
+        assert!(Eid::from_bytes(&eid).is_none());
+    }
+
+    #[test]
     fn encrypt_decrypt() {
         let _ = tracing_subscriber::fmt::try_init();
 
@@ -376,16 +409,26 @@ mod test {
             nonce: [9, 139, 115, 107, 54, 169, 140, 185, 164, 47],
         };
 
-        let mut advert = d.encrypt_advert(&c).unwrap();
+        let advert = d.encrypt_advert(&c).unwrap();
 
-        let c2 = d.decrypt_advert(advert.clone()).unwrap().unwrap();
+        let c2 = d.decrypt_advert(&advert).unwrap().unwrap();
         // decrypting gets back the original value
         assert_eq!(c, c2);
 
         // Changing bits fails
-        advert[0] ^= 1;
-        let decrypted = d.decrypt_advert(advert).unwrap();
-        assert!(decrypted.is_none());
+        let mut bad = advert.clone();
+        bad[0] ^= 1;
+        assert!(d.decrypt_advert(&bad).unwrap().is_none());
+        
+        // Changing HMAC fails
+        let mut bad = advert.clone();
+        bad[size_of::<CableEid>()] ^= 1;
+        assert!(d.decrypt_advert(&bad).unwrap().is_none());
+
+        // Decrypting an advert with the wrong length returns None, not error
+        for x in 0..(advert.len() - 1) {
+            assert!(d.decrypt_advert(&advert[..x]).unwrap().is_none());
+        }
     }
 
     #[test]
@@ -434,7 +477,7 @@ mod test {
             .unwrap();
         trace!("eid_key = {:?}", eid_key);
 
-        let r = discovery.decrypt_advert(advert).unwrap().unwrap();
+        let r = discovery.decrypt_advert(&advert).unwrap().unwrap();
         trace!("eid: {:?}", r);
 
         let expected = Eid {

@@ -233,7 +233,7 @@ impl Tunnel {
             return Err(WebauthnCError::Internal);
         };
 
-        let psk = discovery.get_psk(&eid)?;
+        let psk = discovery.derive_psk(&eid)?;
         let encrypted_eid = discovery.encrypt_advert(&eid)?;
         advertiser.start_advertising(FIDO_CABLE_SERVICE_U16, &encrypted_eid)?;
 

@@ -224,7 +224,7 @@ pub async fn connect_cable_authenticator<'a, U: UiCallback + 'a>(
     ui_callback.dismiss_qr_code();
     drop(scanner);
 
-    let psk = disco.get_psk(&eid)?;
+    let psk = disco.derive_psk(&eid)?;
 
     let connect_url = disco.get_connect_uri(&eid)?;
     let tun = Tunnel::connect_initiator(

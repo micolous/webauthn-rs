@@ -86,7 +86,7 @@
 //! * `key_manager` will connect to a key, pull hardware information, and let
 //!   you reconfigure the key (reset, PIN, fingerprints, etc.)
 //!
-//! * `authenticate` works with any [AuthenticatorBackend], including
+//! * `authenticate` works with any [crate::AuthenticatorBackend], including
 //!   [CtapAuthenticator].
 //!
 //! ## Device-specific issues

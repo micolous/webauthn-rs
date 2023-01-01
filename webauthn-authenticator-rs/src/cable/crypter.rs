@@ -5,11 +5,29 @@ use openssl::symm::{decrypt_aead, encrypt_aead, Cipher};
 use crate::error::WebauthnCError;
 
 pub type EncryptionKey = [u8; 32];
+pub type Nonce = [u8; 12];
 const OLD_ADDITIONAL_BYTES: [u8; 1] = [/* version */ 2];
 const NEW_ADDITIONAL_BYTES: [u8; 0] = [];
 const PADDING_MUL: usize = 32;
 
-/// Encrypted message passing channel for caBLE
+/// Encrypted message passing channel for caBLE.
+///
+/// This is a pair of [CipherState] objects, one used by the initiator, one used
+/// by the authenticator. Messages are encrypted with AES-GCM.
+///
+/// This has two different construction modes: "old" and "new". This object
+/// defaults to "old" mode, and will switch to "new" mode automatically if the
+/// first message decrypted was sent in "new" mode.
+///
+/// "new" mode acts as a pair of regular Noise [CipherState][] objects, with
+/// padding.
+///
+/// "old" mode differences:
+///
+/// * it always sets an additional byte of `0x02`.
+/// * it encodes the nonce as little-endian, rather than big-endian.
+///
+/// [CipherState]: https://noiseprotocol.org/noise.html#the-cipherstate-object
 #[derive(Default)]
 pub struct Crypter {
     read_key: EncryptionKey,
@@ -117,12 +135,14 @@ impl Crypter {
         Ok(decrypted)
     }
 
-    fn construct_nonce(&self, counter: u32) -> [u8; 12] {
-        let mut nonce = [0; 12];
-        if self.new_construction {
-            nonce[12 - size_of::<u32>()..].copy_from_slice(&counter.to_be_bytes());
-        } else {
-            nonce[..size_of::<u32>()].copy_from_slice(&counter.to_le_bytes());
+    fn construct_nonce(&self, counter: u32) -> Nonce {
+        let mut nonce = [0; size_of::<Nonce>()];
+        // 96 bit nonce, last 4 bytes are big-endian nonce value
+        nonce[size_of::<Nonce>() - size_of::<u32>()..].copy_from_slice(&counter.to_be_bytes());
+
+        if !self.new_construction {
+            // 96 bit nonce, first 4 bytes are little-endian nonce value
+            nonce.reverse();
         }
         trace!(
             "new_constuction: {:?}, nonce: {:?}",

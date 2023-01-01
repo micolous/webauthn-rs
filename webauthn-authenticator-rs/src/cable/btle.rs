@@ -61,7 +61,7 @@ pub trait Advertiser {
     ///
     /// Advertisements are of the type "Service Data - 16-bit UUID" (0x16).
     ///
-    /// This should continue until [stop_advertising] is called.
+    /// This should continue until [Advertiser::stop_advertising] is called.
     fn start_advertising(
         &mut self,
         service_uuid: u16,

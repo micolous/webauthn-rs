@@ -50,16 +50,16 @@ pub const SHUTDOWN_COMMAND: CableFrame = CableFrame {
 ///
 /// ### Version 0
 ///
-/// All frames are of the type [MessageType::Ctap], and the wire format is the
+/// All frames are of the type [CableFrameType::Ctap], and the wire format is the
 /// same as CTAP 2.0.
 ///
 /// ### Version 1
 ///
-/// Version 1 adds an initial [MessageType] byte before the payload (`data`):
+/// Version 1 adds an initial [CableFrameType] byte before the payload (`data`):
 ///
-/// * [MessageType::Shutdown]: no payload
-/// * [MessageType::Ctap]: payload is CTAP 2.0 command / response
-/// * [MessageType::Update]: payload is linking information (not implemented)
+/// * [CableFrameType::Shutdown]: no payload
+/// * [CableFrameType::Ctap]: payload is CTAP 2.0 command / response
+/// * [CableFrameType::Update]: payload is linking information (not implemented)
 #[derive(Debug, PartialEq, Eq)]
 pub struct CableFrame {
     pub protocol_version: u32,
