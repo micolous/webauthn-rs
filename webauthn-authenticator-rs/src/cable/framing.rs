@@ -2,14 +2,11 @@
 
 use crate::{
     ctap2::{
-        commands::{value_to_vec_u8, MakeCredentialRequest, GetAssertionRequest},
-        CBORCommand, CBORResponse, GetInfoResponse,
+        commands::{GetAssertionRequest, MakeCredentialRequest},
+        CBORCommand, CBORResponse,
     },
     error::WebauthnCError,
 };
-use serde::Serialize;
-use serde_cbor::{ser::to_vec_packed, Value};
-use std::collections::BTreeMap;
 
 /// Prefix byte for messages sent to the authenticator
 ///
@@ -45,21 +42,21 @@ pub const SHUTDOWN_COMMAND: CableFrame = CableFrame {
 };
 
 /// caBLE request and response framing.
-/// 
+///
 /// These frames are encrypted ([Crypter][crate::cable::crypter::Crypter])
 /// and sent as binary Websocket messages.
 ///
 /// ## Protocol description
 ///
 /// ### Version 0
-/// 
+///
 /// All frames are of the type [MessageType::Ctap], and the wire format is the
 /// same as CTAP 2.0.
-/// 
+///
 /// ### Version 1
-/// 
+///
 /// Version 1 adds an initial [MessageType] byte before the payload (`data`):
-/// 
+///
 /// * [MessageType::Shutdown]: no payload
 /// * [MessageType::Ctap]: payload is CTAP 2.0 command / response
 /// * [MessageType::Update]: payload is linking information (not implemented)
@@ -104,7 +101,7 @@ impl CableFrame {
     }
 
     /// Parses a [CableFrame] (from an initiator) as a CBOR request type.
-    /// 
+    ///
     /// Returns [WebauthnCError::NotSupported] on unknown command types, or if
     /// `message_type` is not [CableFrameType::Ctap].
     pub fn parse_request(&self) -> Result<RequestType, WebauthnCError> {
@@ -113,58 +110,12 @@ impl CableFrame {
         }
         match self.data[0] {
             MakeCredentialRequest::CMD => Ok(RequestType::MakeCredential(
-                <MakeCredentialRequest as CBORResponse>::try_from(&self.data[1..])?
+                <MakeCredentialRequest as CBORResponse>::try_from(&self.data[1..])?,
             )),
             GetAssertionRequest::CMD => Ok(RequestType::GetAssertion(
-                <GetAssertionRequest as CBORResponse>::try_from(&self.data[1..])?
+                <GetAssertionRequest as CBORResponse>::try_from(&self.data[1..])?,
             )),
             _ => Err(WebauthnCError::NotSupported),
         }
-    }
-}
-
-/// Message sent by the authenticator after completing the CableNoise handshake.
-/// 
-/// <https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/fido_tunnel_device.cc;l=368-395;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29>
-///
-/// * Two protocol versions here, protocol 1 and protocol 0.
-/// * Protocol 1 has a CBOR map:
-///   * 1: GetInfoResponse bytes
-///   * 2: linking info (optional)
-/// * Protocol 0: Padded map (not implemented)
-#[derive(Debug, Clone, Serialize)]
-#[serde(try_from = "BTreeMap<u32, Value>", into = "BTreeMap<u32, Value>")]
-pub struct CablePostHandshake {
-    pub info: GetInfoResponse,
-    pub linking_info: Option<Vec<u8>>,
-}
-
-impl TryFrom<BTreeMap<u32, Value>> for CablePostHandshake {
-    type Error = WebauthnCError;
-
-    fn try_from(mut raw: BTreeMap<u32, Value>) -> Result<Self, Self::Error> {
-        // trace!("raw = {:?}", raw);
-        let info = raw
-            .remove(&0x01)
-            .and_then(|v| value_to_vec_u8(v, "0x01"))
-            .ok_or(WebauthnCError::MissingRequiredField)?;
-        let info = <GetInfoResponse as CBORResponse>::try_from(info.as_slice())?;
-
-        let linking_info = raw.remove(&0x02).and_then(|v| value_to_vec_u8(v, "0x02"));
-
-        Ok(Self { info, linking_info })
-    }
-}
-
-impl From<CablePostHandshake> for BTreeMap<u32, Value> {
-    fn from(h: CablePostHandshake) -> Self {
-        let info = to_vec_packed(&h.info).unwrap();
-        let mut o = BTreeMap::from([(0x01, Value::Bytes(info))]);
-
-        if let Some(linking_info) = h.linking_info {
-            o.insert(0x02, Value::Bytes(linking_info));
-        }
-
-        o
     }
 }

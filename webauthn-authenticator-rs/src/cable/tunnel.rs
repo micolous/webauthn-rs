@@ -10,7 +10,8 @@ use openssl::{
     ec::{EcKey, EcKeyRef, EcPoint},
     pkey::{Private, Public},
 };
-use serde_cbor::Value;
+use serde::Serialize;
+use serde_cbor::{ser::to_vec_packed, Value};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
     connect_async,
@@ -28,16 +29,20 @@ use crate::{
         btle::{Advertiser, FIDO_CABLE_SERVICE_U16},
         crypter::Crypter,
         discovery::{Discovery, Eid},
-        framing::{CableFrame, CablePostHandshake, CableFrameType, SHUTDOWN_COMMAND},
+        framing::{CableFrame, CableFrameType, SHUTDOWN_COMMAND},
         noise::CableNoise,
-        Psk, CableState,
+        CableState, Psk,
     },
-    ctap2::{commands::GetInfoResponse, CtapAuthenticator},
+    crypto::get_group,
+    ctap2::{
+        commands::{value_to_vec_u8, GetInfoResponse},
+        CBORResponse, CtapAuthenticator,
+    },
     error::CtapError,
     prelude::WebauthnCError,
     transport::Token,
     ui::UiCallback,
-    util::compute_sha256, crypto::get_group,
+    util::compute_sha256,
 };
 
 /// Well-known domains.
@@ -232,7 +237,7 @@ impl Tunnel {
         let psk = discovery.get_psk(&eid)?;
         let encrypted_eid = discovery.encrypt_advert(&eid)?;
         advertiser.start_advertising(FIDO_CABLE_SERVICE_U16, &encrypted_eid)?;
-        
+
         // Wait for initial message from initiator
         trace!("Advertising started, waiting for initiator...");
         ui.cable_status_update(CableState::WaitingForInitiatorConnection);
@@ -389,6 +394,52 @@ pub fn bytes_to_public_key(buf: &[u8]) -> Result<EcKey<Public>, WebauthnCError> 
     let mut ctx = BigNumContext::new()?;
     let point = EcPoint::from_bytes(&group, &buf, &mut ctx)?;
     Ok(EcKey::from_public_key(&group, &point)?)
+}
+
+/// Message sent by the authenticator after completing the CableNoise handshake.
+///
+/// <https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/fido_tunnel_device.cc;l=368-395;drc=38321ee39cd73ac2d9d4400c56b90613dee5fe29>
+///
+/// * Two protocol versions here, protocol 1 and protocol 0.
+/// * Protocol 1 has a CBOR map:
+///   * 1: GetInfoResponse bytes
+///   * 2: linking info (optional)
+/// * Protocol 0: Padded map (not implemented)
+#[derive(Debug, Clone, Serialize)]
+#[serde(try_from = "BTreeMap<u32, Value>", into = "BTreeMap<u32, Value>")]
+struct CablePostHandshake {
+    info: GetInfoResponse,
+    linking_info: Option<Vec<u8>>,
+}
+
+impl TryFrom<BTreeMap<u32, Value>> for CablePostHandshake {
+    type Error = WebauthnCError;
+
+    fn try_from(mut raw: BTreeMap<u32, Value>) -> Result<Self, Self::Error> {
+        // trace!("raw = {:?}", raw);
+        let info = raw
+            .remove(&0x01)
+            .and_then(|v| value_to_vec_u8(v, "0x01"))
+            .ok_or(WebauthnCError::MissingRequiredField)?;
+        let info = <GetInfoResponse as CBORResponse>::try_from(info.as_slice())?;
+
+        let linking_info = raw.remove(&0x02).and_then(|v| value_to_vec_u8(v, "0x02"));
+
+        Ok(Self { info, linking_info })
+    }
+}
+
+impl From<CablePostHandshake> for BTreeMap<u32, Value> {
+    fn from(h: CablePostHandshake) -> Self {
+        let info = to_vec_packed(&h.info).unwrap();
+        let mut o = BTreeMap::from([(0x01, Value::Bytes(info))]);
+
+        if let Some(linking_info) = h.linking_info {
+            o.insert(0x02, Value::Bytes(linking_info));
+        }
+
+        o
+    }
 }
 
 #[cfg(test)]

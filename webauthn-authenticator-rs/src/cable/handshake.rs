@@ -12,10 +12,11 @@ use std::{
 
 use crate::{
     cable::{base10, discovery::Discovery, CableRequestType},
+    crypto::get_group,
     ctap2::commands::{
         value_to_bool, value_to_string, value_to_u32, value_to_u64, value_to_vec_u8,
     },
-    error::WebauthnCError, crypto::get_group,
+    error::WebauthnCError,
 };
 
 #[derive(Serialize, Debug, Clone)]
