@@ -196,7 +196,7 @@ impl HandshakeV2 {
         let v: BTreeMap<u32, Value> =
             serde_cbor::from_slice(&payload).map_err(|_| WebauthnCError::Cbor)?;
 
-        Ok(Self::try_from(v)?)
+        Self::try_from(v)
     }
 
     /// Converts a [HandshakeV2] payload (from a QR code) into a [Discovery]

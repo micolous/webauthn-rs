@@ -84,7 +84,7 @@ impl UiCallback for Cli {
 
         #[cfg(feature = "qrcode")]
         {
-            let qr = QrCode::new(&url).unwrap();
+            let qr = QrCode::new(&url).expect("Could not create QR code");
 
             let code = qr
                 .render::<Dense1x2>()

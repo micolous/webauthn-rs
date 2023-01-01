@@ -150,7 +150,7 @@ use crate::{
     cable::{
         btle::Scanner,
         discovery::Discovery,
-        framing::{CableFrameType, RequestType},
+        framing::{CableFrameType, RequestType, SHUTDOWN_COMMAND},
         handshake::HandshakeV2,
         tunnel::Tunnel,
     },
@@ -164,7 +164,7 @@ use crate::{
 type Psk = [u8; 32];
 
 impl CableRequestType {
-    fn to_cable_string(&self) -> String {
+    fn to_cable_string(self) -> String {
         use CableRequestType::*;
         match self {
             GetAssertion => String::from("ga"),
@@ -261,6 +261,7 @@ pub async fn share_cable_authenticator<'a, U>(
     tunnel_server_id: u16,
     advertiser: &mut impl Advertiser,
     ui_callback: &'a U,
+    close_after_one_command: bool,
 ) -> Result<(), WebauthnCError>
 where
     U: UiCallback + 'a,
@@ -281,7 +282,6 @@ where
     transports.push("hybrid".to_string());
 
     let handshake = HandshakeV2::from_qr_url(url)?;
-    drop(url);
     let discovery = handshake.to_discovery()?;
 
     let mut tunnel = Tunnel::connect_authenticator(
@@ -297,62 +297,70 @@ where
     trace!("tunnel established");
     let timeout_ms = 30000;
 
-    let resp = loop {
+    loop {
         ui_callback.cable_status_update(CableState::WaitingForInitiatorCommand);
-        let msg = tunnel.recv().await?;
+        let msg = tunnel.recv().await?.ok_or(WebauthnCError::Closed)?;
 
         ui_callback.cable_status_update(CableState::Processing);
-        match msg.message_type {
+        let resp = match msg.message_type {
             CableFrameType::Shutdown => {
-                tunnel.close().await?;
-                return Ok(());
+                break;
             }
             CableFrameType::Ctap => match (handshake.request_type, msg.parse_request()?) {
                 (CableRequestType::MakeCredential, RequestType::MakeCredential(mc))
                 | (CableRequestType::DiscoverableMakeCredential, RequestType::MakeCredential(mc)) =>
                 {
-                    break perform_register_with_request(backend, mc, timeout_ms);
+                    perform_register_with_request(backend, mc, timeout_ms)
                 }
                 (CableRequestType::GetAssertion, RequestType::GetAssertion(ga)) => {
-                    break perform_auth_with_request(backend, ga, timeout_ms);
+                    perform_auth_with_request(backend, ga, timeout_ms)
                 }
                 (c, v) => {
                     error!("Unhandled command {:02x?} for {:?}", v, c);
-                    return Err(WebauthnCError::NotSupported);
+                    Err(WebauthnCError::NotSupported)
                 }
             },
+            CableFrameType::Update => {
+                warn!("Linking information is not supported, ignoring update message");
+                continue;
+            },
+
             _ => {
                 error!("unhandled command: {:?}", msg);
-                return Err(WebauthnCError::NotSupported);
+                Err(WebauthnCError::NotSupported)
             }
+        };
+
+        // Re-insert the error code as needed.
+        let resp = match resp {
+            Err(e) => match e {
+                WebauthnCError::Ctap(c) => vec![c.into()],
+                _ => vec![CtapError::Ctap1InvalidParameter.into()],
+            },
+            Ok(mut resp) => {
+                resp.reserve(1);
+                resp.insert(0, CtapError::Ok.into());
+                resp
+            }
+        };
+
+        // Send the response to the command
+        tunnel
+            .send(framing::CableFrame {
+                protocol_version: 1,
+                message_type: CableFrameType::Ctap,
+                data: resp,
+            })
+            .await?;
+
+        if close_after_one_command {
+            tunnel.send(SHUTDOWN_COMMAND).await?;
+            break;            
         }
     };
-
-    // Re-insert the error code as needed.
-    let resp = match resp {
-        Err(e) => match e {
-            WebauthnCError::Ctap(c) => vec![c.into()],
-            _ => vec![CtapError::Ctap1InvalidParameter.into()],
-        },
-        Ok(mut resp) => {
-            resp.reserve(1);
-            resp.insert(0, CtapError::Ok.into());
-            resp
-        }
-    };
-
-    // Send the response to the command
-    tunnel
-        .send(framing::CableFrame {
-            protocol_version: 1,
-            message_type: CableFrameType::Ctap,
-            data: resp,
-        })
-        .await?;
 
     // Hang up
     tunnel.close().await?;
-
     Ok(())
 }
 

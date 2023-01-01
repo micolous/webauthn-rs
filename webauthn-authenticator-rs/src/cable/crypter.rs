@@ -157,14 +157,14 @@ fn pad(msg: &[u8]) -> Vec<u8> {
     assert!(zeros < 256);
 
     let mut padded = vec![0; padded_len];
-    padded[..msg.len()].copy_from_slice(&msg);
+    padded[..msg.len()].copy_from_slice(msg);
     padded[padded_len - 1] = zeros as u8;
     padded
 }
 
 /// Unpads a message padded with [pad].
 fn unpad(msg: &mut Vec<u8>) -> Result<(), WebauthnCError> {
-    let padding_len = (msg.last().map(|l| *l).unwrap_or_default() as usize) + 1;
+    let padding_len = (msg.last().copied().unwrap_or_default() as usize) + 1;
     if padding_len > msg.len() {
         error!(
             "Invalid caBLE message (padding length {} > message length {})",

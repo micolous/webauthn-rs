@@ -34,7 +34,7 @@ type TunnelId = [u8; 16];
 enum DerivedValueType {
     EIDKey = 1,
     TunnelID = 2,
-    PSK = 3,
+    Psk = 3,
     PairedSecret = 4,
     IdentityKeySeed = 5,
     PerContactIDSecret = 6,
@@ -43,7 +43,7 @@ enum DerivedValueType {
 impl DerivedValueType {
     pub fn derive(&self, ikm: &[u8], salt: &[u8], output: &mut [u8]) -> Result<(), WebauthnCError> {
         let typ = self.to_u32().ok_or(WebauthnCError::Internal)?.to_le_bytes();
-        Ok(hkdf_sha_256(salt, ikm, Some(&typ), output)?)
+        hkdf_sha_256(salt, ikm, Some(&typ), output)
     }
 }
 
@@ -159,7 +159,7 @@ impl Discovery {
     /// Gets the pre-shared key associated with this [Discovery]
     pub fn get_psk(&self, eid: &Eid) -> Result<Psk, WebauthnCError> {
         let mut psk: Psk = [0; size_of::<Psk>()];
-        DerivedValueType::PSK.derive(&self.qr_secret, &eid.to_bytes(), &mut psk)?;
+        DerivedValueType::Psk.derive(&self.qr_secret, &eid.to_bytes(), &mut psk)?;
         Ok(psk)
     }
 
@@ -232,7 +232,10 @@ impl Eid {
     }
 
     /// Parses an [Eid] from unencrypted bytes.
-    fn from_bytes(eid: CableEid) -> Self {
+    fn from_bytes(eid: &CableEid) -> Result<Self, WebauthnCError> {
+        if eid.len() != size_of::<CableEid>() {
+            return Err(WebauthnCError::InvalidMessageLength);
+        }
         let mut p = 1;
         let mut nonce: BleNonce = [0; size_of::<BleNonce>()];
         let mut q = p + size_of::<BleNonce>();
@@ -245,13 +248,17 @@ impl Eid {
 
         p = q;
         q += size_of::<u16>();
-        let tunnel_server_id = u16::from_le_bytes(eid[p..q].try_into().unwrap());
+        let tunnel_server_id = u16::from_le_bytes(
+            eid[p..q]
+                .try_into()
+                .map_err(|_| WebauthnCError::InvalidMessageLength)?,
+        );
 
-        Self {
+        Ok(Self {
             nonce,
             routing_id,
             tunnel_server_id,
-        }
+        })
     }
 
     /// Decrypts and parses a BLE advertisement with a given key.
@@ -266,7 +273,7 @@ impl Eid {
         let mut calculated_hmac: [u8; 32] = [0; 32];
         signer.update(&advert[..16])?;
         signer.sign(&mut calculated_hmac)?;
-        if &calculated_hmac[..4] != &advert[16..20] {
+        if calculated_hmac[..4] != advert[16..20] {
             warn!("incorrect HMAC when decrypting caBLE advertisement");
             return Ok(None);
         }
@@ -282,7 +289,7 @@ impl Eid {
                     return Ok(None);
                 }
 
-                let eid = Eid::from_bytes(plaintext);
+                let eid = Eid::from_bytes(&plaintext)?;
                 if eid.get_domain().is_none() {
                     return Ok(None);
                 }

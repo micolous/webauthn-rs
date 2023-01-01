@@ -115,13 +115,13 @@ impl Scanner {
                     // Service data advertisement events always use the 128-bit
                     // form, even though they're transmitted in 16-bit form.
                     if let Some(d) = service_data.remove(&FIDO_CABLE_SERVICE) {
-                        if let Err(_) = tx.send(d).await {
+                        if tx.send(d).await.is_err() {
                             break;
                         }
                     }
 
                     if let Some(d) = service_data.remove(&GOOGLE_CABLE_SERVICE) {
-                        if let Err(_) = tx.send(d).await {
+                        if tx.send(d).await.is_err() {
                             break;
                         }
                     }

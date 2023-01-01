@@ -241,7 +241,7 @@ impl From<GetInfoResponse> for BTreeMap<u32, Value> {
         let mut o = BTreeMap::from([
             (
                 0x01,
-                Value::Array(versions.into_iter().map(|v| Value::Text(v)).collect()),
+                Value::Array(versions.into_iter().map(Value::Text).collect()),
             ),
             (0x03, Value::Bytes(aaguid)),
         ]);
@@ -249,7 +249,7 @@ impl From<GetInfoResponse> for BTreeMap<u32, Value> {
         if let Some(extensions) = extensions {
             o.insert(
                 0x02,
-                Value::Array(extensions.into_iter().map(|v| Value::Text(v)).collect()),
+                Value::Array(extensions.into_iter().map(Value::Text).collect()),
             );
         }
 
@@ -292,7 +292,7 @@ impl From<GetInfoResponse> for BTreeMap<u32, Value> {
         if let Some(transports) = transports {
             o.insert(
                 0x09,
-                Value::Array(transports.into_iter().map(|v| Value::Text(v)).collect()),
+                Value::Array(transports.into_iter().map(Value::Text).collect()),
             );
         }
 

@@ -1,3 +1,10 @@
+//! caBLE version of [Noise protocol][].
+//! 
+//! caBLE uses a variant of [Noise protocol][] to establish a secure channel
+//! between the initiator and authenticator in a way that the tunnel server
+//! can't decrypt.
+//! 
+//! [Noise protocol]: http://noiseprotocol.org/noise.html
 use std::mem::size_of;
 
 use openssl::{
@@ -23,10 +30,10 @@ pub fn get_public_key_bytes(private_key: &EcKeyRef<Private>) -> Result<Vec<u8>, 
         .to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?)
 }
 
-// implementing Cable's version of noise from scratch
 const NOISE_KN_PROTOCOL: &[u8; 32] = b"Noise_KNpsk0_P256_AESGCM_SHA256\0";
 const NOISE_NK_PROTOCOL: &[u8; 32] = b"Noise_NKpsk0_P256_AESGCM_SHA256\0";
 
+#[derive(Clone, Copy)]
 pub enum HandshakeType {
     KNpsk0,
     NKpsk0,
@@ -187,7 +194,7 @@ impl CableNoise {
             let mut noise = Self::new(HandshakeType::KNpsk0)?;
             let prologue = [1];
             noise.mix_hash(&prologue);
-            noise.mix_hash_point(&local_identity.public_key())?;
+            noise.mix_hash_point(local_identity.public_key())?;
             noise.local_identity = Some(local_identity.to_owned());
             noise
         } else {
@@ -260,7 +267,7 @@ impl CableNoise {
         }
 
         let pt = self.decrypt_and_hash(ct)?;
-        if pt.len() != 0 {
+        if !pt.is_empty() {
             error!(
                 "expected handshake to be empty, got {} bytes: {:02x?}",
                 pt.len(),
@@ -301,7 +308,7 @@ impl CableNoise {
             let mut noise = Self::new(HandshakeType::NKpsk0)?;
             let prologue = [0];
             noise.mix_hash(&prologue);
-            noise.mix_hash_point(&local_identity.public_key())?;
+            noise.mix_hash_point(local_identity.public_key())?;
             noise.local_identity = Some(local_identity.to_owned());
 
             noise
@@ -320,7 +327,7 @@ impl CableNoise {
         noise.mix_hash(peer_point_bytes);
         noise.mix_key(peer_point_bytes)?;
 
-        let peer_point = bytes_to_public_key(&peer_point_bytes)?;
+        let peer_point = bytes_to_public_key(peer_point_bytes)?;
 
         if let Some(local_identity) = local_identity {
             let mut es_key = [0; 32];
@@ -333,7 +340,7 @@ impl CableNoise {
         }
 
         let pt = noise.decrypt_and_hash(ct)?;
-        if pt.len() != 0 {
+        if !pt.is_empty() {
             error!(
                 "expected handshake to be empty, got {} bytes: {:02x?}",
                 pt.len(),

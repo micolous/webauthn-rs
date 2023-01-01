@@ -162,12 +162,10 @@ fn value_to_map(v: Value, loc: &str) -> Option<BTreeMap<Value, Value>> {
 }
 
 fn value_to_vec_u32(v: Value, loc: &str) -> Option<Vec<u32>> {
-    value_to_vec(v, loc).and_then(|v| {
-        let x = v
-            .into_iter()
+    value_to_vec(v, loc).map(|v| {
+        v.into_iter()
             .filter_map(|i| value_to_u32(&i, loc))
-            .collect();
-        Some(x)
+            .collect()
     })
 }
 

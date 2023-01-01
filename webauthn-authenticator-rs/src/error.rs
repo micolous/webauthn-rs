@@ -19,6 +19,8 @@ pub enum WebauthnCError {
     InvalidAssertion,
     MessageTooLarge,
     MessageTooShort,
+    /// Message was an unexpected length
+    InvalidMessageLength,
     Cancelled,
     Ctap(CtapError),
     /// The PIN was too short.
@@ -58,6 +60,10 @@ pub enum WebauthnCError {
     Base10(crate::cable::DecodeError),
     BluetoothError(String),
     NoBluetoothAdapter,
+    /// Attempt to communicate with an authenticator for which the connection
+    /// has been closed.
+    Closed,
+    WebsocketError(String),
 }
 
 #[cfg(feature = "nfc")]
@@ -100,6 +106,13 @@ impl From<openssl::error::ErrorStack> for WebauthnCError {
 impl From<crate::cable::DecodeError> for WebauthnCError {
     fn from(v: crate::cable::DecodeError) -> Self {
         Self::Base10(v)
+    }
+}
+
+#[cfg(feature = "cable")]
+impl From<tokio_tungstenite::tungstenite::error::Error> for WebauthnCError {
+    fn from(v: tokio_tungstenite::tungstenite::error::Error) -> Self {
+        Self::WebsocketError(v.to_string())
     }
 }
 

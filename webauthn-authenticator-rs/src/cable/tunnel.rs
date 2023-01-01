@@ -83,10 +83,10 @@ pub fn get_domain(domain_id: u16) -> Option<String> {
     let tld = TUNNEL_SERVER_TLDS[(result & 3) as usize];
 
     let mut o = String::from("cable.");
-    result = result >> 2;
+    result >>= 2;
     while result != 0 {
         o.push(char::from_u32(BASE32_CHARS[(result & 31) as usize].into())?);
-        result = result >> 5;
+        result >>= 5;
     }
     o.push_str(tld);
 
@@ -111,14 +111,14 @@ impl Tunnel {
     pub(super) async fn connect(
         uri: &Uri,
     ) -> Result<(WebSocketStream<MaybeTlsStream<TcpStream>>, Option<Vec<u8>>), WebauthnCError> {
-        let mut request = IntoClientRequest::into_client_request(uri).unwrap();
+        let mut request = IntoClientRequest::into_client_request(uri)?;
         let headers = request.headers_mut();
         headers.insert(
             "Sec-WebSocket-Protocol",
             HeaderValue::from_static("fido.cable"),
         );
         let origin = format!("wss://{}", uri.host().unwrap_or_default());
-        headers.insert("Origin", HeaderValue::from_str(&origin).unwrap());
+        headers.insert("Origin", HeaderValue::from_str(&origin).map_err(|_| WebauthnCError::Internal)?);
 
         trace!(?request);
         let (stream, response) = connect_async(request).await.map_err(|e| {
@@ -154,12 +154,11 @@ impl Tunnel {
         trace!(">>> {:02x?}", &handshake_message);
         stream
             .send(Message::Binary(handshake_message))
-            .await
-            .unwrap();
+            .await?;
 
         // Handshake sent, get response
         ui.cable_status_update(CableState::WaitingForAuthenticatorResponse);
-        let resp = stream.next().await.unwrap().unwrap();
+        let resp = stream.next().await.ok_or(WebauthnCError::Closed)??;
         trace!("<<< {:?}", resp);
         ui.cable_status_update(CableState::Handshaking);
         let mut crypter = if let Message::Binary(v) = resp {
@@ -172,7 +171,7 @@ impl Tunnel {
         // Waiting for post-handshake message
         ui.cable_status_update(CableState::WaitingForAuthenticatorResponse);
         trace!("Waiting for post-handshake message...");
-        let resp = stream.next().await.unwrap().unwrap();
+        let resp = stream.next().await.ok_or(WebauthnCError::Closed)??;
         trace!("Post-handshake message:");
         trace!("<<< {:?}", resp);
         ui.cable_status_update(CableState::Handshaking);
@@ -241,7 +240,7 @@ impl Tunnel {
         // Wait for initial message from initiator
         trace!("Advertising started, waiting for initiator...");
         ui.cable_status_update(CableState::WaitingForInitiatorConnection);
-        let resp = stream.next().await.unwrap().unwrap();
+        let resp = stream.next().await.ok_or(WebauthnCError::Closed)??;
         trace!("<<< {:?}", resp);
 
         advertiser.stop_advertising()?;
@@ -257,7 +256,7 @@ impl Tunnel {
             CableNoise::build_responder(None, psk, Some(peer_identity), &resp)?;
         trace!("Sending response to initiator challenge");
         trace!(">!> {:02x?}", response);
-        stream.send(Message::Binary(response)).await.unwrap();
+        stream.send(Message::Binary(response)).await?;
 
         // Send post-handshake message
         let phm = CablePostHandshake {
@@ -286,10 +285,10 @@ impl Tunnel {
     /// caBLE authenticator using CTAP 2.x.
     ///
     /// See [CtapAuthenticator::new] for further detail.
-    pub fn get_authenticator<'a, U: UiCallback>(
+    pub fn get_authenticator<U: UiCallback>(
         self,
-        ui_callback: &'a U,
-    ) -> Option<CtapAuthenticator<'a, Self, U>> {
+        ui_callback: &U,
+    ) -> Option<CtapAuthenticator<'_, Self, U>> {
         CtapAuthenticator::new_with_info(self.info.to_owned(), self, ui_callback)
     }
 
@@ -303,15 +302,18 @@ impl Tunnel {
 
     async fn send_raw(&mut self, cmd: &[u8]) -> Result<(), WebauthnCError> {
         trace!(">>> {:02x?}", cmd);
-        let encrypted = self.crypter.encrypt(&cmd)?;
+        let encrypted = self.crypter.encrypt(cmd)?;
         trace!("ENC {:02x?}", encrypted);
-        self.stream.send(Message::Binary(encrypted)).await.unwrap();
+        self.stream.send(Message::Binary(encrypted)).await?;
         Ok(())
     }
 
-    pub(super) async fn recv(&mut self) -> Result<CableFrame, WebauthnCError> {
+    pub(super) async fn recv(&mut self) -> Result<Option<CableFrame>, WebauthnCError> {
         // TODO: handle error
-        let resp = self.stream.next().await.unwrap().unwrap();
+        let resp = match self.stream.next().await {
+            None => return Ok(None),
+            Some(r) => r?,
+        };
 
         let resp = if let Message::Binary(v) = resp {
             v
@@ -324,7 +326,7 @@ impl Tunnel {
         let decrypted = self.crypter.decrypt(&resp)?;
         trace!("<<< {:02x?}", decrypted);
         // TODO: protocol version
-        Ok(CableFrame::from_bytes(1, &decrypted))
+        Ok(Some(CableFrame::from_bytes(1, &decrypted)))
     }
 }
 
@@ -355,7 +357,15 @@ impl Token for Tunnel {
         self.send(f).await?;
         ui.cable_status_update(CableState::WaitingForAuthenticatorResponse);
         let mut data = loop {
-            let resp = self.recv().await?;
+            let resp = match self.recv().await? {
+                Some(r) => r,
+                None => {
+                    // end of stream
+                    self.close().await?;
+                    return Err(WebauthnCError::Closed);
+                }
+            };
+            
             if resp.message_type == CableFrameType::Ctap {
                 break resp.data;
             } else {
@@ -374,7 +384,8 @@ impl Token for Tunnel {
     }
 
     fn cancel(&self) -> Result<(), WebauthnCError> {
-        todo!()
+        // There is no way to cancel transactions without closing in caBLE
+        Ok(())
     }
 
     async fn init(&mut self) -> Result<(), WebauthnCError> {
@@ -392,7 +403,7 @@ impl Token for Tunnel {
 pub fn bytes_to_public_key(buf: &[u8]) -> Result<EcKey<Public>, WebauthnCError> {
     let group = get_group()?;
     let mut ctx = BigNumContext::new()?;
-    let point = EcPoint::from_bytes(&group, &buf, &mut ctx)?;
+    let point = EcPoint::from_bytes(&group, buf, &mut ctx)?;
     Ok(EcKey::from_public_key(&group, &point)?)
 }
 
@@ -431,8 +442,11 @@ impl TryFrom<BTreeMap<u32, Value>> for CablePostHandshake {
 
 impl From<CablePostHandshake> for BTreeMap<u32, Value> {
     fn from(h: CablePostHandshake) -> Self {
-        let info = to_vec_packed(&h.info).unwrap();
-        let mut o = BTreeMap::from([(0x01, Value::Bytes(info))]);
+        let mut o = BTreeMap::new();
+        
+        if let Ok(info) = to_vec_packed(&h.info) {
+            o.insert(0x01, Value::Bytes(info));
+        }
 
         if let Some(linking_info) = h.linking_info {
             o.insert(0x02, Value::Bytes(linking_info));

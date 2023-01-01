@@ -194,6 +194,7 @@ pub(super) async fn main() {
             opt.tunnel_server_id,
             &mut advertiser,
             &ui,
+            true,
         )
         .await
         .unwrap();
@@ -217,6 +218,7 @@ pub(super) async fn main() {
             opt.tunnel_server_id,
             &mut advertiser,
             &ui,
+            true,
         )
         .await
         .unwrap();
