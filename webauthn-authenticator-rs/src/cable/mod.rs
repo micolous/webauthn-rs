@@ -99,7 +99,7 @@
 //! authenticator using a non-standard version of the [Noise protocol][]
 //! ([CableNoise][noise::CableNoise]), using secrets exchanged in the QR code and BTLE
 //! advertisement and a new ephemeral session key, allowing them to derive
-//! traffic keys for [Crypter][crypter::Crypter].
+//! traffic keys for [Crypter][noise::Crypter].
 //!
 //! The authenticator will then immediately send a
 //! [GetInfoResponse][crate::ctap2::GetInfoResponse], and may also send a

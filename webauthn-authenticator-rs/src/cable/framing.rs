@@ -43,7 +43,7 @@ pub const SHUTDOWN_COMMAND: CableFrame = CableFrame {
 
 /// caBLE request and response framing.
 ///
-/// These frames are encrypted ([Crypter][crate::cable::crypter::Crypter])
+/// These frames are encrypted ([Crypter][crate::cable::noise::Crypter])
 /// and sent as binary Websocket messages.
 ///
 /// ## Protocol description
