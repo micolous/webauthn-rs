@@ -4,11 +4,12 @@ extern crate tracing;
 use std::io::{stdin, stdout, Write};
 
 use futures::executor::block_on;
-use webauthn_authenticator_rs::cable::{connect_cable_authenticator, CableRequestType};
+use webauthn_authenticator_rs::cable::connect_cable_authenticator;
 use webauthn_authenticator_rs::ctap2::CtapAuthenticator;
 use webauthn_authenticator_rs::prelude::Url;
 use webauthn_authenticator_rs::softtoken::SoftToken;
 use webauthn_authenticator_rs::transport::*;
+use webauthn_authenticator_rs::types::CableRequestType;
 use webauthn_authenticator_rs::ui::{Cli, UiCallback};
 use webauthn_authenticator_rs::AuthenticatorBackend;
 use webauthn_rs_core::proto::RequestAuthenticationExtensions;

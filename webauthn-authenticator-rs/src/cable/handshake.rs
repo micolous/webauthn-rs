@@ -59,7 +59,7 @@ impl From<HandshakeV2> for BTreeMap<u32, Value> {
             // Chrome omits this field when false, but Safari always includes it.
             // Presence of this field = v2.1, missing = v2.0
             (4, Value::Bool(supports_linking_info)),
-            (5, Value::Text(request_type.to_string())),
+            (5, Value::Text(request_type.to_cable_string())),
         ]);
 
         if let Ok(v) = compress_public_key(peer_identity.as_ref()) {
@@ -126,7 +126,7 @@ impl TryFrom<BTreeMap<u32, Value>> for HandshakeV2 {
             .remove(&5)
             .and_then(|v| value_to_string(v, "0x05"))
             .and_then(|v| {
-                CableRequestType::from_string(v.as_str(), supports_non_discoverable_make_credential)
+                CableRequestType::from_cable_string(v.as_str(), supports_non_discoverable_make_credential)
             })
             .unwrap_or_default();
 

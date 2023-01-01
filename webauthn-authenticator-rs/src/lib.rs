@@ -43,6 +43,7 @@ pub mod softpasskey;
 pub mod softtoken;
 pub mod transport;
 pub mod ui;
+pub mod types;
 mod util;
 
 // TODO: feature

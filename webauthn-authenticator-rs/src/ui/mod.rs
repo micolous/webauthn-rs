@@ -2,8 +2,10 @@ use qrcode::{render::unicode::Dense1x2, QrCode};
 use std::fmt::Debug;
 use std::io::{stderr, Write};
 
-use crate::cable::{CableRequestType, CableState};
-use crate::ctap2::EnrollSampleStatus;
+use crate::{
+    ctap2::EnrollSampleStatus,
+    types::{CableRequestType, CableState},
+};
 
 pub trait UiCallback: Sync + Send + Debug {
     /// Prompts the user to enter their PIN.
