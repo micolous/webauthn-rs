@@ -12,7 +12,7 @@ use tokio_tungstenite::tungstenite::http::Uri;
 
 use crate::{
     cable::{btle::*, handshake::*, tunnel::get_domain, CableRequestType, Psk},
-    crypto::{decrypt, encrypt, hkdf_sha_256, regenerate},
+    crypto::{decrypt, encrypt, hkdf_sha_256, regenerate, public_key_from_private},
     error::WebauthnCError,
 };
 
@@ -122,10 +122,7 @@ impl Discovery {
     /// This payload includes the `request_type`, public key for the
     /// `local_identity`, and `qr_secret`.
     pub fn make_handshake(&self) -> Result<HandshakeV2, WebauthnCError> {
-        let public_key = EcKey::from_public_key(
-            self.local_identity.group(),
-            self.local_identity.public_key(),
-        )?;
+        let public_key = public_key_from_private(&self.local_identity)?;
         HandshakeV2::new(self.request_type, public_key, self.qr_secret)
     }
 

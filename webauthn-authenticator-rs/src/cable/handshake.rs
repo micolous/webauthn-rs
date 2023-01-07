@@ -1,6 +1,5 @@
 use openssl::{
-    bn::BigNumContext,
-    ec::{EcKey, EcKeyRef, EcPoint, PointConversionForm},
+    ec::EcKey,
     pkey::Public,
 };
 use serde::Serialize;
@@ -12,12 +11,14 @@ use std::{
 
 use crate::{
     cable::{base10, discovery::Discovery, tunnel::ASSIGNED_DOMAINS_COUNT, CableRequestType},
-    crypto::get_group,
+    crypto::{public_key_from_bytes, point_to_bytes},
     ctap2::commands::{
         value_to_bool, value_to_string, value_to_u32, value_to_u64, value_to_vec_u8,
     },
     error::WebauthnCError,
 };
+
+const URL_PREFIX: &str = "FIDO:/";
 
 #[derive(Serialize, Debug, Clone)]
 #[serde(into = "BTreeMap<u32, Value>", try_from = "BTreeMap<u32, Value>")]
@@ -62,7 +63,7 @@ impl From<HandshakeV2> for BTreeMap<u32, Value> {
             (5, Value::Text(request_type.to_cable_string())),
         ]);
 
-        if let Ok(v) = compress_public_key(peer_identity.as_ref()) {
+        if let Ok(v) = point_to_bytes(peer_identity.public_key(), true) {
             o.insert(0, Value::Bytes(v));
         }
 
@@ -86,12 +87,7 @@ impl TryFrom<BTreeMap<u32, Value>> for HandshakeV2 {
             .and_then(|v| value_to_vec_u8(v, "0x00"))
             .ok_or(WebauthnCError::MissingRequiredField)?;
 
-        let peer_identity = decompress_public_key(
-            peer_identity
-                .try_into()
-                // TODO: better error
-                .map_err(|_| WebauthnCError::Internal)?,
-        )?;
+        let peer_identity = public_key_from_bytes(&peer_identity)?;
 
         let secret = raw
             .remove(&1)
@@ -145,23 +141,6 @@ impl TryFrom<BTreeMap<u32, Value>> for HandshakeV2 {
     }
 }
 
-fn compress_public_key(key: &EcKeyRef<Public>) -> Result<Vec<u8>, WebauthnCError> {
-    let group = get_group()?;
-    let mut ctx = BigNumContext::new()?;
-    Ok(key
-        .public_key()
-        .to_bytes(&group, PointConversionForm::COMPRESSED, &mut ctx)?)
-}
-
-fn decompress_public_key(bytes: [u8; 33]) -> Result<EcKey<Public>, WebauthnCError> {
-    let group = get_group()?;
-    let mut ctx = BigNumContext::new()?;
-    let point = EcPoint::from_bytes(&group, &bytes, &mut ctx)?;
-    Ok(EcKey::from_public_key(&group, &point)?)
-}
-
-const URL_PREFIX: &str = "FIDO:/";
-
 impl HandshakeV2 {
     pub fn new(
         request_type: CableRequestType,
@@ -207,13 +186,6 @@ impl HandshakeV2 {
         Discovery::new_with_qr_secret(self.request_type, self.secret.to_owned())
     }
 }
-
-// https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/fido_tunnel_device.cc;l=152-159;drc=de9f16dcca1d5057ba55973fa85a5b27423d414f
-// #[derive(Serialize, Debug, Clone)]
-// #[serde(into = "BTreeMap<u32, Value>", try_from = "BTreeMap<u32, Value>")]
-// pub struct ClientPayload {
-
-// }
 
 #[cfg(test)]
 mod test {

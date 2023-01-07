@@ -6,8 +6,7 @@ use std::fmt::Debug;
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use openssl::{
-    bn::BigNumContext,
-    ec::{EcKey, EcKeyRef, EcPoint},
+    ec::EcKeyRef,
     pkey::{Private, Public},
 };
 use serde::Serialize;
@@ -32,7 +31,6 @@ use crate::{
         noise::{CableNoise, Crypter},
         CableState, Psk,
     },
-    crypto::get_group,
     ctap2::{
         commands::{value_to_vec_u8, GetInfoResponse},
         CBORResponse, CtapAuthenticator,
@@ -55,7 +53,7 @@ const ASSIGNED_DOMAINS: [&str; 2] = [
 ];
 
 /// The number of manually-assigned domains known by this module.
-pub const ASSIGNED_DOMAINS_COUNT: usize = ASSIGNED_DOMAINS.len();
+pub const ASSIGNED_DOMAINS_COUNT: u32 = ASSIGNED_DOMAINS.len() as u32;
 
 const TUNNEL_SERVER_SALT: &[u8] = b"caBLEv2 tunnel server domain\0\0\0";
 const TUNNEL_SERVER_ID_OFFSET: usize = TUNNEL_SERVER_SALT.len() - 3;
@@ -401,13 +399,6 @@ impl Token for Tunnel {
         self.stream.close(None).await.ok();
         Ok(())
     }
-}
-
-pub fn bytes_to_public_key(buf: &[u8]) -> Result<EcKey<Public>, WebauthnCError> {
-    let group = get_group()?;
-    let mut ctx = BigNumContext::new()?;
-    let point = EcPoint::from_bytes(&group, buf, &mut ctx)?;
-    Ok(EcKey::from_public_key(&group, &point)?)
 }
 
 /// Message sent by the authenticator after completing the CableNoise handshake.
