@@ -290,7 +290,8 @@ impl<'a, T: Token, U: UiCallback> DerefMut for CtapAuthenticator<'a, T, U> {
     }
 }
 
-/// Wrapper for [Ctap20Authenticator]'s implementation of [AuthenticatorBackend].
+/// Wrapper for [Ctap20Authenticator]'s implementation of
+/// [AuthenticatorBackendHashedClientData].
 impl<'a, T: Token, U: UiCallback> AuthenticatorBackendHashedClientData for CtapAuthenticator<'a, T, U> {
     fn perform_register(
         &mut self,

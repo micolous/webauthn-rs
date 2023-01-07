@@ -44,7 +44,7 @@ use crate::{
     util::compute_sha256,
 };
 
-/// Well-known domains.
+/// Manually-assigned domains.
 ///
 /// Source: <https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=123-125;drc=6767131b3528fefd866f604b32ebbb278c35d395>
 const ASSIGNED_DOMAINS: [&str; 2] = [
@@ -54,7 +54,10 @@ const ASSIGNED_DOMAINS: [&str; 2] = [
     "cable.auth.com",
 ];
 
-const TUNNEL_SERVER_SALT: &[u8] = "caBLEv2 tunnel server domain\0\0\0".as_bytes();
+/// The number of manually-assigned domains known by this module.
+pub const ASSIGNED_DOMAINS_COUNT: usize = ASSIGNED_DOMAINS.len();
+
+const TUNNEL_SERVER_SALT: &[u8] = b"caBLEv2 tunnel server domain\0\0\0";
 const TUNNEL_SERVER_ID_OFFSET: usize = TUNNEL_SERVER_SALT.len() - 3;
 const TUNNEL_SERVER_TLDS: [&str; 4] = [".com", ".org", ".net", ".info"];
 const BASE32_CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";

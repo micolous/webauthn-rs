@@ -192,7 +192,7 @@ pub(crate) fn value_to_u64(v: &Value, loc: &str) -> Option<u64> {
     }
 }
 
-/// Converts a [Value::Bool] into [Option<bool>]. Returns `None` for other [Value] types.
+/// Converts a [`Value::Bool`] into [`Option<bool>`]. Returns [`Option::None`] for other [`Value`] types.
 pub(crate) fn value_to_bool(v: &Value, loc: &str) -> Option<bool> {
     if let Value::Bool(b) = v {
         Some(*b)
@@ -202,7 +202,7 @@ pub(crate) fn value_to_bool(v: &Value, loc: &str) -> Option<bool> {
     }
 }
 
-/// Converts a [Value::Bytes] into [Option<Vec<u8>>]. Returns `None` for other [Value] types.
+/// Converts a [`Value::Bytes`] into [`Option<Vec<u8>>`]. Returns [`Option::None`] for other [`Value`] types.
 pub(crate) fn value_to_vec_u8(v: Value, loc: &str) -> Option<Vec<u8>> {
     if let Value::Bytes(b) = v {
         Some(b)

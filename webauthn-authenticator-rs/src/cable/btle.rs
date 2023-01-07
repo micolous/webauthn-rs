@@ -3,7 +3,15 @@
 //! An authenticator advertises its physical proximity to the platform and some
 //! connection metadata by transmitting an encrypted service data payload.
 //!
-//! [Scanner] uses [btleplug] to watch for caBLE advertisements.
+//! * [Scanner] uses [btleplug] for an initiator to watch for caBLE
+//!   advertisements from an authenticator.
+//!
+//! * [Advertiser] provides a trait for caBLE authenticators
+//! 
+//! [btleplug] (and many platform APIs) do not support sending arbitrary service
+//! data advertisements, so authenticators using this library will need to
+//! implement the [Advertiser] trait themselves. See `examples/cable_tunnel` for
+//! an example using a serial-connected BTLE HCI controller.
 use btleplug::{
     api::{bleuuid::uuid_from_u16, Central, CentralEvent, Manager as _, ScanFilter},
     platform::Manager,
@@ -42,13 +50,7 @@ pub(super) const FIDO_CABLE_SERVICE_U16: u16 = 0xfff9;
 /// [Bluetooth Assigned Numbers]: https://www.bluetooth.com/specifications/assigned-numbers/
 const FIDO_CABLE_SERVICE: Uuid = uuid_from_u16(FIDO_CABLE_SERVICE_U16);
 
-fn get_scan_filter() -> ScanFilter {
-    ScanFilter {
-        services: vec![FIDO_CABLE_SERVICE, GOOGLE_CABLE_SERVICE],
-    }
-}
-
-/// Bluetooth Low Energy advertising trait.
+/// Bluetooth Low Energy advertiser trait.
 ///
 /// A caBLE authenticator needs to be able to send arbitrary service data
 /// advertisements to be discoverable by the initiator (platform).
@@ -72,7 +74,7 @@ pub trait Advertiser {
     fn stop_advertising(&mut self) -> Result<(), WebauthnCError>;
 }
 
-/// caBLE Bluetooth Low Energy service data scanner.
+/// Bluetooth Low Energy service data advertisement scanner.
 pub struct Scanner {
     manager: Manager,
 }
@@ -83,6 +85,14 @@ impl Scanner {
         Ok(Scanner {
             manager: Manager::new().await?,
         })
+    }
+
+    /// Gets a [ScanFilter] that matches FIDO and Google caBLE service data
+    /// advertisements.
+    fn get_scan_filter() -> ScanFilter {
+        ScanFilter {
+            services: vec![FIDO_CABLE_SERVICE, GOOGLE_CABLE_SERVICE],
+        }
     }
 
     /// Starts scanning for caBLE BTLE advertisements in the background.
@@ -99,7 +109,7 @@ impl Scanner {
             .ok_or(WebauthnCError::NoBluetoothAdapter)?;
         let mut events = adapter.events().await?;
 
-        adapter.start_scan(get_scan_filter()).await?;
+        adapter.start_scan(Self::get_scan_filter()).await?;
 
         tokio::spawn(async move {
             while let Some(event) = events.next().await {

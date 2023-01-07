@@ -1,9 +1,13 @@
 //! caBLE / Hybrid Authenticator
 //!
-//! **tl;dr:** scan a QR code with a `FIDO:/` URL, mobile device sends a BLE
+//! **tl;dr:** scan a QR code with a `FIDO:/` URL, mobile device sends a BTLE
 //! advertisement, this is used to establish a doubly-encrypted (TLS and Noise)
 //! Websocket tunnel over which the platform can send a single CTAP 2.x command
 //! and get a response.
+//!
+//! This module implements both the [initator][connect_cable_authenticator] and
+//! [authenticator][share_cable_authenticator] side of caBLE, provided
+//! [you have appropriate hardware](#requirements).
 //!
 //! ## Warning
 //!
@@ -31,13 +35,14 @@
 //! This does not implement the AOA (Android Open Accessory) Hybrid
 //! authenticator protocol.
 //!
-//! This does not implement "contact lists" ("remember this computer").
+//! This does not implement pairing (aka: "contact lists", "remember this
+//! computer").
 //!
 //! ## Requirements
 //!
-//! The platform (generating the request) requires:
+//! The initator (or "browser") requires:
 //!
-//! * a Bluetooth Low Energy (BLE) adaptor
+//! * a Bluetooth Low Energy (BTLE) adaptor
 //!
 //! * an internet connection
 //!
@@ -50,7 +55,7 @@
 //!
 //!   * [iOS 16 or later][ios]
 //!
-//! * a Bluetooth Low Energy (BLE) radio which can transmit service data
+//! * a Bluetooth Low Energy (BTLE) radio which can transmit service data
 //!   advertisements
 //!
 //! * a camera and QR code scanner[^qr]
@@ -65,67 +70,123 @@
 //!
 //! **On iOS,** the authenticator is stored in the iCloud Keychain and shared
 //! with all devices signed in to that iCloud account. There is no way to
-//! identify which device was used.
+//! identify *which* device was used.
 //!
 //! In both cases, the credential is cached in the device's secure element, and
 //! requires user verification (lock screen pattern, PIN, password or biometric
 //! authentication) to access.
 //!
-//! **Warning:** iOS 15 will recognise caBLE QR codes and attempt to offer to
-//! authenticate, but this version of the protocol is not supported.
+//! **Warning:** iOS 15 will recognise caBLE QR codes and offer to authenticate,
+//! but this version of the protocol is not supported.
 //!
 //! ## Protocol overview
 //!
-//! The platform (or "browser") generates a CBOR message
-//! ([HandshakeV2][handshake::HandshakeV2]) containing the desired transaction
-//! type (`MakeCredential` or `GetAssertion`), a shared secret and some protocol
-//! version information. This gets encoded as [base10] and turned into a
-//! `FIDO:/` URL, and is displayed as a QR code for the user to scan with their
-//! mobile device.
+//! Entities in a caBLE transaction:
 //!
-//! The authenticator (mobile device) scans this QR code, and establishes a
-//! tunnel to a well-known WebSocket tunnel server of *its* choosing
-//! ([get_domain][tunnel::get_domain]). Once established, it broadcasts an
-//! encrypted [Eid][discovery::Eid] message over BLE service
-//! advertisements to be discovered by the platform.
+//! * The _initator_ (typically a web browser) starts the caBLE session for a
+//!   `MakeCredential` or `GetAssertion` request on behalf of a relying party.
 //!
-//! Meanwhile, the platform scans for caBLE BLE advertisements and tries to
-//! decrypt and parse them
-//! ([decrypt_advert][discovery::Discovery::decrypt_advert]). On success,
-//! it can then find which tunnel server to connect to, the tunnel ID, and a
-//! nonce.
+//! * The _authenticator_ (or mobile device) stores credential(s) for the user
+//!   in a secure fashion, with some sort of local authentication.
 //!
-//! The platform connects to the tunnel server, and starts a handshake with the
+//! * The _tunnel server_ provides a two-way channel for the initator and
+//!   authenticator to communicate over WebSockets. These are operated by
+//!   organisations providing caBLE authenticators (eg: Apple, Google).
+//!
+//! The user attempts to register or sign in using WebAuthn, and chooses to use
+//! caBLE ("create a passkey on another device", "save a passkey on a device
+//! with a camera"). This application becomes the _initator_ of the caBLE
+//! session.
+//!
+//! The initator generates a CBOR message ([HandshakeV2][]) containing the
+//! desired transaction type (`MakeCredential` or `GetAssertion`),
+//! [a shared secret][qr-secret] and some protocol version information. It
+//! encodes the message as a `FIDO:/` URL by encoding the CBOR as [base10], and
+//! then displays it as a QR code for the user to scan with their authenticator.
+//!
+//! The user scans this QR code using their authenticator (mobile device), which
+//! deserialises the [HandshakeV2][] message.
+//!
+//! Both the initiator and authenticator
+//! [derive the tunnel ID][discovery::Discovery::derive_tunnel_id] from the QR
+//! code's [shared secret][qr-secret].
+//!
+//! The authenticator establishes a connection to
+//! [a well-known WebSocket tunnel server][tunnel::get_domain] of *its*
+//! choosing. Once established, the tunnel server provides a routing ID, which
+//! allows the initiator to connect to this session.
+//!
+//! The authenticator takes [the routing ID][routing_id],
+//! [tunnel server ID][tunnel_server_id], and
+//! [a nonce of its choosing][nonce] (not shared with the tunnel server) into an
+//! [Eid][], and then encrypts and signs it using a secret derived from the QR
+//! code's [shared secret][qr-secret]. It then broadcasts this encrypted [Eid][]
+//! as a BTLE service data advertisement.
+//!
+//! Meanwhile, the initiator scans for caBLE BTLE service data advertisements,
+//! and [tries to decrypt and parse them][discovery::Discovery::decrypt_advert].
+//! On success, it can then find which
+//! [tunnel server to connect to][tunnel_server_id], the
+//! [routing ID][routing_id], and [the nonce][nonce].
+//!
+//! Both the initator and the authenticator
+//! [derive a pre-shared key][discovery::Discovery::derive_psk] from the
+//! [shared secret][qr-secret] and [nonce][].
+//!
+//! The initator connects to the tunnel server, and starts a handshake with the
 //! authenticator using a non-standard version of the [Noise protocol][]
-//! ([CableNoise][noise::CableNoise]), using secrets exchanged in the QR code and BTLE
-//! advertisement and a new ephemeral session key, allowing them to derive
-//! traffic keys for [Crypter][noise::Crypter].
+//! ([CableNoise][]), using the pre-shared key and a new
+//! ephemeral session key.
 //!
-//! The authenticator will then immediately send a
-//! [GetInfoResponse][crate::ctap2::GetInfoResponse], and may also send a
-//! pairing payload (presently Android only). Where supported, a pairing payload
-//! is sent *regardless* of whether the user selects "remember this computer" on
-//! the mobile device (the payload will just be null bytes).
+//! They use the [CableNoise][] to derive traffic keys for [Crypter][]. All
+//! further communications between the initiator and authenticator occur over
+//! the [Crypter][] channel.
 //!
-//! The platform can then send a *single* `MakeCredential` or `GetAssertion`
-//! command to the authenticator in CTAP 2.x format.
+//! The authenticator immediately sends a [GetInfoResponse][], and will also
+//! send a pairing payload once the user has accepted or refused consent[^pair].
+//!
+//! The initiator can then send a *single* `MakeCredential` or `GetAssertion`
+//! command to the authenticator in CTAP 2.0 format. This request *does not* use
+//! PIN/UV auth – user verification is handled internally by the authenticator
+//! *outside* the CTAP 2.0 protocol[^uv].
 //!
 //! Once the command is sent, the authenticator will prompt the user to approve
 //! the request in a user-verifying way (biometric or lock screen pattern,
-//! password or PIN), showing the relying party information (website domain).
+//! password or PIN), showing the user and relying party name.
 //!
-//! The authenticator returns the response to the command, and then closes the
-//! Websocket channel. A new handshake must be performed if the user wishes to
-//! perform another transaction.
+//! Once approved or rejected, the authenticator returns the response to the
+//! command, and then close the Websocket channel. A new handshake must be
+//! performed if the user wishes to perform another transaction.
+//!
+//! The initiator then sends the authenticator's response to the relying party
+//! using the usual WebAuthn APIs.
 //!
 //! [android]: https://developers.google.com/identity/passkeys/supported-environments
 //! [android-sec]: https://security.googleblog.com/2022/10/SecurityofPasskeysintheGooglePasswordManager.html
 //! [android-ver]: https://source.chromium.org/chromium/chromium/src/+/main:chrome/android/features/cablev2_authenticator/java/src/org/chromium/chrome/browser/webauth/authenticator/CableAuthenticatorUI.java;l=170-171;drc=4a8573cb240df29b0e4d9820303538fb28e31d84
+//! [CableNoise]: noise::CableNoise
 //! [crcable]: https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/
+//! [Crypter]: noise::Crypter
 //! [devicePubKey]: https://w3c.github.io/webauthn/#sctn-device-publickey-extension
+//! [Eid]: discovery::Eid
+//! [GetInfoResponse]: crate::ctap2::GetInfoResponse
 //! [gpfido2]: https://developers.google.com/android/reference/com/google/android/gms/fido/fido2/Fido2PrivilegedApiClient
+//! [HandshakeV2]: handshake::HandshakeV2
 //! [ios]: https://developer.apple.com/videos/play/wwdc2022/10092/
 //! [Noise protocol]: http://noiseprotocol.org/noise.html
+//! [nonce]: discovery::Eid::nonce
+//! [qr-secret]: handshake::HandshakeV2::secret
+//! [routing_id]: discovery::Eid::routing_id
+//! [tunnel_server_id]: discovery::Eid::tunnel_server_id
+//!
+//! [^pair]: Pairing payloads are only supported on Android. Where supported,
+//! pairing payloads will always be sent, padded to a constant size,
+//! *regardless* of whether the user consented to pairing. If the user did not
+//! consent, the payload will just be null bytes.
+//!
+//! [^uv]: Chromium and Safari won't even attempt PIN/UV auth, even if the
+//! [GetInfoResponse][] suggested it was required.
+//!
 //! [^qr]: Most mobile device camera apps have an integrated QR code scanner.
 #[allow(rustdoc::private_intra_doc_links)]
 mod base10;
@@ -307,8 +368,7 @@ where
             }
             CableFrameType::Ctap => match (handshake.request_type, msg.parse_request()?) {
                 (CableRequestType::MakeCredential, RequestType::MakeCredential(mc))
-                | (CableRequestType::DiscoverableMakeCredential, RequestType::MakeCredential(mc)) =>
-                {
+                | (CableRequestType::DiscoverableMakeCredential, RequestType::MakeCredential(mc)) => {
                     perform_register_with_request(backend, mc, timeout_ms)
                 }
                 (CableRequestType::GetAssertion, RequestType::GetAssertion(ga)) => {
@@ -322,7 +382,7 @@ where
             CableFrameType::Update => {
                 warn!("Linking information is not supported, ignoring update message");
                 continue;
-            },
+            }
 
             _ => {
                 error!("unhandled command: {:?}", msg);
@@ -354,9 +414,9 @@ where
 
         if close_after_one_command {
             tunnel.send(SHUTDOWN_COMMAND).await?;
-            break;            
+            break;
         }
-    };
+    }
 
     // Hang up
     tunnel.close().await?;

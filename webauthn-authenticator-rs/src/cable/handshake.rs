@@ -11,7 +11,7 @@ use std::{
 };
 
 use crate::{
-    cable::{base10, discovery::Discovery, CableRequestType},
+    cable::{base10, discovery::Discovery, tunnel::ASSIGNED_DOMAINS_COUNT, CableRequestType},
     crypto::get_group,
     ctap2::commands::{
         value_to_bool, value_to_string, value_to_u32, value_to_u64, value_to_vec_u8,
@@ -126,7 +126,10 @@ impl TryFrom<BTreeMap<u32, Value>> for HandshakeV2 {
             .remove(&5)
             .and_then(|v| value_to_string(v, "0x05"))
             .and_then(|v| {
-                CableRequestType::from_cable_string(v.as_str(), supports_non_discoverable_make_credential)
+                CableRequestType::from_cable_string(
+                    v.as_str(),
+                    supports_non_discoverable_make_credential,
+                )
             })
             .unwrap_or_default();
 
@@ -168,8 +171,7 @@ impl HandshakeV2 {
         Ok(Self {
             peer_identity: public_key,
             secret: qr_key,
-            // TODO: set to the real number
-            known_domains_count: 2,
+            known_domains_count: ASSIGNED_DOMAINS_COUNT,
             timestamp: SystemTime::now(),
             supports_linking_info: false,
             request_type,

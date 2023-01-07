@@ -10,9 +10,8 @@ use openssl::{
 use std::mem::size_of;
 use tokio_tungstenite::tungstenite::http::Uri;
 
-use super::{btle::*, handshake::*, tunnel::get_domain};
 use crate::{
-    cable::{CableRequestType, Psk},
+    cable::{btle::*, handshake::*, tunnel::get_domain, CableRequestType, Psk},
     crypto::{decrypt, encrypt, hkdf_sha_256, regenerate},
     error::WebauthnCError,
 };
@@ -103,7 +102,10 @@ impl Discovery {
     ///
     /// Returns `Ok(None)` when the advertisement was encrypted using a
     /// different key, or if the advertisement length was incorrct.
-    pub fn decrypt_advert<'a>(&self, advert: impl TryInto<&'a BleAdvert>) -> Result<Option<Eid>, WebauthnCError> {
+    pub fn decrypt_advert<'a>(
+        &self,
+        advert: impl TryInto<&'a BleAdvert>,
+    ) -> Result<Option<Eid>, WebauthnCError> {
         Eid::decrypt_advert(advert, &self.eid_key)
     }
 
@@ -190,14 +192,26 @@ impl Discovery {
     }
 }
 
+/// Authenticator-provided payload, sent to the initiator as an encrypted BTLE
+/// service data advertisement, which allows it to connect to the authenticator
+/// via the tunnel server.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Eid {
+    /// The [well-known tunnel server][get_domain] to connect to, chosen by the
+    /// authenticator.
     pub tunnel_server_id: u16,
+
+    /// A tunnel server-provided routing ID which allows the initiator to
+    /// connect to the authenticator's session.
     pub routing_id: RoutingId,
+
+    /// An authenticator-provided nonce which is used to derive further secrets
+    /// during the [CableNoise][super::cable::CableNoise] handshake.
     pub nonce: BleNonce,
 }
 
 impl Eid {
+    /// Creates a new [Eid] using a random nonce.
     pub fn new(tunnel_server_id: u16, routing_id: RoutingId) -> Result<Self, WebauthnCError> {
         let mut nonce: BleNonce = [0; size_of::<BleNonce>()];
         rand_bytes(&mut nonce)?;
@@ -273,9 +287,12 @@ impl Eid {
     ///
     /// Returns `Ok(None)` if `advert` was the wrong length, `advert` was not
     /// decryptable (or signed) with `key`, the resulting payload was invalid.
-    /// 
+    ///
     /// See [Discovery::decrypt_advert] for a public API.
-    fn decrypt_advert<'a>(advert: impl TryInto<&'a BleAdvert>, key: &EidKey) -> Result<Option<Eid>, WebauthnCError> {
+    fn decrypt_advert<'a>(
+        advert: impl TryInto<&'a BleAdvert>,
+        key: &EidKey,
+    ) -> Result<Option<Eid>, WebauthnCError> {
         let advert: &BleAdvert = match advert.try_into() {
             Ok(a) => a,
             Err(_) => {
@@ -284,7 +301,7 @@ impl Eid {
                 // advertisements sent with caBLE UUIDs.
                 warn!("Incorrect caBLE advertisement length");
                 return Ok(None);
-            },
+            }
         };
 
         trace!("Decrypting {:?} with key {:?}", advert, key);
@@ -303,6 +320,8 @@ impl Eid {
     }
 
     /// Converts this [Eid] into an encrypted payload for BLE advertisements.
+    ///
+    /// See [Discovery::encrypt_advert] for a public API.
     fn encrypt_advert(&self, key: &EidKey) -> Result<BleAdvert, WebauthnCError> {
         let eid = self.to_bytes();
         let c = encrypt(&key[..32], None, &eid)?;
@@ -329,7 +348,7 @@ impl Eid {
     /// Gets the Websocket connection URI which the platform will use to connect
     /// to the authenticator.
     ///
-    /// `tunnel_id` is provided from [Discovery::get_tunnel_id].
+    /// `tunnel_id` is provided by [Discovery::derive_tunnel_id].
     fn get_connect_uri(&self, tunnel_id: TunnelId) -> Option<Uri> {
         // https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_handshake.cc;l=179;drc=de9f16dcca1d5057ba55973fa85a5b27423d414f
         self.get_domain().and_then(|domain| {
@@ -419,7 +438,7 @@ mod test {
         let mut bad = advert.clone();
         bad[0] ^= 1;
         assert!(d.decrypt_advert(&bad).unwrap().is_none());
-        
+
         // Changing HMAC fails
         let mut bad = advert.clone();
         bad[size_of::<CableEid>()] ^= 1;
@@ -458,14 +477,6 @@ mod test {
             local_identity,
         )
         .unwrap();
-        // Discovery { request_type: DiscoverableMakeCredential, local_identity: EcKey,
-        //  qr_secret: [1, 254, 166, 247, 196, 128, 116, 147, 220, 37, 111, 158, 172, 247, 86, 201],
-        //  eid_key: [71, 198, 63, 179, 47, 46, 248, 209, 45, 152, 14, 113, 249, 195, 83, 240, 190, 43, 150, 219, 184, 209, 141, 199, 120, 65, 118, 178, 1, 231, 76, 120, 59, 145, 227, 9, 254, 71, 60, 47, 0, 15, 75, 80, 23, 69, 155, 106, 127, 123, 2, 165, 97, 86, 51, 86, 70, 70, 198, 20, 167, 240, 247, 240]
-        // }
-        // Private key: [45, 45, 45, 45, 45, 66, 69, 71, 73, 78, 32, 69, 67, 32, 80, 82, 73, 86, 65, 84, 69, 32, 75, 69, 89, 45, 45, 45, 45, 45, 10, 77, 72, 99, 67, 65, 81, 69, 69, 73, 80, 114, 54, 76, 105, 83, 120, 81, 73, 82, 55, 69, 51, 72, 81, 90, 98, 78, 114, 57, 80, 78, 66, 114, 105, 50, 110, 56, 83, 66, 99, 89, 67, 65, 73, 56, 89, 69, 89, 57, 85, 113, 68, 111, 65, 111, 71, 67, 67, 113, 71, 83, 77, 52, 57, 10, 65, 119, 69, 72, 111, 85, 81, 68, 81, 103, 65, 69, 90, 68, 103, 112, 55, 66, 76, 82, 82, 47, 79, 100, 116, 89, 104, 118, 83, 43, 109, 88, 65, 51, 82, 87, 121, 51, 85, 65, 86, 112, 48, 49, 115, 52, 73, 111, 83, 78, 56, 47, 65, 114, 68, 77, 57, 56, 73, 88, 57, 104, 88, 102, 10, 70, 116, 47, 119, 65, 109, 68, 79, 119, 78, 78, 55, 66, 100, 84, 57, 84, 48, 86, 109, 110, 70, 73, 99, 55, 84, 49, 116, 106, 97, 105, 84, 68, 103, 61, 61, 10, 45, 45, 45, 45, 45, 69, 78, 68, 32, 69, 67, 32, 80, 82, 73, 86, 65, 84, 69, 32, 75, 69, 89, 45, 45, 45, 45, 45, 10]
-        // Handshake: HandshakeV2 { peer_identity: EcKey, secret: [1, 254, 166, 247, 196, 128, 116, 147, 220, 37, 111, 158, 172, 247, 86, 201], known_domains_count: 2, timestamp: SystemTime { intervals: 133145064076516439 }, supports_linking_info: false, request_type: DiscoverableMakeCredential, supports_non_discoverable_make_credential: false }
-        // URL: FIDO:/1587255900792438944459061119478825010114531789068054428613131982194017978424543064885470041277246791701065710001119359100784325313076847471971309904207381668112901
-        // {0000fff9-0000-1000-8000-00805f9b34fb: [2, 125, 132, 237, 96, 118, 181, 94, 36, 124, 131, 15, 130, 149, 94, 77, 18, 110, 127, 67]}
 
         let advert = [
             2, 125, 132, 237, 96, 118, 181, 94, 36, 124, 131, 15, 130, 149, 94, 77, 18, 110, 127,
