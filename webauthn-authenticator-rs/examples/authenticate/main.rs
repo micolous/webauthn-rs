@@ -41,6 +41,10 @@ enum Provider {
     CTAP,
     #[cfg(feature = "cable")]
     Cable,
+    #[cfg(feature = "u2fhid")]
+    Mozilla,
+    #[cfg(feature = "win10")]
+    Win10,
 }
 
 impl Provider {
@@ -59,6 +63,10 @@ impl Provider {
                     .await
                     .unwrap(),
             ),
+            #[cfg(feature = "u2fhid")]
+            Provider::Mozilla => Box::new(webauthn_authenticator_rs::u2fhid::U2FHid::default()),
+            #[cfg(feature = "win10")]
+            Provider::Win10 => Box::new(webauthn_authenticator_rs::win10::Win10::default()),
         }
     }
 
@@ -69,27 +77,24 @@ impl Provider {
             CTAP => "CTAP",
             #[cfg(feature = "cable")]
             Cable => "Cable",
+            #[cfg(feature = "u2fhid")]
+            Mozilla => "Mozilla",
+            #[cfg(feature = "win10")]
+            Win10 => "Windows 10",
         }
     }
 }
 
 fn select_provider() -> Provider {
-    // let mut providers: Vec<(&str, fn(&'a Cli) -> Box<dyn AuthenticatorBackend>)> = Vec::new();
-
-    // #[cfg(feature = "u2fhid")]
-    // providers.push(("Mozilla", |_| {
-    //     Box::new(webauthn_authenticator_rs::u2fhid::U2FHid::default())
-    // }));
-
-    // #[cfg(feature = "win10")]
-    // providers.push(("Windows 10", |_| {
-    //     Box::new(webauthn_authenticator_rs::win10::Win10::default())
-    // }));
     let providers = [
         Provider::SoftToken,
         Provider::CTAP,
         #[cfg(feature = "cable")]
         Provider::Cable,
+        #[cfg(feature = "u2fhid")]
+        Provider::Mozilla,
+        #[cfg(feature = "win10")]
+        Provider::Win10,
     ];
 
     if providers.is_empty() {
@@ -133,9 +138,9 @@ async fn main() {
 
     // WARNING: don't use this as an example of how to use the library!
     let wan = Webauthn::new_unsafe_experts_only(
-        "webauthn.firstyear.id.au",
-        "webauthn.firstyear.id.au",
-        vec![url::Url::parse("https://webauthn.firstyear.id.au").unwrap()],
+        "https://localhost:8080/auth",
+        "localhost",
+        vec![url::Url::parse("https://localhost:8080").unwrap()],
         Some(1),
         None,
         None,
@@ -154,7 +159,7 @@ async fn main() {
 
     let r = u
         .perform_register(
-            Url::parse("https://webauthn.firstyear.id.au").unwrap(),
+            Url::parse("https://localhost:8080").unwrap(),
             chal.public_key,
             60_000,
         )
@@ -187,7 +192,7 @@ async fn main() {
 
         let r = u
             .perform_auth(
-                Url::parse("https://webauthn.firstyear.id.au").unwrap(),
+                Url::parse("https://localhost:8080").unwrap(),
                 chal.public_key,
                 60_000,
             )
