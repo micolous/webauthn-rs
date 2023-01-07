@@ -300,7 +300,8 @@ impl NFCCard {
 
         let card = reader
             .ctx
-            .connect(reader_name, ShareMode::Exclusive, Protocols::ANY).map_err(|e| {
+            .connect(reader_name, ShareMode::Exclusive, Protocols::ANY)
+            .map_err(|e| {
                 error!("Error connecting to card: {:?}", e);
                 e
             })?;

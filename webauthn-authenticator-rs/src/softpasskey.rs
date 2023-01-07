@@ -12,8 +12,8 @@ use base64urlsafedata::Base64UrlSafeData;
 
 use webauthn_rs_proto::{
     AllowCredentials, AuthenticationExtensionsClientOutputs, AuthenticatorAssertionResponseRaw,
-    AuthenticatorAttachment, AuthenticatorAttestationResponseRaw,
-    PublicKeyCredential, PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
+    AuthenticatorAttachment, AuthenticatorAttestationResponseRaw, PublicKeyCredential,
+    PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
     RegisterPublicKeyCredential, RegistrationExtensionsClientOutputs, UserVerificationPolicy,
 };
 
@@ -367,7 +367,7 @@ impl AuthenticatorBackendHashedClientData for SoftPasskey {
 
     fn perform_auth(
         &mut self,
-client_data_json_hash: Vec<u8>,
+        client_data_json_hash: Vec<u8>,
         options: PublicKeyCredentialRequestOptions,
         timeout_ms: u32,
     ) -> Result<PublicKeyCredential, WebauthnCError> {

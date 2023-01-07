@@ -7,7 +7,7 @@
 //!   advertisements from an authenticator.
 //!
 //! * [Advertiser] provides a trait for caBLE authenticators
-//! 
+//!
 //! [btleplug] (and many platform APIs) do not support sending arbitrary service
 //! data advertisements, so authenticators using this library will need to
 //! implement the [Advertiser] trait themselves. See `examples/cable_tunnel` for

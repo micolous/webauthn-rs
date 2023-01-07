@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{decrypt, encrypt, hkdf_sha_256, regenerate, ecdh, get_group},
+    crypto::{decrypt, ecdh, encrypt, get_group, hkdf_sha_256, regenerate},
     error::WebauthnCError,
     util::compute_sha256,
 };

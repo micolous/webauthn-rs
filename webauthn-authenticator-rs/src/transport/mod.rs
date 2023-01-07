@@ -80,7 +80,7 @@ pub trait Token: Sized + fmt::Debug + Sync + Send {
     /// Transmits a command on the underlying transport.
     ///
     /// `cbor` is a CBOR-encoded command.
-    /// 
+    ///
     /// Interfaces need to check for and return any transport-layer-specific
     /// error code [WebauthnCError::Ctap], but don't need to worry about
     /// deserialising CBOR.

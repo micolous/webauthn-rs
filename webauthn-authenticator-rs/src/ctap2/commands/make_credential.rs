@@ -46,12 +46,12 @@ impl CBORCommand for MakeCredentialRequest {
 /// `authenticatorMakeCredential` response type.
 ///
 /// Reference: <https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#authenticatormakecredential-response-structure>
-/// 
+///
 /// ## Implementation notes
 ///
 /// This needs to be (de)serialisable to/from both `Map<u32, Value>` **and**
 /// `Map<String, Value>`:
-/// 
+///
 /// * The authenticator itself uses a map with `u32` keys. This is needed to get
 ///   the value from from the authenticator, and to re-serialise values for
 ///   caBLE (via `AuthenticatorBackendWithRequests`)

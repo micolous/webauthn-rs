@@ -1,12 +1,12 @@
 use std::{collections::BTreeMap, fmt::Debug};
 
 use crate::{
+    authenticator_hashed::AuthenticatorBackendHashedClientData,
     ctap2::{commands::*, pin_uv::*},
     error::WebauthnCError,
     transport::Token,
     ui::UiCallback,
     util::check_pin,
-    authenticator_hashed::AuthenticatorBackendHashedClientData,
 };
 
 use base64urlsafedata::Base64UrlSafeData;
@@ -350,7 +350,9 @@ impl<'a, T: Token, U: UiCallback> Ctap20Authenticator<'a, T, U> {
     }
 }
 
-impl<'a, T: Token, U: UiCallback> AuthenticatorBackendHashedClientData for Ctap20Authenticator<'a, T, U> {
+impl<'a, T: Token, U: UiCallback> AuthenticatorBackendHashedClientData
+    for Ctap20Authenticator<'a, T, U>
+{
     fn perform_register(
         &mut self,
         client_data_hash: Vec<u8>,

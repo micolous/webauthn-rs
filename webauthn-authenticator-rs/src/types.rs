@@ -1,5 +1,5 @@
 //! Types used in a public API.
-//! 
+//!
 //! These types need to be present regardless of which features were selected
 //! at build time, because they are part of some other API which doesn't change.
 

@@ -54,7 +54,11 @@ impl Provider {
             Provider::SoftToken => Box::new(SoftToken::new().unwrap().0),
             Provider::CTAP => Box::new(select_transport(ui)),
             #[cfg(feature = "cable")]
-            Provider::Cable => Box::new(webauthn_authenticator_rs::cable::connect_cable_authenticator(request_type, ui).await.unwrap()),
+            Provider::Cable => Box::new(
+                webauthn_authenticator_rs::cable::connect_cable_authenticator(request_type, ui)
+                    .await
+                    .unwrap(),
+            ),
         }
     }
 
@@ -82,8 +86,8 @@ fn select_provider() -> Provider {
     //     Box::new(webauthn_authenticator_rs::win10::Win10::default())
     // }));
     let providers = [
-        Provider::SoftToken, 
-        Provider::CTAP, 
+        Provider::SoftToken,
+        Provider::CTAP,
         #[cfg(feature = "cable")]
         Provider::Cable,
     ];

@@ -292,14 +292,21 @@ impl<'a, T: Token, U: UiCallback> DerefMut for CtapAuthenticator<'a, T, U> {
 
 /// Wrapper for [Ctap20Authenticator]'s implementation of
 /// [AuthenticatorBackendHashedClientData].
-impl<'a, T: Token, U: UiCallback> AuthenticatorBackendHashedClientData for CtapAuthenticator<'a, T, U> {
+impl<'a, T: Token, U: UiCallback> AuthenticatorBackendHashedClientData
+    for CtapAuthenticator<'a, T, U>
+{
     fn perform_register(
         &mut self,
         client_data_hash: Vec<u8>,
         options: webauthn_rs_proto::PublicKeyCredentialCreationOptions,
         timeout_ms: u32,
     ) -> Result<webauthn_rs_proto::RegisterPublicKeyCredential, WebauthnCError> {
-        <Ctap20Authenticator<'a, T, U> as AuthenticatorBackendHashedClientData>::perform_register(self, client_data_hash, options, timeout_ms)
+        <Ctap20Authenticator<'a, T, U> as AuthenticatorBackendHashedClientData>::perform_register(
+            self,
+            client_data_hash,
+            options,
+            timeout_ms,
+        )
     }
 
     fn perform_auth(
@@ -308,7 +315,12 @@ impl<'a, T: Token, U: UiCallback> AuthenticatorBackendHashedClientData for CtapA
         options: webauthn_rs_proto::PublicKeyCredentialRequestOptions,
         timeout_ms: u32,
     ) -> Result<webauthn_rs_proto::PublicKeyCredential, WebauthnCError> {
-        <Ctap20Authenticator<'a, T, U> as AuthenticatorBackendHashedClientData>::perform_auth(self, client_data_hash, options, timeout_ms)
+        <Ctap20Authenticator<'a, T, U> as AuthenticatorBackendHashedClientData>::perform_auth(
+            self,
+            client_data_hash,
+            options,
+            timeout_ms,
+        )
     }
 }
 

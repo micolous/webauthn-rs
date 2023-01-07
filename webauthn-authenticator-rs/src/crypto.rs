@@ -4,7 +4,7 @@ use openssl::{
     ec::{EcGroup, EcKey},
     md::Md,
     nid::Nid,
-    pkey::{Id, Private, Public, PKey},
+    pkey::{Id, PKey, Private, Public},
     pkey_ctx::PkeyCtx,
     symm::{Cipher, Crypter, Mode},
 };
