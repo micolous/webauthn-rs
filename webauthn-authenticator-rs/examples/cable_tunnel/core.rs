@@ -13,18 +13,13 @@ use serialport_hci::{
     vendor::none::{Event, Vendor},
     SerialController,
 };
-use std::{
-    fmt::Debug,
-    fs::OpenOptions,
-    io::{Read, Seek, SeekFrom, Write},
-    time::Duration,
-};
+use std::{fmt::Debug, fs::OpenOptions, time::Duration};
 
 use webauthn_authenticator_rs::{
     cable::{share_cable_authenticator, Advertiser},
     ctap2::CtapAuthenticator,
     error::WebauthnCError,
-    softtoken::SoftToken,
+    softtoken::SoftTokenFile,
     transport::{AnyTransport, Transport},
     ui::Cli,
 };
@@ -140,7 +135,6 @@ impl Advertiser for SerialHciAdvertiser {
 
 #[tokio::main]
 pub(super) async fn main() {
-    let _ = tracing_subscriber::fmt::try_init();
     let opt = CliParser::parse();
     let cable_url = if let Some(u) = opt.cable_url {
         u
@@ -176,16 +170,14 @@ pub(super) async fn main() {
     let ui = Cli {};
 
     if let Some(p) = opt.softtoken_path {
-        let mut f = OpenOptions::new()
+        let f = OpenOptions::new()
             .read(true)
             .write(true)
             .create(false)
             .open(p)
             .unwrap();
-        let mut buffer = Vec::new();
-        f.read_to_end(&mut buffer).unwrap();
-        let mut softtoken = SoftToken::from_cbor(&buffer).unwrap();
-        let info = softtoken.get_info();
+        let mut softtoken = SoftTokenFile::open(f).unwrap();
+        let info = softtoken.as_ref().get_info();
 
         share_cable_authenticator(
             &mut softtoken,
@@ -198,13 +190,6 @@ pub(super) async fn main() {
         )
         .await
         .unwrap();
-
-        // Overwrite state
-        let buffer = softtoken.to_cbor().unwrap();
-        f.seek(SeekFrom::Start(0)).unwrap();
-        f.set_len(0).unwrap();
-        f.write_all(&buffer).unwrap();
-        f.flush().unwrap();
     } else {
         let mut transport = AnyTransport::new().unwrap();
         let token = transport.tokens().unwrap().pop().unwrap();

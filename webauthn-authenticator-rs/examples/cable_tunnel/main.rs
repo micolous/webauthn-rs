@@ -7,6 +7,8 @@ extern crate tracing;
 mod core;
 
 fn main() {
+    let _ = tracing_subscriber::fmt::try_init();
+
     #[cfg(feature = "cable")]
     core::main();
 
