@@ -33,10 +33,17 @@ use webauthn_authenticator_rs::{
 ))]
 pub struct CliParser {
     /// Serial port where Bluetooth HCI controller is connected to.
+    ///
+    /// This has primarily been tested using a Nordic nRF52 microcontroller
+    /// running [Apache Mynewt's NimBLE HCI demo][0].
+    ///
+    /// [0]: https://mynewt.apache.org/latest/tutorials/ble/blehci_project.html
     #[clap(short, long)]
     pub serial_port: String,
 
     /// Baud rate for communication with Bluetooth HCI controller.
+    ///
+    /// By default, Apache Mynewt's NimBLE HCI demo runs at 1000000 baud.
     #[clap(short, long, default_value = "1000000")]
     pub baud_rate: u32,
 
@@ -44,15 +51,38 @@ pub struct CliParser {
     #[clap(short, long, default_value = "0")]
     pub tunnel_server_id: u16,
 
-    /// `FIDO:/` URL from the initiator (QR code)
+    /// `FIDO:/` URL from the initiator's QR code. Either this option or
+    /// --qr-image is required.
     #[clap(short, long)]
     pub cable_url: Option<String>,
 
-    /// Image file containing a FIDO QR code.
+    /// Screenshot of the initator's QR code. Either this option or --cable-url
+    /// is required.
+    ///
+    /// Use `adb` to screenshot an Android device with USB debugging:
+    ///
+    /// adb exec-out screencap -p > screenshot.png
+    ///
+    /// Use Xcode to screenshot an iOS device with debugging. There is no need
+    /// to open an Xcode project: from the `Window` menu, select
+    /// `Devices and Simulators`, then select the device, and press
+    /// `Take Screenshot`. The screenshot will be saved to `~/Desktop`.
+    ///
+    /// Note: this *will not* work in the Android emulator or iOS simulator,
+    /// because they do not have access to a physical Bluetooth controller.
     #[clap(short, long)]
     pub qr_image: Option<String>,
 
-    /// Path to serialized SoftToken
+    /// Path to saved SoftToken.
+    ///
+    /// You can create a new SoftToken with the `softtoken` example:
+    ///
+    /// cargo run --example softtoken -- create /tmp/softtoken.dat
+    ///
+    /// If this option is not specified, `cable_tunnel` will attempt to connect
+    /// to the first supported physical token using AnyTransport. Most initators
+    /// (browsers) will *also* attempt to connect directly to *all* physical
+    /// tokens, so only use this if your initator is running on another device!
     #[clap(long)]
     pub softtoken_path: Option<String>,
 }
@@ -170,6 +200,7 @@ pub(super) async fn main() {
     let ui = Cli {};
 
     if let Some(p) = opt.softtoken_path {
+        // Use a SoftToken
         let f = OpenOptions::new()
             .read(true)
             .write(true)
@@ -191,6 +222,7 @@ pub(super) async fn main() {
         .await
         .unwrap();
     } else {
+        // Use a physical authenticator
         let mut transport = AnyTransport::new().unwrap();
         let token = transport.tokens().unwrap().pop().unwrap();
         let mut authenticator = CtapAuthenticator::new(token, &ui).await.unwrap();
@@ -208,6 +240,4 @@ pub(super) async fn main() {
         .await
         .unwrap();
     };
-
-    // let (mut authenticator, _) = SoftToken::new().unwrap();
 }

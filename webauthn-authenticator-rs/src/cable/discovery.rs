@@ -20,8 +20,6 @@ type BleAdvert = [u8; size_of::<CableEid>() + 4];
 type RoutingId = [u8; 3];
 type BleNonce = [u8; 10];
 type QrSecret = [u8; 16];
-// type QrSeed = [u8; 32];
-// type QrKey = [u8; size_of::<QrSecret>() + size_of::<QrSeed>()];
 type EidKey = [u8; 32 + 32];
 type CableEid = [u8; 16];
 type TunnelId = [u8; 16];
@@ -192,7 +190,7 @@ impl Discovery {
 /// Authenticator-provided payload, sent to the initiator as an encrypted BTLE
 /// service data advertisement, which allows it to connect to the authenticator
 /// via the tunnel server.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Eid {
     /// The [well-known tunnel server][get_domain] to connect to, chosen by the
     /// authenticator.
@@ -381,7 +379,7 @@ mod test {
 
     #[test]
     fn eid_from_bytes() {
-        let mut eid = [
+        let eid = [
             // Reserved byte
             0, //
             // Nonce
@@ -405,31 +403,59 @@ mod test {
         assert!(Eid::from_bytes(&[0; 17][..]).is_none());
 
         // Setting tunnel server ID to invalid value should fail
-        eid[15] = 0;
-        assert!(Eid::from_bytes(&eid).is_none());
+        let mut bad = eid;
+        bad[15] = 0;
+        assert!(Eid::from_bytes(&bad).is_none());
 
         // Setting reserved byte should fail
-        eid[15] = 1;
-        eid[0] = 1;
-        assert!(Eid::from_bytes(&eid).is_none());
+        let mut bad = eid;
+        bad[0] = 1;
+        assert!(Eid::from_bytes(&bad).is_none());
     }
 
     #[test]
     fn encrypt_decrypt() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let d = Discovery::new(CableRequestType::MakeCredential).unwrap();
+        let d = Discovery::new_with_qr_secret(CableRequestType::MakeCredential, [0; 16]).unwrap();
         let c = Eid {
-            tunnel_server_id: 0x0102,
+            tunnel_server_id: 0xf980,
             routing_id: [9, 10, 11],
             nonce: [9, 139, 115, 107, 54, 169, 140, 185, 164, 47],
         };
 
         let advert = d.encrypt_advert(&c).unwrap();
 
+        // Decrypt the encrypted advertisement => same value
         let c2 = d.decrypt_advert(&advert).unwrap().unwrap();
-        // decrypting gets back the original value
         assert_eq!(c, c2);
+
+        // Make sure URLs stay consistent
+        assert_eq!(
+            "wss://cable.my4kstlhndi4c.net/cable/new/3EEF97097986413B059EAA2A30D653D4",
+            d.get_new_tunnel_uri(c.tunnel_server_id)
+                .unwrap()
+                .to_string()
+        );
+        assert_eq!(
+            "wss://cable.my4kstlhndi4c.net/cable/connect/090A0B/3EEF97097986413B059EAA2A30D653D4",
+            d.get_connect_uri(&c).unwrap().to_string()
+        );
+
+        // Changing the tunnel server ID should work too
+        let mut google_eid = c;
+        google_eid.tunnel_server_id = 0;
+        assert_eq!(
+            "wss://cable.ua5v.com/cable/connect/090A0B/3EEF97097986413B059EAA2A30D653D4",
+            d.get_connect_uri(&google_eid).unwrap().to_string()
+        );
+
+        let mut apple_eid = c;
+        apple_eid.tunnel_server_id = 1;
+        assert_eq!(
+            "wss://cable.auth.com/cable/connect/090A0B/3EEF97097986413B059EAA2A30D653D4",
+            d.get_connect_uri(&apple_eid).unwrap().to_string()
+        );
 
         // Changing bits fails
         let mut bad = advert;
@@ -475,15 +501,15 @@ mod test {
         )
         .unwrap();
 
+        assert_eq!(
+            "wss://cable.ua5v.com/cable/new/367CBBF5F5085DF4098476AFE4B9B1D2",
+            discovery.get_new_tunnel_uri(0).unwrap().to_string(),
+        );
+
         let advert = [
             2, 125, 132, 237, 96, 118, 181, 94, 36, 124, 131, 15, 130, 149, 94, 77, 18, 110, 127,
             67,
         ];
-        let mut eid_key: EidKey = [0; size_of::<EidKey>()];
-        DerivedValueType::EIDKey
-            .derive(&qr_secret, &[], &mut eid_key)
-            .unwrap();
-        trace!("eid_key = {:?}", eid_key);
 
         let r = discovery.decrypt_advert(&advert).unwrap().unwrap();
         trace!("eid: {:?}", r);

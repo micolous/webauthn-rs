@@ -188,9 +188,17 @@ impl Tunnel {
         let decrypted = crypter.decrypt(&v)?;
         trace!("<<< {:?}", decrypted);
 
-        // TODO: android sends us a v0 handshake with extra padded CBOR and linking info
-        // for some reason, serde_cbor is happy to decode this, so it doesn't error
-        // Because supports_linking = false, then it is a v0 handshake
+        // If Chromium on Android uses caBLE v2.0 if the supports_linking field
+        // is missing, or v2.1 if it is present (even if false)[0]. When using
+        // v2.0, it sends a different initial message with extra padded CBOR and
+        // linking info.
+        //
+        // As an initiator, Chromium will try to decode this message as v2.1,
+        // falling back to v2.0[1] on a parser error. However, serde_cbor is
+        // happy to parse the padded value regardless.
+        //
+        // [0]: https://source.chromium.org/chromium/chromium/src/+/main:chrome/android/features/cablev2_authenticator/native/cablev2_authenticator_android.cc;l=688-693;drc=9d8024e69625a0c457a4999f4d1aca32c24eb494
+        // [1]: https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/fido_tunnel_device.cc;l=368-375;drc=52fa5a7f263b37149bcfbac06da00fec5abcc416
         let v: BTreeMap<u32, Value> =
             serde_cbor::from_slice(&decrypted).map_err(|_| WebauthnCError::Cbor)?;
 
@@ -294,10 +302,7 @@ impl Tunnel {
     }
 
     pub(super) async fn send(&mut self, cmd: CableFrame) -> Result<(), WebauthnCError> {
-        // TODO: handle error
-        // trace!("send: flushing before send");
-        // self.stream.flush().await.unwrap();
-        let cmd = cmd.to_bytes();
+        let cmd = cmd.to_bytes().ok_or(WebauthnCError::ApduConstruction)?;
         self.send_raw(&cmd).await
     }
 
@@ -310,7 +315,6 @@ impl Tunnel {
     }
 
     pub(super) async fn recv(&mut self) -> Result<Option<CableFrame>, WebauthnCError> {
-        // TODO: handle error
         let resp = match self.stream.next().await {
             None => return Ok(None),
             Some(r) => r?,
@@ -454,33 +458,6 @@ impl From<CablePostHandshake> for BTreeMap<u32, Value> {
 mod test {
     use super::*;
 
-    /*
-    Chrome
-
-    FIDO: DEBUG: fido_tunnel_device.cc:429 Linking information was not received from caBLE device
-    FIDO: DEBUG: fido_tunnel_device.cc:433 tunnel-7CE0C968AA83BB21: established v2.1
-    FIDO: DEBUG: device_response_converter.cc:265 -> {1: ["FIDO_2_0"], 3: h'REDACTED', 4: {"rk": true, "uv": true}}
-    FIDO: DEBUG: fido_device.cc:80 The device supports the CTAP2 protocol.
-
-
-    FIDO: DEBUG: ctap2_device_operation.h:87 <- 1
-    {1: h'66569EFC827249E894E662CA9C78401C128D9053685052E42395DC69B972611B',
-     2: {"id": "webauthn.firstyear.id.au", "name": "webauthn.firstyear.id.au"},
-     3: {"id": h'3BC33B00624F4D45912DC4E2EB75A289', "name": "a", "displayName": "a"},
-     4: [{"alg": -7, "type": "public-key"}, {"alg": -257, "type": "public-key"}],
-     5: [{"id": h'00010203', "type": "public-key"}],   // excludelist
-     7: {"uv": true}}
-
-
-    We send:
-
-    CBOR: cmd=1, cbor=Ok(Map({
-      Integer(1): Bytes( [246, 134, 212, 222, 63, 120, 188, 83, 162, 239, 197, 129, 146, 115, 255, 101, 140, 102, 137, 129, 161, 162, 25, 206, 163, 3, 22, 222, 112, 135, 101, 51]),
-      Integer(2): Map({Text("id"): Text("webauthn.firstyear.id.au"), Text("name"): Text("webauthn.firstyear.id.au")}),
-      Integer(3): Map({Text("id"): Bytes([158, 170, 228, 89, 68, 28, 73, 194, 134, 19, 227, 153, 107, 220, 150, 238]), Text("name"): Text("william"), Text("displayName"): Text("william")}),
-      Integer(4): Array([Map({Text("alg"): Integer(-7), Text("type"): Text("public-key")}), Map({Text("alg"): Integer(-257), Text("type"): Text("public-key")})]),
-      Integer(7): Map({Text("uv"): Bool(true)})}))
-    */
     #[test]
     fn check_known_tunnel_server_domains() {
         assert_eq!(get_domain(0), Some(String::from("cable.ua5v.com")));

@@ -794,7 +794,7 @@ mod test {
             0x6b, 0x65, 0x79, 0x7, 0xa1, 0x62, 0x75, 0x76, 0xf5,
         ];
 
-        let r = req.to_bytes();
+        let r = req.to_bytes().unwrap();
 
         assert_eq!(r, expected_req_encoding);
 

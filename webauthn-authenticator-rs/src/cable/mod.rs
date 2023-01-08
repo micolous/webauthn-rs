@@ -1,42 +1,61 @@
 //! caBLE / Hybrid Authenticator
 //!
 //! **tl;dr:** scan a QR code with a `FIDO:/` URL, mobile device sends a BTLE
-//! advertisement, this is used to establish a doubly-encrypted (TLS and Noise)
-//! Websocket tunnel over which the platform can send a single CTAP 2.x command
-//! and get a response.
+//! advertisement, this is used to establish a doubly-encrypted (TLS and
+//! [Noise][]) Websocket tunnel over which the platform can send a single CTAP
+//! 2.x command and get a response.
 //!
 //! This module implements both the [initator][connect_cable_authenticator] and
 //! [authenticator][share_cable_authenticator] side of caBLE, provided
 //! [you have appropriate hardware](#requirements).
 //!
-//! ## Warning
+//! The initiator implementation provides a [`CtapAuthenticator`][] (so works
+//! like other authenticator backends), and uses a [`UiCallback`][]
+//! implementation to display the QR code the user. Authenticators on Android
+//! and iOS only allow the initiator to send a single command before hanging up,
+//! so other features like credential management won't work.
 //!
-//! **There is no publicly-published spec from this protocol, aside from
-//! [Chromium's C++ implementation][crcable]. There are probably errors in this
-//! implementation and its documentation.**
+//! The authenticator implementation takes an input URL (parsed from the QR
+//! code), a [`AuthenticatorBackendHashedClientData`] and an [`Advertiser`] to
+//! establish a tunnel and respond to an initator's request. This allows one to
+//! share many of the authenticator backends this library already supports over
+//! a caBLE tunnel.
+//!
+//! ## Warning
 //!
 //! **This implementation is incomplete, and has not been reviewed from a
 //! cryptography standpoint.**
 //!
-//! This implementation is a *very* rough port to "make things work" based on
-//! what Chromium does -- there will probably be errors compared to whatever
-//! the final spec is (FIDO v2.2?)
+//! There is **no** publicly-published spec from this protocol, aside from
+//! [Chromium's C++ implementation][crcable], so this aims to do whatever
+//! Chromium does.
+//!
+//! We've attempted to document and untangle things as best we can, but there
+//! are probably errors in this implementation and its documentation. caBLE's
+//! design appears to have changed multiple times during its development, aiming
+//! for compatibility with older versions of Chromium.
+//!
+//! ## Features
 //!
 //! There are two major versions of caBLE, and this only implements caBLE v2.
 //! There are also several minor versions of caBLE v2, which aren't fully
-//! explained (or implemented here).
+//! explained (or implemented here); this mostly implements what we *think* is
+//! caBLE v2.1 as both an initiator and an authenticator.
 //!
-//! caBLE v1 is significantly different, and is not implemented here.
+//! Known-missing functionality includes:
 //!
-//! This should work with Android devices with a current version of Google
-//! Play Services, and with iOS devices on a current version of iOS. The
-//! computer running this library will need a Bluetooth Low Energy adaptor.
+//! * caBLE v1: protocol is significantly different
+//! * caBLE v2.0: this has some quirks that this doesn't fully implement
+//! * [caBLE over AOA][cableaoa] (Android Open Accessory Protocol)
+//! * [caBLE over Firebase Cloud Messaging][cablefcm]
+//! * Pairing (aka: "contact lists", "remember this computer")
 //!
-//! This does not implement the AOA (Android Open Accessory) Hybrid
-//! authenticator protocol.
+//! It is impossible to know for certain how many gaps there are until the caBLE
+//! working group publishes documentation *publicly*.
 //!
-//! This does not implement pairing (aka: "contact lists", "remember this
-//! computer").
+//! The library is complete enough as an initiator to communicate with
+//! authenticators on Android and iOS 16, and complete enough as an
+//! authenticator to work with Chrome and Safari as initiators.
 //!
 //! ## Requirements
 //!
@@ -53,7 +72,7 @@
 //!   * [Android 7 or later][android-ver] with
 //!     [a recent version of Chrome and Google Play Services (October 2022)][android]
 //!
-//!   * [iOS 16 or later][ios]
+//!   * [iOS 16 or later][ios][^ios15]
 //!
 //! * a Bluetooth Low Energy (BTLE) radio which can transmit service data
 //!   advertisements
@@ -74,9 +93,10 @@
 //!
 //! In both cases, the credential is cached in the device's secure element, and
 //! requires user verification (lock screen pattern, PIN, password or biometric
-//! authentication) to access.
+//! authentication) to access. This user verification is performed on-device,
+//! and is entirely separate to CTAP2's PIN/UV auth.
 //!
-//! **Warning:** iOS 15 will recognise caBLE QR codes and offer to authenticate,
+//! [^ios15]: iOS 15 will recognise caBLE QR codes and offer to authenticate,
 //! but this version of the protocol is not supported.
 //!
 //! ## Protocol overview
@@ -134,7 +154,7 @@
 //! [shared secret][qr-secret] and [nonce][].
 //!
 //! The initator connects to the tunnel server, and starts a handshake with the
-//! authenticator using a non-standard version of the [Noise protocol][]
+//! authenticator using a non-standard version of the [Noise protocol][Noise]
 //! ([CableNoise][]), using the pre-shared key and a new
 //! ephemeral session key.
 //!
@@ -164,7 +184,9 @@
 //! [android]: https://developers.google.com/identity/passkeys/supported-environments
 //! [android-sec]: https://security.googleblog.com/2022/10/SecurityofPasskeysintheGooglePasswordManager.html
 //! [android-ver]: https://source.chromium.org/chromium/chromium/src/+/main:chrome/android/features/cablev2_authenticator/java/src/org/chromium/chrome/browser/webauth/authenticator/CableAuthenticatorUI.java;l=170-171;drc=4a8573cb240df29b0e4d9820303538fb28e31d84
+//! [cableaoa]: https://source.chromium.org/chromium/chromium/src/+/main:device/fido/aoa/
 //! [CableNoise]: noise::CableNoise
+//! [cablefcm]: https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/v2_authenticator.h;l=150-161;drc=eef4e6f76aff3defa06b9f8d921fcd46bb3e4dc1
 //! [crcable]: https://source.chromium.org/chromium/chromium/src/+/main:device/fido/cable/
 //! [Crypter]: noise::Crypter
 //! [devicePubKey]: https://w3c.github.io/webauthn/#sctn-device-publickey-extension
@@ -173,7 +195,7 @@
 //! [gpfido2]: https://developers.google.com/android/reference/com/google/android/gms/fido/fido2/Fido2PrivilegedApiClient
 //! [HandshakeV2]: handshake::HandshakeV2
 //! [ios]: https://developer.apple.com/videos/play/wwdc2022/10092/
-//! [Noise protocol]: http://noiseprotocol.org/noise.html
+//! [Noise]: http://noiseprotocol.org/noise.html
 //! [nonce]: discovery::Eid::nonce
 //! [qr-secret]: handshake::HandshakeV2::secret
 //! [routing_id]: discovery::Eid::routing_id

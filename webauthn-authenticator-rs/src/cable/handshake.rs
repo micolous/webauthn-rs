@@ -91,7 +91,6 @@ impl TryFrom<BTreeMap<u32, Value>> for HandshakeV2 {
             .and_then(|v| value_to_vec_u8(v, "0x01"))
             .ok_or(WebauthnCError::MissingRequiredField)?
             .try_into()
-            // TODO: better error
             .map_err(|_| WebauthnCError::InvalidAlgorithm)?;
 
         let known_domains_count = raw
