@@ -99,7 +99,11 @@ impl Provider {
             }
             Provider::Ctap => Box::new(select_transport(ui)),
             #[cfg(feature = "cable")]
-            Provider::Cable => Box::new(webauthn_authenticator_rs::cable::connect_cable_authenticator(request_type, ui).await.unwrap()),
+            Provider::Cable => Box::new(
+                webauthn_authenticator_rs::cable::connect_cable_authenticator(request_type, ui)
+                    .await
+                    .unwrap(),
+            ),
             #[cfg(feature = "u2fhid")]
             Provider::Mozilla => Box::new(webauthn_authenticator_rs::u2fhid::U2FHid::default()),
             #[cfg(feature = "win10")]
