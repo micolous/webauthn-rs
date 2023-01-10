@@ -90,6 +90,13 @@ impl Scanner {
     /// Gets a [ScanFilter] that matches FIDO and Google caBLE service data
     /// advertisements.
     fn get_scan_filter() -> ScanFilter {
+        // Sending a service filter to bluez causes it to not give us *any*
+        // advertisements *at all*, so we have to drink straight from the
+        // firehose instead.
+        #[cfg(target_os = "linux")]
+        return Default::default();
+
+        #[cfg(not(target_os = "linux"))]
         ScanFilter {
             services: vec![FIDO_CABLE_SERVICE, GOOGLE_CABLE_SERVICE],
         }
@@ -124,6 +131,9 @@ impl Scanner {
                 {
                     // Service data advertisement events always use the 128-bit
                     // form, even though they're transmitted in 16-bit form.
+                    //
+                    // bluez doesn't filter properly, so we need to explicitly
+                    // check for service data UUIDs we care about.
                     if let Some(d) = service_data.remove(&FIDO_CABLE_SERVICE) {
                         if tx.send(d).await.is_err() {
                             break;
