@@ -110,8 +110,10 @@
 //!   in a secure fashion, with some sort of local authentication.
 //!
 //! * The _tunnel server_ provides a two-way channel for the initator and
-//!   authenticator to communicate over WebSockets. These are operated by
-//!   organisations providing caBLE authenticators (eg: Apple, Google).
+//!   authenticator to communicate over WebSockets. There are well-known servers
+//!   operated by Apple (`wss://cable.auth.com`) and Google
+//!   (`wss://cable.ua5v.com`), and an algorithm to generate tunnel server
+//!   domain names from a hash to allow for future expansion.
 //!
 //! The user attempts to register or sign in using WebAuthn, and chooses to use
 //! caBLE ("create a passkey on another device", "save a passkey on a device
@@ -175,7 +177,7 @@
 //! password or PIN), showing the user and relying party name.
 //!
 //! Once approved or rejected, the authenticator returns the response to the
-//! command, and then close the Websocket channel. A new handshake must be
+//! command, and then closes the Websocket channel. A new handshake must be
 //! performed if the user wishes to perform another transaction.
 //!
 //! The initiator then sends the authenticator's response to the relying party
