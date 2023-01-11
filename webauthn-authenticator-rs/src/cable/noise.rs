@@ -717,6 +717,22 @@ mod test {
     }
 
     #[test]
+    fn unencrypted() {
+        let mut c = CipherState::new(NonceType::New, true);
+        let pt = b"Hello, world!";
+
+        // When CipherState has no key, it should pass through as plaintext and
+        // not affect the nonce value.
+        let r = c.encrypt(pt, None).unwrap();
+        assert_eq!(pt, r.as_slice());
+        assert_eq!(0, c.n);
+
+        let r = c.decrypt(pt, None).unwrap();
+        assert_eq!(pt, r.as_slice());
+        assert_eq!(0, c.n);
+    }
+
+    #[test]
     fn construction() {
         let _ = tracing_subscriber::fmt::try_init();
         // Patched chromium to leak its key data
