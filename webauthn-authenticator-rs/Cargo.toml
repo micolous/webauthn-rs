@@ -79,6 +79,8 @@ serialport-hci = { git = "https://github.com/micolous/serialport-hci.git", rev =
 bluetooth-hci = { git = "https://github.com/micolous/bluetooth-hci.git", rev = "04f98f734b0b9f0304e433335357307f63f6bc26" }
 bardecoder = "0.4.0"
 image = "0.23"
+embed_plist = { version = "1.2.2" }
+cargo-xcode = "1.5.0"
 
 [build-dependencies]
 openssl = "0.10"

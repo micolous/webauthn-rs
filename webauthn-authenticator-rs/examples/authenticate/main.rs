@@ -17,6 +17,9 @@ use webauthn_authenticator_rs::AuthenticatorBackend;
 use webauthn_rs_core::proto::RequestAuthenticationExtensions;
 use webauthn_rs_core::WebauthnCore as Webauthn;
 
+#[cfg(feature = "macos")]
+embed_plist::embed_info_plist!("Info.plist");
+
 #[derive(Debug, clap::Parser)]
 #[clap(about = "Register and authenticate test")]
 pub struct CliParser {
