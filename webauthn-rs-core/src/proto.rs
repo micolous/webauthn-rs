@@ -166,7 +166,7 @@ pub struct PublicKeyCredential {
     pub id: String,
     /// The binary of the credential id.
     #[serde(rename = "rawId")]
-    pub raw_id: Base64UrlSafeData,
+    pub raw_id: Vec<u8>,
     /// The authenticator response.
     pub response: AuthenticatorAssertionResponseRaw,
     /// The extensions sent by the client

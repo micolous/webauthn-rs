@@ -1,6 +1,6 @@
 //! Types related to attestation (Registration)
 
-use base64urlsafedata::Base64UrlSafeData;
+use base64urlsafedata::{self, Base64UrlSafeData};
 use serde::{Deserialize, Serialize};
 
 use crate::extensions::{RegistrationExtensionsClientOutputs, RequestRegistrationExtensions};
@@ -15,7 +15,7 @@ pub struct PublicKeyCredentialCreationOptions {
     /// The user.
     pub user: User,
     /// The one-time challenge for the credential to sign.
-    pub challenge: Base64UrlSafeData,
+    pub challenge: Vec<u8>,
     /// The set of cryptographic types allowed by this server.
     pub pub_key_cred_params: Vec<PubKeyCredParams>,
 
@@ -57,8 +57,8 @@ impl From<CreationChallengeResponse> for web_sys::CredentialCreationOptions {
         use js_sys::{Array, Object, Uint8Array};
         use wasm_bindgen::JsValue;
 
-        let chal = Uint8Array::from(ccr.public_key.challenge.0.as_slice());
-        let userid = Uint8Array::from(ccr.public_key.user.id.0.as_slice());
+        let chal = Uint8Array::from(ccr.public_key.challenge.as_slice());
+        let userid = Uint8Array::from(ccr.public_key.user.id.as_slice());
 
         let jsv = serde_wasm_bindgen::to_value(&ccr).unwrap();
 
@@ -86,7 +86,7 @@ impl From<CreationChallengeResponse> for web_sys::CredentialCreationOptions {
                     )
                     .unwrap();
 
-                    js_sys::Reflect::set(&obj, &"id".into(), &Uint8Array::from(ac.id.0.as_slice()))
+                    js_sys::Reflect::set(&obj, &"id".into(), &Uint8Array::from(ac.id.as_slice()))
                         .unwrap();
 
                     if let Some(transports) = &ac.transports {
@@ -145,8 +145,8 @@ pub struct RegisterPublicKeyCredential {
     /// This is NEVER actually
     /// used in a real registration, because the true credential ID is taken from the
     /// attestation data.
-    #[serde(rename = "rawId")]
-    pub raw_id: Base64UrlSafeData,
+    #[serde(rename = "rawId", with = "base64urlsafedata")]
+    pub raw_id: Vec<u8>,
     /// <https://w3c.github.io/webauthn/#dom-publickeycredential-response>
     pub response: AuthenticatorAttestationResponseRaw,
     /// The type of credential.
@@ -195,7 +195,7 @@ impl From<web_sys::PublicKeyCredential> for RegisterPublicKeyCredential {
 
         RegisterPublicKeyCredential {
             id: format!("{data_raw_id_b64}"),
-            raw_id: data_raw_id_b64,
+            raw_id: data_raw_id_b64.0,
             response: AuthenticatorAttestationResponseRaw {
                 attestation_object: data_response_attestation_object_b64,
                 client_data_json: data_response_client_data_json_b64,

@@ -9,7 +9,7 @@ use std::{collections::BTreeMap, str::FromStr};
 /// it could also be a future change for this to be base64 string instead.
 ///
 /// If changed, this would likely be a major library version change.
-pub type CredentialID = Base64UrlSafeData;
+pub type CredentialID = Vec<u8>;
 
 /// Defines the User Authenticator Verification policy. This is documented
 /// <https://w3c.github.io/webauthn/#enumdef-userverificationrequirement>, and each
@@ -86,7 +86,7 @@ pub struct User {
     /// The user's id in base64 form. This MUST be a unique id, and
     /// must NOT contain personally identifying information, as this value can NEVER
     /// be changed. If in doubt, use a UUID.
-    pub id: Base64UrlSafeData,
+    pub id: Vec<u8>,
     /// A detailed name for the account, such as an email address. This value
     /// **can** change, so **must not** be used as a primary key.
     pub name: String,
@@ -187,7 +187,7 @@ pub struct PublicKeyCredentialDescriptor {
     #[serde(rename = "type")]
     pub type_: String,
     /// The credential id.
-    pub id: Base64UrlSafeData,
+    pub id: Vec<u8>,
     /// The allowed transports for this credential. Note this is a hint, and is NOT
     /// enforced.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -261,7 +261,7 @@ pub struct AllowCredentials {
     /// The type of credential.
     pub type_: String,
     /// The id of the credential.
-    pub id: Base64UrlSafeData,
+    pub id: Vec<u8>,
     /// <https://www.w3.org/TR/webauthn/#transport>
     /// may be usb, nfc, ble, internal
     #[serde(skip_serializing_if = "Option::is_none")]

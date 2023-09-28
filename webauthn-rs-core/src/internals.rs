@@ -4,7 +4,6 @@
 use crate::attestation::AttestationFormat;
 use crate::error::WebauthnError;
 use crate::proto::*;
-use base64urlsafedata::Base64UrlSafeData;
 use serde::Deserialize;
 
 use std::borrow::Borrow;
@@ -31,21 +30,15 @@ impl Challenge {
     }
 }
 
-impl From<Challenge> for Base64UrlSafeData {
+impl From<Challenge> for Vec<u8> {
     fn from(chal: Challenge) -> Self {
-        Base64UrlSafeData(chal.0)
+        chal.0
     }
 }
 
-impl From<Base64UrlSafeData> for Challenge {
-    fn from(d: Base64UrlSafeData) -> Self {
-        Challenge(d.0)
-    }
-}
-
-impl<'a> From<&'a Base64UrlSafeData> for &'a ChallengeRef {
-    fn from(d: &'a Base64UrlSafeData) -> Self {
-        ChallengeRef::new(d.0.as_slice())
+impl<'a> From<&'a [u8]> for &'a ChallengeRef {
+    fn from(d: &'a [u8]) -> Self {
+        ChallengeRef::new(d)
     }
 }
 
@@ -306,7 +299,7 @@ fn acd_parser(i: &[u8]) -> nom::IResult<&[u8], AttestedCredentialData> {
         i,
         AttestedCredentialData {
             aaguid,
-            credential_id: Base64UrlSafeData(cred_id.to_vec()),
+            credential_id: cred_id.to_vec(),
             credential_pk: cred_pk,
         },
     ))

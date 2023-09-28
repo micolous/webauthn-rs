@@ -33,7 +33,7 @@ pub type Counter = u32;
 pub struct RegistrationState {
     pub(crate) policy: UserVerificationPolicy,
     pub(crate) exclude_credentials: Vec<CredentialID>,
-    pub(crate) challenge: Base64UrlSafeData,
+    pub(crate) challenge: Vec<u8>,
     pub(crate) credential_algorithms: Vec<COSEAlgorithm>,
     pub(crate) require_resident_key: bool,
     pub(crate) authenticator_attachment: Option<AuthenticatorAttachment>,
@@ -47,7 +47,7 @@ pub struct RegistrationState {
 pub struct AuthenticationState {
     pub(crate) credentials: Vec<Credential>,
     pub(crate) policy: UserVerificationPolicy,
-    pub(crate) challenge: Base64UrlSafeData,
+    pub(crate) challenge: Vec<u8>,
     pub(crate) appid: Option<String>,
     pub(crate) allow_backup_eligible_upgrade: bool,
 }
@@ -318,7 +318,7 @@ impl From<CredentialV3> for Credential {
 
         // prior to 20220520 no multi-device credentials existed to migrate from.
         Credential {
-            cred_id: Base64UrlSafeData(cred_id),
+            cred_id,
             cred,
             counter,
             transports: None,
@@ -457,7 +457,7 @@ pub enum AttestationMetadata {
         /// the name of apk that originated this key operation
         apk_package_name: String,
         /// cert chain for this apk
-        apk_certificate_digest_sha256: Vec<Base64UrlSafeData>,
+        apk_certificate_digest_sha256: Vec<Vec<u8>>,
         /// A stricter verdict of device integrity. If the value of ctsProfileMatch is true, then the profile of the device running your app matches the profile of a device that has passed Android compatibility testing and has been approved as a Google-certified Android device.
         cts_profile_match: bool,
         /// A more lenient verdict of device integrity. If only the value of basicIntegrity is true, then the device running your app likely wasn't tampered with. However, the device hasn't necessarily passed Android compatibility testing.

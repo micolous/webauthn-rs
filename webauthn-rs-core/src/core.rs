@@ -30,7 +30,6 @@ use crate::crypto::compute_sha256;
 use crate::error::WebauthnError;
 use crate::internals::*;
 use crate::proto::*;
-use base64urlsafedata::Base64UrlSafeData;
 
 /// This is the core of the Webauthn operations. It provides 4 interfaces that you will likely
 /// use the most:
@@ -220,7 +219,7 @@ impl WebauthnCore {
                     id: self.rp_id.clone(),
                 },
                 user: User {
-                    id: Base64UrlSafeData(user_id),
+                    id: user_id,
                     name: user_name.to_string(),
                     display_name: user_display_name.to_string(),
                 },
@@ -303,7 +302,7 @@ impl WebauthnCore {
             extensions,
             experimental_allow_passkeys,
         } = state;
-        let chal: &ChallengeRef = challenge.into();
+        let chal: &ChallengeRef = challenge.as_slice().into();
 
         // send to register_credential_internal
         let credential = self.register_credential_internal(
@@ -648,7 +647,7 @@ impl WebauthnCore {
         // OUT OF SPEC - exclude any credential that is in our exclude list.
         let excluded = exclude_credentials
             .iter()
-            .any(|credid| credid.0.as_slice() == credential.cred_id.0.as_slice());
+            .any(|credid| credid.as_slice() == credential.cred_id.as_slice());
 
         if excluded {
             return Err(WebauthnError::CredentialAlteredAlgFromRequest);
@@ -985,7 +984,7 @@ impl WebauthnCore {
             appid,
             allow_backup_eligible_upgrade,
         } = state;
-        let chal: &ChallengeRef = chal.into();
+        let chal: &ChallengeRef = chal.as_slice().into();
 
         // If the allowCredentials option was given when this authentication ceremony was initiated,
         // verify that credential.id identifies one of the public key credentials that were listed in allowCredentials.
@@ -1015,7 +1014,7 @@ impl WebauthnCore {
             // inappropriate for your use case), look up the corresponding credential public key.
             let mut found_cred: Option<&Credential> = None;
             for cred in creds {
-                if cred.cred_id.0 == rsp.raw_id.0 {
+                if cred.cred_id == rsp.raw_id {
                     found_cred = Some(cred);
                     break;
                 }
@@ -1550,7 +1549,7 @@ mod tests {
 
         let chal: Base64UrlSafeData =
             serde_json::from_str("\"qabSCYW_PPKKBAW5_qEsPF3Q3prQeYBORfDMArsoKdg\"").unwrap();
-        let chal = Challenge::from(chal);
+        let chal = Challenge::new(chal.0);
 
         let rsp = r#"{
             "id": "eKSmfhLUwwmJpuD2IKaTopbbWKFv-qZAE4LXa2FGmTtRpvioMpeFhI8RqdsOGlBoQxJehEQyWyu7ECwPkVL5Hg",
@@ -1595,7 +1594,7 @@ mod tests {
 
         let chal: Base64UrlSafeData =
             serde_json::from_str("\"qabSCYW_PPKKBAW5_qEsPF3Q3prQeYBORfDMArsoKdg\"").unwrap();
-        let chal = Challenge::from(chal);
+        let chal = Challenge::new(chal.0);
 
         let rsp = r#"{
             "id": "eKSmfhLUwwmJpuD2IKaTopbbWKFv-qZAE4LXa2FGmTtRpvioMpeFhI8RqdsOGlBoQxJehEQyWyu7ECwPkVL5Hg",
@@ -1651,12 +1650,12 @@ mod tests {
 
         // Create the fake credential that we know is associated
         let cred = Credential {
-            cred_id: Base64UrlSafeData(vec![
+            cred_id: vec![
                 106, 223, 133, 124, 161, 172, 56, 141, 181, 18, 27, 66, 187, 181, 113, 251, 187,
                 123, 20, 169, 41, 80, 236, 138, 92, 137, 4, 4, 16, 255, 188, 47, 158, 202, 111,
                 192, 117, 110, 152, 245, 95, 22, 200, 172, 71, 154, 40, 181, 212, 64, 80, 17, 238,
                 238, 21, 13, 27, 145, 140, 27, 208, 101, 166, 81,
-            ]),
+            ],
             cred: COSEKey {
                 type_: COSEAlgorithm::ES256,
                 key: COSEKeyType::EC_EC2(COSEEC2Key {
@@ -1775,10 +1774,10 @@ mod tests {
         let cred = Credential {
             counter: 1,
             transports: None,
-            cred_id: Base64UrlSafeData(vec![
+            cred_id: vec![
                 179, 64, 237, 0, 28, 248, 197, 30, 213, 228, 250, 139, 28, 11, 156, 130, 69, 242,
                 21, 48, 84, 77, 103, 163, 66, 204, 167, 147, 82, 214, 212,
-            ]),
+            ],
             cred: COSEKey {
                 type_: COSEAlgorithm::ES256,
                 key: COSEKeyType::EC_EC2(COSEEC2Key {
@@ -1894,9 +1893,9 @@ mod tests {
 
         let rsp_d = RegisterPublicKeyCredential {
             id: "uZcVDBVS68E_MtAgeQpElJxldF_6cY9sSvbWqx_qRh8wiu42lyRBRmh5yFeD_r9k130dMbFHBHI9RTFgdJQIzQ".to_string(),
-            raw_id: Base64UrlSafeData(
+            raw_id: 
                 STANDARD.decode("uZcVDBVS68E/MtAgeQpElJxldF/6cY9sSvbWqx/qRh8wiu42lyRBRmh5yFeD/r9k130dMbFHBHI9RTFgdJQIzQ==").unwrap()
-            ),
+            ,
             response: AuthenticatorAttestationResponseRaw {
                 attestation_object: Base64UrlSafeData(
                     STANDARD.decode("o2NmbXRmcGFja2VkZ2F0dFN0bXSjY2FsZyZjc2lnWEcwRQIhAKAZODmj+uF5qXsDY2NFol3apRjld544KRUpHzwfk5cbAiBnp2gHmamr2xr46ilQuhzIR9BwMlwtxWd6IT2QEYeo7WN4NWOBWQLBMIICvTCCAaWgAwIBAgIEK/F8eDANBgkqhkiG9w0BAQsFADAuMSwwKgYDVQQDEyNZdWJpY28gVTJGIFJvb3QgQ0EgU2VyaWFsIDQ1NzIwMDYzMTAgFw0xNDA4MDEwMDAwMDBaGA8yMDUwMDkwNDAwMDAwMFowbjELMAkGA1UEBhMCU0UxEjAQBgNVBAoMCVl1YmljbyBBQjEiMCAGA1UECwwZQXV0aGVudGljYXRvciBBdHRlc3RhdGlvbjEnMCUGA1UEAwweWXViaWNvIFUyRiBFRSBTZXJpYWwgNzM3MjQ2MzI4MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEdMLHhCPIcS6bSPJZWGb8cECuTN8H13fVha8Ek5nt+pI8vrSflxb59Vp4bDQlH8jzXj3oW1ZwUDjHC6EnGWB5i6NsMGowIgYJKwYBBAGCxAoCBBUxLjMuNi4xLjQuMS40MTQ4Mi4xLjcwEwYLKwYBBAGC5RwCAQEEBAMCAiQwIQYLKwYBBAGC5RwBAQQEEgQQxe9V/62aS5+1gK3rr+Am0DAMBgNVHRMBAf8EAjAAMA0GCSqGSIb3DQEBCwUAA4IBAQCLbpN2nXhNbunZANJxAn/Cd+S4JuZsObnUiLnLLS0FPWa01TY8F7oJ8bE+aFa4kTe6NQQfi8+yiZrQ8N+JL4f7gNdQPSrH+r3iFd4SvroDe1jaJO4J9LeiFjmRdcVa+5cqNF4G1fPCofvw9W4lKnObuPakr0x/icdVq1MXhYdUtQk6Zr5mBnc4FhN9qi7DXqLHD5G7ZFUmGwfIcD2+0m1f1mwQS8yRD5+/aDCf3vutwddoi3crtivzyromwbKklR4qHunJ75LGZLZA8pJ/mXnUQ6TTsgRqPvPXgQPbSyGMf2z/DIPbQqCD/Bmc4dj9o6LozheBdDtcZCAjSPTAd/uiaGF1dGhEYXRhWMS3tF916xTswLEZrAO3fy8EzMmvvR8f5wWM7F5+4KJ0ikEAAAACxe9V/62aS5+1gK3rr+Am0ABAuZcVDBVS68E/MtAgeQpElJxldF/6cY9sSvbWqx/qRh8wiu42lyRBRmh5yFeD/r9k130dMbFHBHI9RTFgdJQIzaUBAgMmIAEhWCDCfn9t/BeDFfwG32Ms/owb5hFeBYUcaCmQRauVoRrI8yJYII97t5wYshX4dZ+iRas0vPwaOwYvZ1wTOnVn+QDbCF/E").unwrap()
@@ -2019,10 +2018,10 @@ mod tests {
 
         let rsp_d = RegisterPublicKeyCredential {
             id: "KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI".to_string(),
-            raw_id: Base64UrlSafeData(vec![
+            raw_id: vec![
                 43, 9, 68, 12, 224, 66, 5, 207, 79, 213, 133, 55, 53, 104, 161, 96, 176, 158, 99,
                 226, 61, 40, 99, 33, 61, 170, 125, 191, 1, 219, 86, 130,
-            ]),
+            ],
             response: AuthenticatorAttestationResponseRaw {
                 attestation_object: Base64UrlSafeData(vec![
                     163, 99, 102, 109, 116, 100, 110, 111, 110, 101, 103, 97, 116, 116, 83, 116,
@@ -2088,17 +2087,17 @@ mod tests {
 
         let rsp_d = PublicKeyCredential {
             id: "KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI".to_string(),
-            raw_id: Base64UrlSafeData(vec![
+            raw_id: vec![
                 43, 9, 68, 12, 224, 66, 5, 207, 79, 213, 133, 55, 53, 104, 161, 96, 176, 158, 99,
                 226, 61, 40, 99, 33, 61, 170, 125, 191, 1, 219, 86, 130,
-            ]),
+            ],
             response: AuthenticatorAssertionResponseRaw {
-                authenticator_data: Base64UrlSafeData(vec![
+                authenticator_data: vec![
                     108, 41, 129, 232, 231, 178, 172, 146, 198, 102, 0, 255, 160, 250, 221, 227,
                     137, 40, 196, 142, 208, 221, 115, 246, 47, 198, 69, 45, 165, 107, 42, 27, 5, 0,
                     0, 0, 1,
-                ]),
-                client_data_json: Base64UrlSafeData(vec![
+                ],
+                client_data_json: vec![
                     123, 34, 116, 121, 112, 101, 34, 58, 34, 119, 101, 98, 97, 117, 116, 104, 110,
                     46, 103, 101, 116, 34, 44, 34, 99, 104, 97, 108, 108, 101, 110, 103, 101, 34,
                     58, 34, 118, 88, 82, 45, 97, 48, 111, 100, 48, 114, 86, 106, 115, 113, 51, 87,
@@ -2108,8 +2107,8 @@ mod tests {
                     115, 45, 100, 101, 118, 46, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109,
                     58, 56, 48, 56, 48, 34, 44, 34, 99, 114, 111, 115, 115, 79, 114, 105, 103, 105,
                     110, 34, 58, 102, 97, 108, 115, 101, 125,
-                ]),
-                signature: Base64UrlSafeData(vec![
+                ],
+                signature: vec![
                     77, 253, 152, 83, 184, 198, 5, 16, 68, 51, 178, 5, 228, 20, 148, 168, 182, 3,
                     201, 59, 162, 181, 96, 221, 67, 136, 230, 61, 252, 0, 38, 244, 143, 98, 100,
                     14, 226, 223, 234, 58, 72, 9, 230, 190, 0, 189, 176, 101, 172, 176, 146, 25,
@@ -2126,8 +2125,8 @@ mod tests {
                     248, 10, 1, 73, 222, 52, 57, 72, 51, 44, 131, 206, 4, 243, 66, 100, 61, 113,
                     237, 221, 115, 182, 37, 187, 29, 250, 103, 178, 104, 69, 153, 47, 212, 76, 200,
                     242,
-                ]),
-                user_handle: Some(Base64UrlSafeData(vec![109, 99, 104, 97, 110])),
+                ],
+                user_handle: Some(vec![109, 99, 104, 97, 110]),
             },
             extensions: AuthenticationExtensionsClientOutputs::default(),
             type_: "public-key".to_string(),
@@ -2164,10 +2163,10 @@ mod tests {
 
         let rsp_d = RegisterPublicKeyCredential {
             id: "0_n4aTCbomLUQXr07c7Ea-J0iNvdYmW0bUGuN6-ceGA".to_string(),
-            raw_id: Base64UrlSafeData(vec![
+            raw_id: vec![
                 211, 249, 248, 105, 48, 155, 162, 98, 212, 65, 122, 244, 237, 206, 196, 107, 226,
                 116, 136, 219, 221, 98, 101, 180, 109, 65, 174, 55, 175, 156, 120, 96,
-            ]),
+            ],
             response: AuthenticatorAttestationResponseRaw {
                 attestation_object: Base64UrlSafeData(vec![
                     163, 99, 102, 109, 116, 99, 116, 112, 109, 103, 97, 116, 116, 83, 116, 109,
@@ -2514,10 +2513,10 @@ mod tests {
 
         let rsp_d = RegisterPublicKeyCredential {
             id: "u_tliFf-aXRLg9XIz-SuQ0XBlbE".to_string(),
-            raw_id: Base64UrlSafeData(vec![
+            raw_id: vec![
                 187, 251, 101, 136, 87, 254, 105, 116, 75, 131, 213, 200, 207, 228, 174, 67, 69,
                 193, 149, 177,
-            ]),
+            ],
             response: AuthenticatorAttestationResponseRaw {
                 attestation_object: Base64UrlSafeData(vec![
                     163, 99, 102, 109, 116, 101, 97, 112, 112, 108, 101, 103, 97, 116, 116, 83,
@@ -2716,10 +2715,10 @@ mod tests {
 
         let rsp_d = RegisterPublicKeyCredential {
             id: "u_tliFf-aXRLg9XIz-SuQ0XBlbE".to_string(),
-            raw_id: Base64UrlSafeData(vec![
+            raw_id: vec![
                 187, 251, 101, 136, 87, 254, 105, 116, 75, 131, 213, 200, 207, 228, 174, 67, 69,
                 193, 149, 177,
-            ]),
+            ],
             response: AuthenticatorAttestationResponseRaw {
                 attestation_object: Base64UrlSafeData(vec![
                     163, 99, 102, 109, 116, 101, 97, 112, 112, 108, 101, 103, 97, 116, 116, 83,
@@ -2855,12 +2854,12 @@ mod tests {
         // Given two credentials with differening policy
         let mut creds = vec![
             Credential {
-                cred_id: Base64UrlSafeData(vec![
+                cred_id: vec![
                     205, 198, 18, 130, 133, 220, 73, 23, 199, 211, 240, 143, 220, 154, 172, 117,
                     91, 18, 164, 211, 24, 147, 16, 203, 118, 76, 33, 65, 31, 92, 236, 211, 79, 67,
                     240, 30, 65, 247, 46, 134, 19, 136, 170, 209, 11, 115, 37, 12, 88, 244, 244,
                     240, 148, 132, 191, 165, 150, 166, 252, 39, 97, 137, 21, 186,
-                ]),
+                ],
                 cred: COSEKey {
                     type_: COSEAlgorithm::ES256,
                     key: COSEKeyType::EC_EC2(COSEEC2Key {
@@ -2895,12 +2894,12 @@ mod tests {
                 attestation_format: AttestationFormat::None,
             },
             Credential {
-                cred_id: Base64UrlSafeData(vec![
+                cred_id: vec![
                     211, 204, 163, 253, 101, 149, 83, 136, 242, 175, 211, 104, 215, 131, 122, 175,
                     187, 84, 13, 3, 21, 24, 11, 138, 50, 137, 55, 225, 180, 109, 49, 28, 98, 8, 28,
                     181, 149, 241, 106, 124, 110, 149, 154, 198, 23, 8, 8, 4, 41, 69, 236, 203,
                     122, 120, 204, 174, 28, 58, 171, 43, 218, 81, 195, 177,
-                ]),
+                ],
                 cred: COSEKey {
                     type_: COSEAlgorithm::ES256,
                     key: COSEKeyType::EC_EC2(COSEEC2Key {
@@ -3005,12 +3004,12 @@ mod tests {
 
         let id =
             "zIQDbMsgDg89LbWHAMLrpgI4w5Bz5Hy8U6F-gaUmda1fgwgn6NzhXQFJwEDfowsiY0NTgdU2jjAG2PmzaD5aWA".to_string();
-        let raw_id = Base64UrlSafeData(vec![
+        let raw_id = vec![
             204, 132, 3, 108, 203, 32, 14, 15, 61, 45, 181, 135, 0, 194, 235, 166, 2, 56, 195, 144,
             115, 228, 124, 188, 83, 161, 126, 129, 165, 38, 117, 173, 95, 131, 8, 39, 232, 220,
             225, 93, 1, 73, 192, 64, 223, 163, 11, 34, 99, 67, 83, 129, 213, 54, 142, 48, 6, 216,
             249, 179, 104, 62, 90, 88,
-        ]);
+        ];
 
         let chal = Challenge::new(vec![
             174, 237, 157, 66, 159, 70, 216, 148, 130, 184, 54, 89, 38, 149, 217, 32, 161, 42, 99,
@@ -3122,12 +3121,12 @@ mod tests {
             id,
             raw_id,
             response: AuthenticatorAssertionResponseRaw {
-                authenticator_data: Base64UrlSafeData(vec![
+                authenticator_data: vec![
                     239, 115, 241, 111, 91, 226, 27, 23, 185, 145, 15, 75, 208, 190, 109, 73, 186,
                     119, 107, 122, 2, 224, 117, 140, 139, 132, 92, 21, 148, 105, 187, 55, 1, 0, 0,
                     3, 237,
-                ]),
-                client_data_json: Base64UrlSafeData(vec![
+                ],
+                client_data_json: vec![
                     123, 34, 116, 121, 112, 101, 34, 58, 34, 119, 101, 98, 97, 117, 116, 104, 110,
                     46, 103, 101, 116, 34, 44, 34, 99, 104, 97, 108, 108, 101, 110, 103, 101, 34,
                     58, 34, 102, 122, 84, 81, 56, 57, 90, 89, 84, 121, 73, 77, 52, 112, 72, 90, 50,
@@ -3137,15 +3136,15 @@ mod tests {
                     100, 109, 46, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 58, 56, 48,
                     56, 48, 34, 44, 34, 99, 114, 111, 115, 115, 79, 114, 105, 103, 105, 110, 34,
                     58, 102, 97, 108, 115, 101, 125,
-                ]),
-                signature: Base64UrlSafeData(vec![
+                ],
+                signature: vec![
                     48, 69, 2, 32, 113, 175, 47, 74, 251, 87, 115, 175, 144, 222, 52, 128, 21, 250,
                     35, 239, 213, 162, 75, 45, 110, 28, 15, 103, 138, 234, 106, 219, 34, 198, 74,
                     74, 2, 33, 0, 204, 144, 147, 62, 250, 6, 11, 19, 239, 90, 108, 6, 126, 165,
                     157, 41, 223, 251, 81, 22, 202, 121, 126, 133, 192, 81, 71, 193, 220, 208, 25,
                     127,
-                ]),
-                user_handle: Some(Base64UrlSafeData(vec![])),
+                ],
+                user_handle: Some(vec![]),
             },
             extensions: AuthenticationExtensionsClientOutputs::default(),
             type_: "public-key".to_string(),
@@ -3177,7 +3176,7 @@ mod tests {
 
         let chal: Base64UrlSafeData =
             serde_json::from_str("\"NE6dm0mgUe47-X0Yf5nRdhYokY3A8XAzs10KBLGlVY0\"").unwrap();
-        let chal = Challenge::from(chal);
+        let chal = Challenge::new(chal.0);
 
         let rsp_d: RegisterPublicKeyCredential = serde_json::from_str(r#"{
             "id": "k8-N3sbgQe_ze58s5b955iLRrqcizmms-YOqFQTQbBbbJLStt9CaR3vUYXEajy4O22fAgdyY1aOvc6HW9o1ikqiSWee2CxXXJe2DE40byI4-m4oesHfmz4urfMxkIrAd_4i8pgWHNLVlTSMtAzhCXH16Yw4uUsdsntv1HpYiu94",
@@ -3221,7 +3220,7 @@ mod tests {
 
         let chal: Base64UrlSafeData =
             serde_json::from_str("\"rRPXQ7lps3xBQzX3dDAor9fHwH_ff55gUU-8wwZVK-g\"").unwrap();
-        let chal = Challenge::from(chal);
+        let chal = Challenge::new(chal.0);
 
         let rsp_d: RegisterPublicKeyCredential = serde_json::from_str(r#"{
             "id": "owBY6NCpGj_5nAM427VzsWjmifVdW10z3Ov8fyN5BPX5cxyR2umlVN5h7oGUos-9RPeoYBuCRBkSyAK6jM0gkZ0RLrHrCGRTwfk5p1NQ2ucX_cAh0uel-TkBpyWE-dxqXyk-WLlhSA4LKEdlmyTVqiDAGG7CRHdDn0oAufgq0za7-Crt6cWPKwzmkTGHsMAaEqEaQzHjo1D-pb_WkJJfYp5SZ52ZdTj5eKx7htT5QIogb70lwTKv82ix8PZskqiV-L4j5EroU-xXl7sxKlVtmkS8tSlHpyU-h8fZcFmmW4lr6cBOACd5aNEgR88BTFqQQZ97RORZ7J9sagJQJ63Jj-CZTqGBewVu2jazgA",
@@ -3266,7 +3265,7 @@ mod tests {
         );
         let chal: Base64UrlSafeData =
             serde_json::from_str("\"Y0j5PX0VXeKb2150k6sAh1QNRBJ3iTv8WBsUfgn_pRs\"").unwrap();
-        let chal = Challenge::from(chal);
+        let chal = Challenge::new(chal.0);
 
         let rsp_d: RegisterPublicKeyCredential = serde_json::from_str(r#"{
             "id": "Afx3PxBAXAercQxfFjvHGt3OnTHtXjfNcuCxI-XVaeAtLkohnHQ_mJ2Ocgj2Bhhkv3neczncwaH1nkVpwitUxyQ",
@@ -3310,7 +3309,7 @@ mod tests {
         );
         let chal: Base64UrlSafeData =
             serde_json::from_str("\"CxQSmkUusCl8ig6qyA0Cp4qFU4Y960OAYGX1c24G-fo\"").unwrap();
-        let chal = Challenge::from(chal);
+        let chal = Challenge::new(chal.0);
 
         let rsp_d: RegisterPublicKeyCredential = serde_json::from_str(r#"{
         "id": "ARyDDvKaBEFvDCuXalasRT97rY-Akdim8kK03QK3EP3gJHq4ddYvvWvgkd_FwoR4zrfstbILRWCpT4Xy9j44c8w",
@@ -3353,7 +3352,7 @@ mod tests {
 
         let chal: Base64UrlSafeData =
             serde_json::from_str("\"55Wztjbgks9UkS5jYthawNFik0HSiYuCSB5pzNbT6k0\"").unwrap();
-        let chal = Challenge::from(chal);
+        let chal = Challenge::new(chal.0);
 
         let rsp_d: RegisterPublicKeyCredential = serde_json::from_str(r#"{
         "id": "AfzEi3UOVveYjwUwIFO3QuN9V0fomECvAYrD_8S5FAsUJqtGbwpgB9bEfphVOURzFQoEszkuULIj5fMvnTkt6cs",
@@ -3396,7 +3395,7 @@ mod tests {
 
         let chal: Base64UrlSafeData =
             serde_json::from_str("\"t_We131NpwllyPL0x26bzZgkF5f_XvA7Ocb4b98zlxM\"").unwrap();
-        let chal = Challenge::from(chal);
+        let chal = Challenge::new(chal.0);
 
         let rsp_d: RegisterPublicKeyCredential = serde_json::from_str(r#"{
         "id": "AfJfonHsXY_f7_gFmV1dI473Ce--_g0tHhdXUoh7JmMn0gzhYUtU9bFqpCgSljjwJxEXkjzb-11ulePZyI0RiyQ",
@@ -3444,7 +3443,7 @@ mod tests {
 
         let chal: Base64UrlSafeData =
             serde_json::from_str("\"FKVseWmr5DxQ_H9iTyoTgRPIClLspXO0XbOKQfMuaFc\"").unwrap();
-        let chal = Challenge::from(chal);
+        let chal = Challenge::new(chal.0);
 
         let rsp_d: RegisterPublicKeyCredential = serde_json::from_str(r#"{
             "id": "6h7wVk2n4Buulhd5fiShGb0BBViIgvDoVO3xhn0A0Mg",
@@ -3493,15 +3492,15 @@ mod tests {
             108, 33, 62, 167, 162, 234, 36, 63, 176, 231, 161, 58, 41, 233, 117, 157, 210, 244,
             123, 28, 194, 100, 34, 68, 32, 1, 183, 240, 100, 225, 182, 48,
         ]);
-        let chal = Challenge::from(chal);
+        let chal = Challenge::new(chal.0);
 
         let rsp_d: RegisterPublicKeyCredential = RegisterPublicKeyCredential {
             id: "AWtT-NSYHNmZjP2R9JAbBmwf3sWMxs_L4_O2XoIvI8HY-rGPjA".to_string(),
-            raw_id: Base64UrlSafeData(vec![
+            raw_id: vec![
                 1, 107, 83, 248, 212, 152, 28, 217, 153, 140, 253, 145, 244, 144, 27, 6, 108, 31,
                 222, 197, 140, 198, 207, 203, 227, 243, 182, 94, 130, 47, 35, 193, 216, 250, 177,
                 143, 140,
-            ]),
+            ],
             response: AuthenticatorAttestationResponseRaw {
                 attestation_object: Base64UrlSafeData(vec![
                     163, 99, 102, 109, 116, 102, 112, 97, 99, 107, 101, 100, 103, 97, 116, 116, 83,
@@ -3611,7 +3610,7 @@ mod tests {
 
         let chal: Base64UrlSafeData =
             serde_json::from_str("\"dfo+HlqJp3MLK+J5TLxxmvXJieS3zGwdk9G9H9bPezg=\"").unwrap();
-        let chal = Challenge::from(chal);
+        let chal = Challenge::new(chal.0);
 
         let rsp_d: RegisterPublicKeyCredential = serde_json::from_str(response).unwrap();
 
@@ -3669,7 +3668,7 @@ mod tests {
             None,
         );
 
-        let chal = Challenge::from(chal);
+        let chal = Challenge::new(chal.0);
 
         let rsp_d: RegisterPublicKeyCredential = serde_json::from_str(response).unwrap();
 
@@ -3728,7 +3727,7 @@ mod tests {
             None,
         );
 
-        let chal = Challenge::from(chal);
+        let chal = Challenge::new(chal.0);
 
         let rsp_d: RegisterPublicKeyCredential = serde_json::from_str(response).unwrap();
 
@@ -3797,7 +3796,7 @@ mod tests {
             None,
         );
 
-        let chal = Challenge::from(chal);
+        let chal = Challenge::new(chal.0);
 
         let rsp_d: RegisterPublicKeyCredential = serde_json::from_str(response).unwrap();
 

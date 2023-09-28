@@ -1,7 +1,7 @@
 use url::Url;
 use webauthn_rs_core::error::{WebauthnError, WebauthnResult};
 use webauthn_rs_core::proto::{
-    AuthenticationResult, Base64UrlSafeData, CreationChallengeResponse, Credential,
+    AuthenticationResult, CreationChallengeResponse, Credential,
     PublicKeyCredential, RegisterPublicKeyCredential, RequestChallengeResponse,
 };
 use webauthn_rs_core::proto::{AuthenticationState, RegistrationState};
@@ -101,7 +101,7 @@ impl WebauthnActor {
                     user_unique_id,
                     &username,
                     &username,
-                    Some(vec![Base64UrlSafeData(vec![0x00, 0x01, 0x02, 0x03])]),
+                    Some(vec![vec![0x00, 0x01, 0x02, 0x03]]),
                 )
                 .map(|(ccr, rs)| (ccr, RegistrationTypedState::Passkey(rs)))?,
             RegisterWithType::AttestedPasskey(strict) => {

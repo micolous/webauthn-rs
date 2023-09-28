@@ -12,7 +12,7 @@ use crate::crypto::{
 use crate::error::WebauthnError;
 use crate::internals::*;
 use crate::proto::*;
-use base64urlsafedata::Base64UrlSafeData;
+use base64urlsafedata;
 use openssl::hash::MessageDigest;
 use openssl::sha::sha256;
 use openssl::stack;
@@ -594,7 +594,7 @@ pub(crate) fn verify_fidou2f_attestation(
         .iter()
         .chain(att_obj.auth_data.rp_id_hash.iter())
         .chain(client_data_hash.iter())
-        .chain(acd.credential_id.0.iter())
+        .chain(acd.credential_id.iter())
         .chain(public_key_u2f.iter())
         .copied()
         .collect();
@@ -1101,9 +1101,10 @@ pub(crate) fn verify_android_safetynet_attestation(
     #[serde(rename_all = "camelCase")]
     struct SafteyNetAttestResponse {
         timestamp_ms: u64,
-        nonce: Base64UrlSafeData,
+        #[serde(with = "base64urlsafedata")]
+        nonce: Vec<u8>,
         apk_package_name: String,
-        apk_certificate_digest_sha256: Vec<Base64UrlSafeData>,
+        apk_certificate_digest_sha256: Vec<Vec<u8>>,
         cts_profile_match: bool,
         basic_integrity: bool,
         evaluation_type: Option<String>,
@@ -1164,7 +1165,7 @@ pub(crate) fn verify_android_safetynet_attestation(
             let verified_claims = jws.into_inner();
 
             // 3. Verify that the nonce attribute in the payload of response is identical to the Base64 encoding of the SHA-256 hash of the concatenation of authenticatorData and clientDataHash.
-            if verified_claims.nonce.0 != data_to_verify.to_vec() {
+            if verified_claims.nonce != data_to_verify.to_vec() {
                 return Err(SafetyNetError::NonceMismatch);
             }
 

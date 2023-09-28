@@ -140,6 +140,61 @@ impl Serialize for Base64UrlSafeData {
     }
 }
 
+pub fn serialize<S: Serializer>(v: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_str(&URL_SAFE_NO_PAD.encode(v))
+}
+
+pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+    d.deserialize_any(MaybeBase64UrlSafeVisitor)
+}
+
+struct MaybeBase64UrlSafeVisitor;
+
+impl<'de> Visitor<'de> for MaybeBase64UrlSafeVisitor {
+    type Value = Vec<u8>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "a base64 url encoded string")
+    }
+
+    fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        Ok(v)
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        // Forgive alt base64 decoding formats
+        for config in ALLOWED_DECODING_FORMATS {
+            if let Ok(data) = config.decode(v) {
+                return Ok(data);
+            }
+        }
+
+        Err(serde::de::Error::invalid_value(Unexpected::Str(v), &self))
+    }
+
+    fn visit_seq<A>(self, mut v: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let mut data = if let Some(sz) = v.size_hint() {
+            Vec::with_capacity(sz)
+        } else {
+            Vec::new()
+        };
+
+        while let Some(i) = v.next_element()? {
+            data.push(i)
+        }
+        Ok(data)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Base64UrlSafeData;
