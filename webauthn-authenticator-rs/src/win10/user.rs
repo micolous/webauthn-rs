@@ -1,6 +1,6 @@
 //! Wrappers for [User].
+use crate::{error::WebauthnCError, win10::native::WinWrapper};
 use std::pin::Pin;
-
 use webauthn_rs_proto::User;
 use windows::{
     core::{HSTRING, PCWSTR},
@@ -8,9 +8,6 @@ use windows::{
         WEBAUTHN_USER_ENTITY_INFORMATION, WEBAUTHN_USER_ENTITY_INFORMATION_CURRENT_VERSION,
     },
 };
-
-use super::WinWrapper;
-use crate::error::WebauthnCError;
 
 /// Wrapper for [WEBAUTHN_USER_ENTITY_INFORMATION] to ensure pointer lifetime, analgous to [User].
 pub struct WinUserEntityInformation {

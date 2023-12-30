@@ -1,14 +1,10 @@
 //! Wrappers for extensions.
-use crate::prelude::WebauthnCError;
-use std::ffi::c_void;
-use std::pin::Pin;
+use crate::{error::WebauthnCError, win10::native::WinWrapper};
+use std::{ffi::c_void, pin::Pin};
 use webauthn_rs_proto::{
     AuthenticationExtensionsClientOutputs, CredProtect, RegistrationExtensionsClientOutputs,
     RequestRegistrationExtensions,
 };
-
-use super::WinWrapper;
-
 use windows::{
     core::PCWSTR,
     Win32::{Foundation::BOOL, Networking::WindowsWebServices::*},

@@ -1,6 +1,6 @@
 //! Wrappers for [RelyingParty].
+use crate::{error::WebauthnCError, win10::native::WinWrapper};
 use std::pin::Pin;
-
 use webauthn_rs_proto::RelyingParty;
 use windows::{
     core::{HSTRING, PCWSTR},
@@ -8,9 +8,6 @@ use windows::{
         WEBAUTHN_RP_ENTITY_INFORMATION, WEBAUTHN_RP_ENTITY_INFORMATION_CURRENT_VERSION,
     },
 };
-
-use super::WinWrapper;
-use crate::error::WebauthnCError;
 
 /// Wrapper for [WEBAUTHN_RP_ENTITY_INFORMATION] to ensure pointer lifetime.
 pub struct WinRpEntityInformation {

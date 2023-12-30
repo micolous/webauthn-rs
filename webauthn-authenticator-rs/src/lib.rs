@@ -166,7 +166,7 @@ pub mod u2fhid {
     pub use crate::mozilla::MozillaAuthenticator as U2FHid;
 }
 
-#[cfg(any(all(doc, not(doctest)), feature = "win10"))]
+#[cfg(any(all(doc, not(doctest)), any(feature = "win10", feature = "win10-rdp")))]
 pub mod win10;
 
 #[cfg(doc)]

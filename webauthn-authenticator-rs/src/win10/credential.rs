@@ -1,11 +1,8 @@
 //! Wrappers for [AllowCredentials] and [PublicKeyCredentialDescriptor].
-use crate::prelude::WebauthnCError;
+use crate::{error::WebauthnCError, win10::native::WinWrapper};
 use base64urlsafedata::Base64UrlSafeData;
 use std::pin::Pin;
 use webauthn_rs_proto::{AllowCredentials, AuthenticatorTransport, PublicKeyCredentialDescriptor};
-
-use super::WinWrapper;
-
 use windows::{
     core::{w, PCWSTR},
     Win32::Networking::WindowsWebServices::{

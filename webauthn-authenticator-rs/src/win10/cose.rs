@@ -1,10 +1,7 @@
 //! Wrappers for [PubKeyCredParams].
-use crate::prelude::WebauthnCError;
+use crate::{error::WebauthnCError, win10::native::WinWrapper};
 use std::pin::Pin;
 use webauthn_rs_proto::PubKeyCredParams;
-
-use super::WinWrapper;
-
 use windows::{
     core::{HSTRING, PCWSTR},
     Win32::Networking::WindowsWebServices::{
