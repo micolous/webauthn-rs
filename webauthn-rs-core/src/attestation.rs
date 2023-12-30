@@ -57,6 +57,13 @@ impl AttestationX509Extension for FidoGenCeAaguid {
     type Output = Aaguid;
 
     fn parse(i: &[u8]) -> der_parser::error::BerResult<(Self::Output, AttestationMetadata)> {
+        if i.len() == std::mem::size_of::<Aaguid>() {
+            // HACK HACK HACK REMOVE ME
+            // Windows 10 MicrosoftCtapTestProvider fails this.
+            // https://w3c.github.io/webauthn/#sctn-packed-attestation-cert-requirements
+            warn!("AAGUID wrapped in *single* octet string, rather than *two* octet strings!");
+            return Ok((&[], (i.try_into().unwrap(), AttestationMetadata::None)));
+        }
         let (rem, aaguid) = der_parser::der::parse_der_octetstring(i)?;
         let aaguid: Aaguid = aaguid
             .as_slice()
@@ -317,14 +324,24 @@ where
 {
     let der_bytes = x509.to_der()?;
     x509_parser::parse_x509_certificate(&der_bytes)
-        .map_err(|_| WebauthnError::AttestationStatementX5CInvalid)?
+        .map_err(|e| {
+            error!(
+                "cannot parse X509 certificate when validating extension {:?}: {e:?}",
+                T::OID
+            );
+            WebauthnError::AttestationStatementX5CInvalid
+        })?
         .1
         .extensions()
         .iter()
         .find_map(|extension| {
             (extension.oid == T::OID).then(|| {
+                trace!("extension {:?} value: {}", T::OID, hex::encode(&extension.value));
                 T::parse(extension.value)
-                    .map_err(|_| WebauthnError::AttestationStatementX5CInvalid)
+                    .map_err(|e| {
+                        error!("cannot parse extension {:?}: {e:?}", T::OID);
+                        WebauthnError::AttestationStatementX5CInvalid
+                    })
                     .and_then(|(_, (output, metadata))| {
                         if &output == data {
                             Ok(metadata)

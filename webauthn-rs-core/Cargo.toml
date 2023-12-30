@@ -36,6 +36,7 @@ x509-parser = "0.13.0"
 der-parser = "7.0.0"
 compact_jwt.workspace = true
 uuid = { workspace = true, features = ["serde"] }
+hex.workspace = true
 
 [dev-dependencies]
 hex-literal = "0.3"

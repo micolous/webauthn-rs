@@ -10,7 +10,7 @@ pub struct ChannelRequest {
     pub command: u8,
     pub flags: u32,
     pub timeout: u32,
-    #[serde(with = "UuidDef")]
+    // #[serde(with = "UuidDef")]
     pub transaction_id: Uuid,
     #[serde(rename = "webAuthNPara", skip_serializing_if = "Option::is_none")]
     pub webauthn_para: Option<WebauthnPara>,
@@ -29,7 +29,7 @@ pub struct WebauthnPara {
     pub user_verification: u32,
     pub attestation_preference: u32,
     pub enterprise_attestation: u32,
-    #[serde(with = "UuidDef")]
+    // #[serde(with = "UuidDef")]
     pub cancellation_id: Uuid,
 }
 
@@ -73,22 +73,6 @@ impl DeviceInfo {
             "test" => Some(AuthenticatorTransport::Test),
             _ => None,
         }
-    }
-}
-
-type UuidByteArray = ByteArray<{ std::mem::size_of::<uuid::Bytes>() }>;
-
-#[derive(Serialize, Deserialize)]
-#[serde(remote = "uuid::Uuid")]
-struct UuidDef(#[serde(getter = "uuiddef_from_uuid")] pub UuidByteArray);
-
-fn uuiddef_from_uuid(u: &Uuid) -> UuidByteArray {
-    UuidByteArray::new(u.as_bytes().clone())
-}
-
-impl From<UuidDef> for Uuid {
-    fn from(value: UuidDef) -> Self {
-        Uuid::from_bytes(*value.0)
     }
 }
 
