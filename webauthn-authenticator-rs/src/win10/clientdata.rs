@@ -6,8 +6,7 @@ use super::WinWrapper;
 use crate::error::WebauthnCError;
 
 use windows::{
-    core::HSTRING,
-    w,
+    core::{w, PCWSTR},
     Win32::Networking::WindowsWebServices::{
         WEBAUTHN_CLIENT_DATA, WEBAUTHN_CLIENT_DATA_CURRENT_VERSION,
     },
@@ -15,7 +14,7 @@ use windows::{
 // Most constants are `&str`, but APIs expect `HSTRING`... there's no good work-around.
 // https://github.com/microsoft/windows-rs/issues/2049
 /// [windows::Win32::Networking::WindowsWebServices::WEBAUTHN_HASH_ALGORITHM_SHA_256]
-const SHA_256: &HSTRING = w!("SHA-256");
+const SHA_256: PCWSTR = w!("SHA-256");
 
 /// Wrapper for [WEBAUTHN_CLIENT_DATA] to ensure pointer lifetime.
 pub struct WinClientData {

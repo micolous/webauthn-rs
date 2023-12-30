@@ -43,10 +43,9 @@ use std::{
     thread,
 };
 use windows::{
-    core::{HSTRING, PCWSTR},
-    w,
+    core::{w, PCWSTR},
     Win32::{
-        Foundation::{GetLastError, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
+        Foundation::{GetLastError, HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM},
         Graphics::{
             Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS},
             Gdi::{GetSysColorBrush, COLOR_WINDOW},
@@ -75,7 +74,7 @@ unsafe extern "system" fn window_proc(
 ) -> LRESULT {
     match msg {
         WM_CLOSE => {
-            DestroyWindow(hwnd);
+            let _ = DestroyWindow(hwnd);
             LRESULT(0)
         }
         WM_DESTROY => {
@@ -87,13 +86,13 @@ unsafe extern "system" fn window_proc(
 }
 
 /// Window class for our [Window].
-const WINDOW_CLASS: &HSTRING = w!("webauthn-authenticator-rs");
+const WINDOW_CLASS: PCWSTR = w!("webauthn-authenticator-rs");
 
 /// Gets a module handle for the current process and registers
 /// [WINDOW_CLASS] on first run.
-unsafe fn get_module_handle() -> HINSTANCE {
+unsafe fn get_module_handle() -> HMODULE {
     static INIT: Once = Once::new();
-    static mut MODULE_HANDLE: HINSTANCE = HINSTANCE(0);
+    static mut MODULE_HANDLE: HMODULE = HMODULE(0);
 
     INIT.call_once(|| {
         MODULE_HANDLE = GetModuleHandleW(PCWSTR::null()).expect("GetModuleHandleW");
@@ -105,7 +104,7 @@ unsafe fn get_module_handle() -> HINSTANCE {
             lpfnWndProc: Some(window_proc),
             cbClsExtra: 0,
             cbWndExtra: 0,
-            hInstance: MODULE_HANDLE,
+            hInstance: MODULE_HANDLE.into(),
             hIcon: icon,
             hCursor: LoadCursorW(None, IDC_ARROW).expect("LoadCursorW"),
             hbrBackground: GetSysColorBrush(COLOR_WINDOW),
@@ -122,7 +121,7 @@ unsafe fn get_module_handle() -> HINSTANCE {
 
 /// Window to act as a parent for Windows WebAuthn API.
 pub struct Window {
-    hwnd: HWND,
+    pub hwnd: HWND,
 }
 
 impl Window {
@@ -182,7 +181,7 @@ impl Window {
                 if parent == HWND(0) {
                     // When we have an un-parented window, make it invisible
                     // and put it in the centre of the primary screen.
-                    SetLayeredWindowAttributes(hwnd, None, 0, LWA_ALPHA);
+                    let _ = SetLayeredWindowAttributes(hwnd, None, 0, LWA_ALPHA);
                     Some((
                         GetSystemMetrics(SM_CXSCREEN) / 2,
                         GetSystemMetrics(SM_CYSCREEN) / 2,
@@ -234,14 +233,8 @@ impl Drop for Window {
     fn drop(&mut self) {
         // trace!("dropping window");
         unsafe {
-            PostMessageW(self.hwnd, WM_CLOSE, None, None);
+            let _ = PostMessageW(self.hwnd, WM_CLOSE, None, None);
         }
-    }
-}
-
-impl From<&Window> for HWND {
-    fn from(w: &Window) -> HWND {
-        w.hwnd
     }
 }
 

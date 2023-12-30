@@ -6,7 +6,7 @@ use webauthn_rs_proto::PubKeyCredParams;
 use super::WinWrapper;
 
 use windows::{
-    core::HSTRING,
+    core::{HSTRING, PCWSTR},
     Win32::Networking::WindowsWebServices::{
         WEBAUTHN_COSE_CREDENTIAL_PARAMETER, WEBAUTHN_COSE_CREDENTIAL_PARAMETERS,
         WEBAUTHN_COSE_CREDENTIAL_PARAMETER_CURRENT_VERSION,
@@ -30,7 +30,7 @@ impl WinCoseCredentialParameter {
 
         let native = WEBAUTHN_COSE_CREDENTIAL_PARAMETER {
             dwVersion: WEBAUTHN_COSE_CREDENTIAL_PARAMETER_CURRENT_VERSION,
-            pwszCredentialType: (&boxed._typ).into(),
+            pwszCredentialType: PCWSTR(boxed._typ.as_ptr()),
             lAlg: p.alg as i32,
         };
 

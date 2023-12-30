@@ -10,7 +10,7 @@ use webauthn_rs_proto::{
 use super::WinWrapper;
 
 use windows::{
-    core::HSTRING,
+    core::PCWSTR,
     Win32::{Foundation::BOOL, Networking::WindowsWebServices::*},
 };
 
@@ -35,7 +35,7 @@ where
     Self: Sized,
 {
     /// Extension identier, as string.
-    fn identifier(&self) -> &str;
+    fn identifier(&self) -> PCWSTR;
     /// Length of the native data structure, in bytes.
     fn len(&self) -> u32;
     /// Pointer to the native data structure.
@@ -47,7 +47,7 @@ where
 }
 
 impl WinExtensionRequestType for WinExtensionMakeCredentialRequest {
-    fn identifier(&self) -> &str {
+    fn identifier(&self) -> PCWSTR {
         match self {
             Self::HmacSecret(_) => WEBAUTHN_EXTENSIONS_IDENTIFIER_HMAC_SECRET,
             Self::CredProtect(_) => WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_PROTECT,
@@ -161,28 +161,34 @@ impl TryFrom<&WEBAUTHN_EXTENSION> for WinExtensionMakeCredentialResponse {
 
     /// Reads a [WEBAUTHN_EXTENSION] for a response to a MakeCredential call.
     fn try_from(e: &WEBAUTHN_EXTENSION) -> Result<Self, WebauthnCError> {
-        let id = unsafe {
-            e.pwszExtensionIdentifier
-                .to_string()
-                .map_err(|_| WebauthnCError::Internal)?
-        };
-        // let id = &HSTRING::from_wide(unsafe { e.pwszExtensionIdentifier.as_wide() });
-        match id.as_str() {
-            WEBAUTHN_EXTENSIONS_IDENTIFIER_HMAC_SECRET => {
-                read_extension::<'_, BOOL, _>(e).map(WinExtensionMakeCredentialResponse::HmacSecret)
-            }
-            WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_PROTECT => {
-                read_extension2(e).map(WinExtensionMakeCredentialResponse::CredProtect)
-            }
+        if e.pwszExtensionIdentifier.is_null() {
+            return Err(WebauthnCError::Internal);
+        }
+
+        if pcwstr_eq(
+            e.pwszExtensionIdentifier,
+            WEBAUTHN_EXTENSIONS_IDENTIFIER_HMAC_SECRET,
+        ) {
+            read_extension::<'_, BOOL, _>(e).map(WinExtensionMakeCredentialResponse::HmacSecret)
+        } else if pcwstr_eq(
+            e.pwszExtensionIdentifier,
+            WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_PROTECT,
+        ) {
+            read_extension2(e).map(WinExtensionMakeCredentialResponse::CredProtect)
+        } else if pcwstr_eq(
+            e.pwszExtensionIdentifier,
+            WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_BLOB,
+        ) {
             // Value intentonally ignored
-            WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_BLOB => Ok(Self::CredBlob),
-            WEBAUTHN_EXTENSIONS_IDENTIFIER_MIN_PIN_LENGTH => {
-                read_extension2(e).map(WinExtensionMakeCredentialResponse::MinPinLength)
-            }
-            o => {
-                error!("unknown extension: {:?}", o);
-                Err(WebauthnCError::Internal)
-            }
+            Ok(Self::CredBlob)
+        } else if pcwstr_eq(
+            e.pwszExtensionIdentifier,
+            WEBAUTHN_EXTENSIONS_IDENTIFIER_MIN_PIN_LENGTH,
+        ) {
+            read_extension2(e).map(WinExtensionMakeCredentialResponse::MinPinLength)
+        } else {
+            error!("unknown extension: {:?}", e.pwszExtensionIdentifier);
+            Err(WebauthnCError::Internal)
         }
     }
 }
@@ -223,18 +229,15 @@ impl TryFrom<&WEBAUTHN_EXTENSION> for WinExtensionGetAssertionResponse {
 
     /// Reads a [WEBAUTHN_EXTENSION] for a response to a GetAssertion call.
     fn try_from(e: &WEBAUTHN_EXTENSION) -> Result<Self, Self::Error> {
-        let id = unsafe {
-            e.pwszExtensionIdentifier
-                .to_string()
-                .map_err(|_| WebauthnCError::Internal)?
-        };
-
-        match id.as_str() {
-            WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_BLOB => Ok(Self::CredBlob),
-            o => {
-                error!("unknown extension: {:?}", o);
-                Err(WebauthnCError::Internal)
-            }
+        if pcwstr_eq(
+            e.pwszExtensionIdentifier,
+            WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_BLOB,
+        ) {
+            // Value intentionally ignored
+            Ok(Self::CredBlob)
+        } else {
+            error!("unknown extension: {:?}", e.pwszExtensionIdentifier);
+            Err(WebauthnCError::Internal)
         }
     }
 }
@@ -263,7 +266,7 @@ where
 {
     native: WEBAUTHN_EXTENSIONS,
     native_list: Vec<WEBAUTHN_EXTENSION>,
-    ids: Vec<HSTRING>,
+    ids: Vec<PCWSTR>,
     extensions: Vec<T>,
 }
 
@@ -316,9 +319,8 @@ where
             let l = &mut mut_ptr.native_list;
             let l_ptr = l.as_mut_ptr();
             for (i, extension) in mut_ptr.extensions.iter_mut().enumerate() {
-                let id = &mut_ptr.ids[i];
                 *l_ptr.add(i) = WEBAUTHN_EXTENSION {
-                    pwszExtensionIdentifier: id.into(),
+                    pwszExtensionIdentifier: mut_ptr.ids[i],
                     cbExtension: extension.len(),
                     pvExtension: extension.ptr(),
                 };
@@ -340,4 +342,16 @@ where
 
         Ok(boxed)
     }
+}
+
+fn pcwstr_eq(a: PCWSTR, b: PCWSTR) -> bool {
+    extern "C" {
+        fn wcscmp(a: PCWSTR, b: PCWSTR) -> i32;
+    }
+
+    if a.is_null() || b.is_null() {
+        return a.is_null() == b.is_null();
+    }
+
+    unsafe { wcscmp(a, b) == 0 }
 }

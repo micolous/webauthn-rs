@@ -94,7 +94,7 @@ impl AuthenticatorBackend for Win10 {
         options: PublicKeyCredentialCreationOptions,
         timeout_ms: u32,
     ) -> Result<RegisterPublicKeyCredential, WebauthnCError> {
-        let hwnd = Window::new()?;
+        let window = Window::new()?;
         // let hwnd = get_hwnd().ok_or(WebauthnCError::CannotFindHWND)?;
         let rp = WinRpEntityInformation::new(&options.rp)?;
         let userinfo = WinUserEntityInformation::new(&options.user)?;
@@ -151,6 +151,7 @@ impl AuthenticatorBackend for Win10 {
             dwEnterpriseAttestation: 0,
             dwLargeBlobSupport: 0,
             bPreferResidentKey: false.into(),
+            bBrowserInPrivateMode: false.into(),
         };
 
         // trace!("WebAuthNAuthenticatorMakeCredential()");
@@ -158,7 +159,7 @@ impl AuthenticatorBackend for Win10 {
         // trace!(?makecredopts);
         let a = unsafe {
             let r = WebAuthNAuthenticatorMakeCredential(
-                &hwnd,
+                window.hwnd,
                 rp.native_ptr(),
                 userinfo.native_ptr(),
                 pubkeycredparams.native_ptr(),
@@ -176,7 +177,7 @@ impl AuthenticatorBackend for Win10 {
         };
         // These needed to live until WebAuthNAuthenticatorMakeCredential returned.
         drop(extensions);
-        drop(hwnd);
+        drop(window);
 
         // trace!("got result from WebAuthNAuthenticatorMakeCredential");
         // trace!("{:?}", (*a));
@@ -221,7 +222,7 @@ impl AuthenticatorBackend for Win10 {
         timeout_ms: u32,
     ) -> Result<PublicKeyCredential, WebauthnCError> {
         trace!(?options);
-        let hwnd = Window::new()?;
+        let window = Window::new()?;
         let rp_id: HSTRING = options.rp_id.clone().into();
         let clientdata = WinClientData::new(&get_to_clientdata(origin, options.challenge.clone()))?;
 
@@ -276,7 +277,7 @@ impl AuthenticatorBackend for Win10 {
             dwFlags: 0,
             pwszU2fAppId: match &app_id {
                 None => PCWSTR::null(),
-                Some(l) => l.into(),
+                Some(l) => PCWSTR(l.as_ptr()),
             },
             pbU2fAppId: std::ptr::addr_of_mut!(app_id_used),
             pCancellationId: std::ptr::null_mut(),
@@ -284,12 +285,14 @@ impl AuthenticatorBackend for Win10 {
             dwCredLargeBlobOperation: 0,
             cbCredLargeBlob: 0,
             pbCredLargeBlob: std::ptr::null_mut(),
+            pHmacSecretSaltValues: std::ptr::null_mut(),
+            bBrowserInPrivateMode: false.into(),
         };
 
         // trace!("WebAuthNAuthenticatorGetAssertion()");
         let a = unsafe {
             let r = WebAuthNAuthenticatorGetAssertion(
-                &hwnd,
+                window.hwnd,
                 &rp_id,
                 clientdata.native_ptr(),
                 Some(&getassertopts),
@@ -303,7 +306,8 @@ impl AuthenticatorBackend for Win10 {
             WinPtr::new(r, WebAuthNFreeAssertion).ok_or(WebauthnCError::Internal)?
         };
         // This needed to live until WebAuthNAuthenticatorGetAssertion returned.
-        drop(hwnd);
+        drop(window);
+        drop(app_id);
         // trace!("got result from WebAuthNAuthenticatorGetAssertion");
 
         unsafe {

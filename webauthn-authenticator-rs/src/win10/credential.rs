@@ -7,8 +7,7 @@ use webauthn_rs_proto::{AllowCredentials, AuthenticatorTransport, PublicKeyCrede
 use super::WinWrapper;
 
 use windows::{
-    core::HSTRING,
-    w,
+    core::{w, PCWSTR},
     Win32::Networking::WindowsWebServices::{
         WEBAUTHN_CREDENTIAL_EX, WEBAUTHN_CREDENTIAL_EX_CURRENT_VERSION, WEBAUTHN_CREDENTIAL_LIST,
         WEBAUTHN_CTAP_TRANSPORT_BLE, WEBAUTHN_CTAP_TRANSPORT_INTERNAL, WEBAUTHN_CTAP_TRANSPORT_NFC,
@@ -19,7 +18,7 @@ use windows::{
 // Most constants are `&str`, but APIs expect `HSTRING`... there's no good work-around.
 // https://github.com/microsoft/windows-rs/issues/2049
 /// [windows::Win32::Networking::WindowsWebServices::WEBAUTHN_CREDENTIAL_TYPE_PUBLIC_KEY]
-const CREDENTIAL_TYPE_PUBLIC_KEY: &HSTRING = w!("public-key");
+const CREDENTIAL_TYPE_PUBLIC_KEY: PCWSTR = w!("public-key");
 
 /// Converts an [AuthenticatorTransport] into a value for
 /// [WEBAUTHN_CREDENTIAL_EX::dwTransports]
