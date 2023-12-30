@@ -7,7 +7,7 @@ use std::io::{stdin, stdout, Write};
 use std::time::Duration;
 
 use clap::clap_derive::ValueEnum;
-#[cfg(any(feature = "cable", feature = "softtoken"))]
+#[cfg(any(feature = "cable", feature = "softtoken", feature = "win10-rdp"))]
 use clap::Args;
 use clap::{Parser, Subcommand};
 #[cfg(feature = "cable")]
@@ -29,7 +29,7 @@ use webauthn_authenticator_rs::ui::{Cli, UiCallback};
 use webauthn_authenticator_rs::AuthenticatorBackend;
 use webauthn_rs_core::proto::RequestAuthenticationExtensions;
 use webauthn_rs_core::WebauthnCore as Webauthn;
-use webauthn_rs_proto::{AttestationConveyancePreference, COSEAlgorithm, UserVerificationPolicy};
+use webauthn_rs_proto::{AttestationConveyancePreference, COSEAlgorithm, UserVerificationPolicy, AuthenticatorAttachment};
 
 #[derive(Debug, clap::Parser)]
 #[clap(about = "Register and authenticate test")]
@@ -41,6 +41,10 @@ pub struct CliParser {
     /// User verification policy for the request.
     #[clap(short, long, value_enum, default_value_t)]
     verification_policy: UvPolicy,
+
+    /// Authenticator attachment policy for the request.
+    #[clap(short, long, value_enum, default_value_t)]
+    attachment: Attachment,
 }
 
 #[derive(ValueEnum, Clone, Default, Debug)]
@@ -57,6 +61,24 @@ impl From<UvPolicy> for UserVerificationPolicy {
             UvPolicy::Discouraged => UserVerificationPolicy::Discouraged_DO_NOT_USE,
             UvPolicy::Preferred => UserVerificationPolicy::Preferred,
             UvPolicy::Required => UserVerificationPolicy::Required,
+        }
+    }
+}
+
+#[derive(ValueEnum, Clone, Default, Debug)]
+pub enum Attachment {
+    #[default]
+    Any,
+    Platform,
+    CrossPlatform,
+}
+
+impl From<Attachment> for Option<AuthenticatorAttachment> {
+    fn from(value: Attachment) -> Self {
+        match value {
+            Attachment::Any => None,
+            Attachment::Platform => Some(AuthenticatorAttachment::Platform),
+            Attachment::CrossPlatform => Some(AuthenticatorAttachment::CrossPlatform),
         }
     }
 }
@@ -134,6 +156,15 @@ impl CableOpt {
     }
 }
 
+
+#[cfg(feature = "win10-rdp")]
+#[derive(Debug, Args, Clone)]
+pub struct Win10RdpOpt {
+    #[clap(long)]
+    pub test_mode: bool,
+}
+
+
 #[derive(Debug, Clone, Subcommand)]
 enum Provider {
     #[cfg(feature = "softtoken")]
@@ -163,7 +194,7 @@ enum Provider {
 
     #[cfg(feature = "win10-rdp")]
     /// Windows 10 WebAuthn API, via an RDP Virtual Channel.
-    Win10Rdp,
+    Win10Rdp(Win10RdpOpt),
 }
 
 impl Provider {
@@ -215,8 +246,12 @@ impl Provider {
             #[cfg(feature = "win10")]
             Provider::Win10 => Box::<webauthn_authenticator_rs::win10::Win10>::default(),
             #[cfg(feature = "win10-rdp")]
-            Provider::Win10Rdp => {
-                Box::new(webauthn_authenticator_rs::win10::rdp::Win10Rdp::new().unwrap())
+            Provider::Win10Rdp(o) => {
+                let mut rdp = webauthn_authenticator_rs::win10::rdp::Win10Rdp::new().unwrap();
+                if o.test_mode {
+                    rdp.enable_test_mode();
+                }
+                Box::new(rdp)
             }
         }
     }
@@ -266,7 +301,7 @@ async fn main() {
             None,
             COSEAlgorithm::secure_algs(),
             false,
-            None,
+            opt.attachment.into(),
             false,
         )
         .unwrap();

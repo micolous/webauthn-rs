@@ -18,13 +18,25 @@ use crate::{
 use base64urlsafedata::Base64UrlSafeData;
 use uuid::Uuid;
 use webauthn_rs_proto::{
-    AuthenticatorAttestationResponseRaw, RegisterPublicKeyCredential,
-    RegistrationExtensionsClientOutputs,
+    AttestationConveyancePreference, AuthenticatorAttachment, AuthenticatorAttestationResponseRaw,
+    RegisterPublicKeyCredential, RegistrationExtensionsClientOutputs, ResidentKeyRequirement,
+    UserVerificationPolicy,
 };
 use windows::{
     core::{AsImpl as _, Result as WinResult},
     Win32::{
         Foundation::{E_FAIL, NTE_BAD_LEN},
+        Networking::WindowsWebServices::{
+            WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_ANY,
+            WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_DIRECT,
+            WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_INDIRECT,
+            WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_NONE, WEBAUTHN_AUTHENTICATOR_ATTACHMENT_ANY,
+            WEBAUTHN_AUTHENTICATOR_ATTACHMENT_CROSS_PLATFORM,
+            WEBAUTHN_AUTHENTICATOR_ATTACHMENT_PLATFORM,
+            WEBAUTHN_USER_VERIFICATION_REQUIREMENT_DISCOURAGED,
+            WEBAUTHN_USER_VERIFICATION_REQUIREMENT_PREFERRED,
+            WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED,
+        },
         System::RemoteDesktop::{IWTSPlugin, IWTSVirtualChannelManager},
     },
 };
@@ -32,6 +44,7 @@ use windows::{
 pub struct Win10Rdp {
     plugin: IWTSPlugin,
     iface: IWTSVirtualChannelManager,
+    test_mode: bool,
 }
 
 impl Win10Rdp {
@@ -39,6 +52,7 @@ impl Win10Rdp {
         let o = Self {
             plugin: plugin::get_webauthn_iwtsplugin()?,
             iface: VirtualChannelManager::new().into(),
+            test_mode: false,
         };
 
         unsafe {
@@ -47,6 +61,10 @@ impl Win10Rdp {
         }
 
         Ok(o)
+    }
+
+    pub fn enable_test_mode(&mut self) {
+        self.test_mode = true;
     }
 
     fn connect(&self) -> WinResult<Connection> {
@@ -114,19 +132,65 @@ impl AuthenticatorBackendHashedClientData for Win10Rdp {
         };
 
         let window = Window::new()?;
+
+        let flags = if self.test_mode {
+            warn!("using test mode!");
+            0x8800_0000
+        } else {
+            0x0004_0000 // CTAPCLT_DUAL_FLAG    
+            | match authenticator_selection.user_verification {
+                UserVerificationPolicy::Discouraged_DO_NOT_USE => 0x0100_0000,
+                UserVerificationPolicy::Preferred => 0x0080_0000,
+                UserVerificationPolicy::Required => 0x0040_0000,
+            }
+        };
         let webauthn_para = WebauthnPara {
             wnd: window.hwnd.0,
-            attachment: 0,
-            require_resident: false,
-            prefer_resident: false,
-            user_verification: 0,
-            attestation_preference: 0,
+            attachment: match authenticator_selection.authenticator_attachment {
+                None => WEBAUTHN_AUTHENTICATOR_ATTACHMENT_ANY,
+                Some(AuthenticatorAttachment::CrossPlatform) => {
+                    WEBAUTHN_AUTHENTICATOR_ATTACHMENT_CROSS_PLATFORM
+                }
+                Some(AuthenticatorAttachment::Platform) => {
+                    WEBAUTHN_AUTHENTICATOR_ATTACHMENT_PLATFORM
+                }
+            },
+            require_resident: authenticator_selection.require_resident_key
+                || matches!(
+                    authenticator_selection.resident_key,
+                    Some(ResidentKeyRequirement::Required)
+                ),
+            prefer_resident: matches!(
+                authenticator_selection.resident_key,
+                Some(ResidentKeyRequirement::Preferred)
+            ),
+            user_verification: match authenticator_selection.user_verification {
+                UserVerificationPolicy::Required => WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED,
+                UserVerificationPolicy::Preferred => {
+                    WEBAUTHN_USER_VERIFICATION_REQUIREMENT_PREFERRED
+                }
+                UserVerificationPolicy::Discouraged_DO_NOT_USE => {
+                    WEBAUTHN_USER_VERIFICATION_REQUIREMENT_DISCOURAGED
+                }
+            },
+            attestation_preference: match options.attestation {
+                None => WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_ANY,
+                Some(AttestationConveyancePreference::None) => {
+                    WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_NONE
+                }
+                Some(AttestationConveyancePreference::Indirect) => {
+                    WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_INDIRECT
+                }
+                Some(AttestationConveyancePreference::Direct) => {
+                    WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_DIRECT
+                }
+            },
             enterprise_attestation: 0,
             cancellation_id: Uuid::nil(),
         };
 
         let (channel_response, ret) = c
-            .transcieve_cbor(mc, 4194304, 60000, Uuid::nil(), webauthn_para)
+            .transcieve_cbor(mc, flags, 60000, Uuid::nil(), webauthn_para)
             .map_err(|_| WebauthnCError::Internal)?;
 
         drop(window);
@@ -160,10 +224,12 @@ impl AuthenticatorBackendHashedClientData for Win10Rdp {
             response: AuthenticatorAttestationResponseRaw {
                 attestation_object: Base64UrlSafeData(raw),
                 client_data_json: Base64UrlSafeData(vec![]),
-                // All transports the token supports, as opposed to the
-                // transport which was actually used.
-                // TODO
-                transports: None,
+                // The transport actually used
+                transports: channel_response
+                    .device_info
+                    .as_ref()
+                    .and_then(|device_info| device_info.get_transport())
+                    .map(|t| vec![t]),
             },
         })
     }

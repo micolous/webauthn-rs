@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_bytes::{ByteArray, ByteBuf};
 use uuid::Uuid;
+use webauthn_rs_proto::AuthenticatorTransport;
 
 /// <https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpewa/3012640f-f57a-45a4-aa87-e2afbad42a68>
 #[derive(Default, Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -22,12 +23,12 @@ pub struct ChannelRequest {
 #[serde(rename_all = "camelCase")]
 pub struct WebauthnPara {
     pub wnd: isize,
-    pub attachment: u8,
+    pub attachment: u32,
     pub require_resident: bool,
     pub prefer_resident: bool,
-    pub user_verification: u8,
-    pub attestation_preference: u8,
-    pub enterprise_attestation: u8,
+    pub user_verification: u32,
+    pub attestation_preference: u32,
+    pub enterprise_attestation: u32,
     #[serde(with = "UuidDef")]
     pub cancellation_id: Uuid,
 }
@@ -36,31 +37,44 @@ pub struct WebauthnPara {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelResponse {
-    // pub device_info: DeviceInfo,
+    pub device_info: Option<DeviceInfo>,
     pub status: u8,
     pub response: Option<ByteBuf>,
     // TODO: deviceInfoList
 }
 
-// /// <https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpewa/ef4bafb6-0801-4c17-9238-99e3efdc0798>
-// #[derive(Deserialize, Serialize, Debug, Clone)]
-// #[serde(rename_all = "camelCase")]
-// pub struct DeviceInfo {
-//     max_msg_size: Option<u32>,
-//     max_serialized_large_blob_array: Option<u32>,
-//     provider_type: String,
-//     provider_name: String,
-//     device_path: Option<String>,
-//     #[serde(rename = "Manufacturer")]
-//     manufacturer: Option<String>,
-//     #[serde(rename = "Product")]
-//     product: Option<String>,
-//     #[serde(rename = "aaGuid")]
-//     aaguid: Uuid,
-//     resident_key: Option<bool>,
-//     uv_status: Option<u8>,
-//     uv_retries: Option<u8>,
-// }
+/// <https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpewa/ef4bafb6-0801-4c17-9238-99e3efdc0798>
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceInfo {
+    max_msg_size: Option<u32>,
+    max_serialized_large_blob_array: Option<u32>,
+    provider_type: String,
+    provider_name: String,
+    device_path: Option<String>,
+    manufacturer: Option<String>,
+    product: Option<String>,
+    #[serde(rename = "aaGuid")]
+    aaguid: Option<Uuid>,
+    resident_key: Option<bool>,
+    uv_status: Option<u8>,
+    uv_retries: Option<u8>,
+    u2f_protocol: Option<bool>,
+}
+
+impl DeviceInfo {
+    pub fn get_transport(&self) -> Option<AuthenticatorTransport> {
+        let provider = self.provider_type.to_ascii_lowercase();
+        match provider.as_str() {
+            "hid" => Some(AuthenticatorTransport::Usb),
+            "nfc" => Some(AuthenticatorTransport::Nfc),
+            "ble" => Some(AuthenticatorTransport::Ble),
+            "platform" => Some(AuthenticatorTransport::Internal),
+            "test" => Some(AuthenticatorTransport::Test),
+            _ => None,
+        }
+    }
+}
 
 type UuidByteArray = ByteArray<{ std::mem::size_of::<uuid::Bytes>() }>;
 
