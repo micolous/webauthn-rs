@@ -1,34 +1,20 @@
-use std::{
-    ffi::c_void,
-    mem::{forget, transmute},
-    ops::{DerefMut, RangeInclusive},
-    slice,
-    sync::{Arc, Mutex, RwLock},
-};
+use std::{ffi::c_void, mem::transmute};
 use windows::{
-    core::{
-        implement, s, w, AsImpl, ComInterface, Error, IntoParam, BSTR, GUID, HRESULT, HSTRING,
-        PCSTR, PCWSTR, Result,
-    },
+    core::{s, w, ComInterface, Error, IntoParam, Result, GUID, HRESULT, HSTRING, PCSTR, PCWSTR},
     Win32::{
-        Foundation::{
-            FreeLibrary, BOOL, DBG_UNABLE_TO_PROVIDE_HANDLE, ERROR_CONNECTION_REFUSED, E_FAIL,
-            MAX_PATH, NTE_BAD_LEN, NTE_INVALID_PARAMETER, S_OK,
-        },
+        Foundation::{FreeLibrary, NTE_BAD_LEN},
         System::{
-            Com::{CoInitializeEx, COINIT_MULTITHREADED},
             LibraryLoader::{GetProcAddress, LoadLibraryW},
             Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ},
-            RemoteDesktop::{
-                IWTSListenerCallback, IWTSPlugin, IWTSVirtualChannel, IWTSVirtualChannelCallback,
-                IWTSVirtualChannelManager, IWTSVirtualChannelManager_Impl, IWTSVirtualChannel_Impl,
-            },
+            RemoteDesktop::IWTSPlugin,
         },
     },
 };
 
 /// <https://learn.microsoft.com/en-us/windows/win32/termserv/virtualchannelgetinstance>
 type VirtualChannelGetInstance = unsafe fn(&GUID, &mut u32, *mut *mut c_void) -> HRESULT;
+
+const VIRTUAL_CHANNEL_GET_INSTANCE: PCSTR = s!("VirtualChannelGetInstance");
 
 /// Load a function from a given library.
 ///
@@ -117,22 +103,23 @@ fn get_webauthn_rdp_plugin_path() -> Result<HSTRING> {
 /// Gets an instance of the WebAuthn [IWTSPlugin].
 pub fn get_webauthn_iwtsplugin() -> Result<IWTSPlugin> {
     let path = get_webauthn_rdp_plugin_path()?;
-
     let virtual_channel_get_instance: VirtualChannelGetInstance =
-        unsafe { transmute(delay_load(&path, s!("VirtualChannelGetInstance"))?) };
+        unsafe { transmute(delay_load(&path, VIRTUAL_CHANNEL_GET_INSTANCE)?) };
 
     let mut instance = Option::None;
     let mut num_objs = 1;
-    let plugin: IWTSPlugin = unsafe {
-        let ret = virtual_channel_get_instance(
+    Ok(unsafe {
+        let plugin = virtual_channel_get_instance(
             &IWTSPlugin::IID,
             &mut num_objs,
             &mut instance as *mut _ as *mut _,
         )
         .and_some(instance)?;
-        assert_eq!(1, num_objs);
-        ret
-    };
 
-    Ok(plugin)
+        if num_objs != 1 {
+            return Err(NTE_BAD_LEN.into());
+        }
+
+        plugin
+    })
 }

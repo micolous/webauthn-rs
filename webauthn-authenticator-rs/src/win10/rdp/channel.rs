@@ -1,29 +1,18 @@
 use std::{
-    ffi::c_void,
-    mem::{forget, transmute},
     ops::{DerefMut, RangeInclusive},
     slice,
     sync::{Arc, Mutex, RwLock},
 };
 use windows::{
-    core::{
-        implement, s, w, AsImpl, ComInterface, Error, IUnknown, IntoParam, Result, BSTR, GUID,
-        HRESULT, HSTRING, PCSTR, PCWSTR,
-    },
+    core::{implement, IUnknown, Result, BSTR, HRESULT, PCSTR},
     Win32::{
         Foundation::{
-            FreeLibrary, BOOL, DBG_UNABLE_TO_PROVIDE_HANDLE, ERROR_CONNECTION_REFUSED, E_FAIL,
-            MAX_PATH, NTE_BAD_LEN, NTE_INVALID_PARAMETER, S_OK,
+            BOOL, DBG_UNABLE_TO_PROVIDE_HANDLE, ERROR_CONNECTION_REFUSED, E_FAIL, MAX_PATH,
+            NTE_BAD_LEN, NTE_INVALID_PARAMETER, S_OK,
         },
-        System::{
-            Com::{CoInitializeEx, COINIT_MULTITHREADED},
-            LibraryLoader::{GetProcAddress, LoadLibraryW},
-            Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ},
-            RemoteDesktop::{
-                IWTSListener, IWTSListenerCallback, IWTSPlugin, IWTSVirtualChannel,
-                IWTSVirtualChannelCallback, IWTSVirtualChannelManager,
-                IWTSVirtualChannelManager_Impl, IWTSVirtualChannel_Impl,
-            },
+        System::RemoteDesktop::{
+            IWTSListener, IWTSListenerCallback, IWTSVirtualChannel, IWTSVirtualChannelCallback,
+            IWTSVirtualChannelManager, IWTSVirtualChannelManager_Impl, IWTSVirtualChannel_Impl,
         },
     },
 };
