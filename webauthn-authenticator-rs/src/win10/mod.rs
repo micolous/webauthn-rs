@@ -15,7 +15,7 @@ mod cose;
 mod credential;
 #[cfg(feature = "win10")]
 mod extensions;
-#[cfg(feature = "win10")]
+#[cfg(any(feature = "win10", feature = "win10-rdp"))]
 mod gui;
 #[cfg(feature = "win10")]
 mod native;

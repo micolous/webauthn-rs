@@ -1,8 +1,14 @@
+use crate::{
+    ctap2::{CBORCommand, CBORResponse},
+    win10::rdp::message::{ChannelRequest, WebauthnPara, ChannelResponse}, error::CtapError,
+};
 use std::{
     ops::{DerefMut, RangeInclusive},
     slice,
     sync::{Arc, Mutex, RwLock},
 };
+use serde_bytes::ByteBuf;
+use uuid::Uuid;
 use windows::{
     core::{implement, IUnknown, Result, BSTR, HRESULT, PCSTR},
     Win32::{
@@ -192,7 +198,7 @@ impl Connection {
     /// * the [IWTSPlugin] which always issues a
     ///   [IWTSVirtualChannel_Impl::Write] for each
     ///   [IWTSVirtualChannelCallback::OnDataReceived] call
-    pub fn transceive(&self, buf: &[u8]) -> windows::core::Result<Vec<u8>> {
+    pub fn transceive_raw(&self, buf: &[u8]) -> windows::core::Result<Vec<u8>> {
         trace!(">>> {}", hex::encode(&buf));
         unsafe {
             // webauthn.dll's OnDataRecieved will block until it has a result.
@@ -215,6 +221,65 @@ impl Connection {
         }
 
         res
+    }
+
+    pub fn transcieve_cbor<'a, C, R>(
+        &self,
+        cmd: C,
+        flags: u32,
+        timeout: u32,
+        transaction_id: Uuid,
+        webauthn_para: WebauthnPara,
+    ) -> Result<(ChannelResponse, Option<R>)>
+    where
+        C: CBORCommand<Response = R>,
+        R: CBORResponse,
+    {
+        // serialise into a CBOR value
+        let cbor = cmd.cbor().map_err(|_| E_FAIL)?;
+
+        // Parcel into a message
+        let req = ChannelRequest {
+            command: 5,
+            flags,
+            timeout,
+            transaction_id,
+            webauthn_para: Some(webauthn_para),
+            request: Some(ByteBuf::from(cbor)),
+        };
+
+        let req = serde_cbor_2::to_vec(&req).map_err(|_| E_FAIL)?;
+        let resp = self.transceive_raw(&req)?;
+
+        trace!("<<< {}", hex::encode(&resp));
+
+        let resp: ChannelResponse = serde_cbor_2::from_slice(&resp).map_err(|_| E_FAIL)?;
+
+        let cbor = if let Some(cbor_bytes) = &resp.response {
+            if !cbor_bytes.is_empty() {
+                let err = CtapError::from(cbor_bytes[0]);
+                if err.is_ok() {
+                    Some(R::try_from(&cbor_bytes[1..]).map_err(|_| E_FAIL)?)
+                } else {
+                    error!("CBOR error: {err:?}");
+                    return Err(E_FAIL.into());
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        Ok((resp, cbor))
+    }
+}
+
+impl std::fmt::Debug for Connection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Connection")
+            .field("callback", &self.callback)
+            .finish()
     }
 }
 

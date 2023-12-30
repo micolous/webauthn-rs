@@ -160,6 +160,10 @@ enum Provider {
     #[cfg(feature = "win10")]
     /// Windows 10 WebAuthn API, supporting BTLE, NFC and USB HID.
     Win10,
+
+    #[cfg(feature = "win10-rdp")]
+    /// Windows 10 WebAuthn API, via an RDP Virtual Channel.
+    Win10Rdp,
 }
 
 impl Provider {
@@ -210,6 +214,10 @@ impl Provider {
             Provider::Mozilla => Box::<webauthn_authenticator_rs::mozilla::MozillaAuthenticator>::default(),
             #[cfg(feature = "win10")]
             Provider::Win10 => Box::<webauthn_authenticator_rs::win10::Win10>::default(),
+            #[cfg(feature = "win10-rdp")]
+            Provider::Win10Rdp => {
+                Box::new(webauthn_authenticator_rs::win10::rdp::Win10Rdp::new().unwrap())
+            }
         }
     }
 }
