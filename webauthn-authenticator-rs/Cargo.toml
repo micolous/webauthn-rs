@@ -77,13 +77,9 @@ win10-rdp = [
     "windows/Win32_Graphics_Dwm",
     "windows/Win32_Graphics_Gdi",
     "windows/Win32_Networking_WindowsWebServices",
-    "windows/Win32_System_Com_StructuredStorage",
     "windows/Win32_System_Com",
     "windows/Win32_System_LibraryLoader",
-    "windows/Win32_System_Ole",
-    "windows/Win32_System_Registry",
     "windows/Win32_System_RemoteDesktop",
-    "windows/Win32_System_Variant",
     "windows/Win32_UI_WindowsAndMessaging",
 ]
 

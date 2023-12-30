@@ -227,7 +227,7 @@ impl Connection {
         &self,
         cmd: C,
         flags: u32,
-        timeout: u32,
+        timeout_ms: u32,
         transaction_id: Uuid,
         webauthn_para: WebauthnPara,
     ) -> Result<(ChannelResponse, Option<R>)>
@@ -242,7 +242,7 @@ impl Connection {
         let req = ChannelRequest {
             command: 5,
             flags,
-            timeout,
+            timeout_ms,
             transaction_id,
             webauthn_para: Some(webauthn_para),
             request: Some(ByteBuf::from(cbor)),
@@ -251,9 +251,8 @@ impl Connection {
         let req = serde_cbor_2::to_vec(&req).map_err(|_| E_FAIL)?;
         let resp = self.transceive_raw(&req)?;
 
-        trace!("<<< {}", hex::encode(&resp));
-
         let resp: ChannelResponse = serde_cbor_2::from_slice(&resp).map_err(|_| E_FAIL)?;
+        trace!(?resp);
 
         let cbor = if let Some(cbor_bytes) = &resp.response {
             if !cbor_bytes.is_empty() {

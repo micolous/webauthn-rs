@@ -21,7 +21,7 @@ use crate::{
 use base64urlsafedata::Base64UrlSafeData;
 use std::slice::from_raw_parts;
 use webauthn_rs_proto::{
-    AuthenticatorAssertionResponseRaw, AuthenticatorAttachment,
+    AttestationConveyancePreference, AuthenticatorAssertionResponseRaw, AuthenticatorAttachment,
     AuthenticatorAttestationResponseRaw, PublicKeyCredential, PublicKeyCredentialCreationOptions,
     PublicKeyCredentialRequestOptions, RegisterPublicKeyCredential, UserVerificationPolicy,
 };
@@ -109,7 +109,18 @@ impl AuthenticatorBackend for Win10 {
                     .as_ref()
                     .map(|s| &s.user_verification),
             ),
-            dwAttestationConveyancePreference: 0,
+            dwAttestationConveyancePreference: match options.attestation {
+                None => WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_ANY,
+                Some(AttestationConveyancePreference::None) => {
+                    WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_NONE
+                }
+                Some(AttestationConveyancePreference::Indirect) => {
+                    WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_INDIRECT
+                }
+                Some(AttestationConveyancePreference::Direct) => {
+                    WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_DIRECT
+                }
+            },
             dwFlags: 0,
             pCancellationId: std::ptr::null_mut(),
             pExcludeCredentialList: match &mut exclude_credentials {

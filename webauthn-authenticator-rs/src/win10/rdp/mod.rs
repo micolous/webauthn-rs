@@ -1,10 +1,39 @@
+//! Bindings for Windows 10 WebAuthn API, routed over
+//! [WebAuthn Terminal Services Virtual Channel Protocol][1].
+//!
+//! This module essentially pretends to be MSTSC (Terminal Services Client),
+//! issuing the same RPCs that MSTSC would for an RDP connection, using a subset
+//! of [the Virtual Channel COM interface][0].
+//!
+//! This module can be used for both local and remote (terminal server)
+//! sessions.
+//!
+//! While this seems convoluted, this is actually siginificantly cleaner and
+//! safer than the regular Windows WebAuthn (C) APIs, as the transport layer is
+//! mostly working with CBOR rather than structs and fundamentally unsafe types
+//! like `PCWSTR`.
+//!
+//! Unlike the regular Windows APIs, this also supports
+//! [AuthenticatorBackendHashedClientData], so you can proxy requests, and
+//! supports the undocumented "test" provider (`MicrosoftCtapTestProvider`).
+//!
+//! This API is available in Windows 10 bulid 1903 and later.
+//!
+//! ## API docs
+//!
+//! * [`MS-RDPEWA`: Remote Desktop Protocol: WebAuthn Virtual Channel Protocol][1]
+//! * [MSDN: WebAuthn API](https://learn.microsoft.com/en-us/windows/win32/api/webauthn/)
+//! * [webauthn.h](github.com/microsoft/webauthn) (describes versions)
+//!
+//! [0]: https://learn.microsoft.com/en-us/windows/win32/api/tsvirtualchannels/
+//! [1]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpewa/68f2df2e-7c40-4a93-9bb0-517e4283a991
+
 mod channel;
 mod message;
 mod plugin;
-// mod tunnel;
 
 use crate::{
-    ctap2::commands::MakeCredentialRequest,
+    ctap2::commands::{GetAssertionRequest, MakeCredentialRequest},
     error::WebauthnCError,
     win10::{
         gui::Window,
@@ -18,9 +47,11 @@ use crate::{
 use base64urlsafedata::Base64UrlSafeData;
 use uuid::Uuid;
 use webauthn_rs_proto::{
-    AttestationConveyancePreference, AuthenticatorAttachment, AuthenticatorAttestationResponseRaw,
-    RegisterPublicKeyCredential, RegistrationExtensionsClientOutputs, ResidentKeyRequirement,
-    UserVerificationPolicy,
+    AttestationConveyancePreference, AuthenticationExtensionsClientOutputs,
+    AuthenticatorAssertionResponseRaw, AuthenticatorAttachment,
+    AuthenticatorAttestationResponseRaw, PublicKeyCredential, PublicKeyCredentialCreationOptions,
+    PublicKeyCredentialRequestOptions, RegisterPublicKeyCredential,
+    RegistrationExtensionsClientOutputs, ResidentKeyRequirement, UserVerificationPolicy,
 };
 use windows::{
     core::{AsImpl as _, Result as WinResult},
@@ -41,10 +72,40 @@ use windows::{
     },
 };
 
+/// Interface selection options for [Win10Rdp].
+///
+/// Reference: <https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpewa/3012640f-f57a-45a4-aa87-e2afbad42a68>
+#[derive(Default, Debug, PartialEq, Eq)]
+pub enum InterfaceSelection {
+    /// Only use CTAP2 interfaces.
+    ForceCtap,
+    /// Indicate the request and response will use U2F. The provider should use
+    /// the U2F device interface instead of the CTAP interface.
+    PreferU2F,
+    /// Indicate to first try CTAP messages and protocol. If CTAP fails, use U2F
+    /// messages.
+    #[default]
+    PreferCtap,
+    /// Only use U2F interfaces.
+    ForceU2F,
+}
+
+impl InterfaceSelection {
+    const fn as_flag(&self) -> u32 {
+        match self {
+            InterfaceSelection::ForceCtap => 0,
+            InterfaceSelection::PreferU2F => 0x0002_0000,
+            InterfaceSelection::PreferCtap => 0x0004_0000,
+            InterfaceSelection::ForceU2F => 0x0800_0000,
+        }
+    }
+}
+
 pub struct Win10Rdp {
     plugin: IWTSPlugin,
     iface: IWTSVirtualChannelManager,
     test_mode: bool,
+    interface: InterfaceSelection,
 }
 
 impl Win10Rdp {
@@ -53,6 +114,7 @@ impl Win10Rdp {
             plugin: plugin::get_webauthn_iwtsplugin()?,
             iface: VirtualChannelManager::new().into(),
             test_mode: false,
+            interface: InterfaceSelection::default(),
         };
 
         unsafe {
@@ -63,8 +125,35 @@ impl Win10Rdp {
         Ok(o)
     }
 
+    /// Enables Windows WebAuthn test mode (`MicrosoftCtapTestProvider`).
+    ///
+    /// ## Warning
+    ///
+    /// This mode is undocumented, and has a number of limitations and broken
+    /// things:
+    ///
+    /// * Windows will pop up a message with "this security key can't be used"
+    ///   momentarily. That will disappear without further interaction.
+    ///
+    /// * Test mode only works with [`AuthenticatorAttachment::CrossPlatform`].
+    ///
+    /// * User verification will never be performed, even if `required`.
+    ///
+    /// * `packed` attestation is broken - Windows incorrectly encodes the
+    ///   `id-fido-gen-ce-aaguid` extension as only *one* layer of octet string,
+    ///   rather than [the two required by the spec][0].
+    ///
+    /// * Requests will still be routed through RDP sessions, just like ordinary
+    ///   platform WebAuthn requests on Windows.
+    ///
+    /// [0]: https://w3c.github.io/webauthn/#sctn-packed-attestation-cert-requirements
     pub fn enable_test_mode(&mut self) {
         self.test_mode = true;
+    }
+
+    /// Sets the interface Windows
+    pub fn set_interface(&mut self, interface: InterfaceSelection) {
+        self.interface = interface;
     }
 
     fn connect(&self) -> WinResult<Connection> {
@@ -76,6 +165,7 @@ impl Win10Rdp {
         Connection::new(&c)
     }
 
+    /// Gets the currently supported API version.
     pub fn get_api_version(&self) -> WinResult<u32> {
         let c = self.connect()?;
         let s = serde_cbor_2::to_vec(&CMD_API_VERSION).unwrap();
@@ -84,6 +174,7 @@ impl Win10Rdp {
         Ok(u32::from_le_bytes(r.try_into().map_err(|_| NTE_BAD_LEN)?))
     }
 
+    /// Checks if a user-verifying platform authenticator is available.
     pub fn is_user_verifying_platform_authenticator_available(&self) -> WinResult<bool> {
         let c = self.connect()?;
         let s = serde_cbor_2::to_vec(&CMD_IUVPA).unwrap();
@@ -97,26 +188,36 @@ impl AuthenticatorBackendHashedClientData for Win10Rdp {
     fn perform_register(
         &mut self,
         client_data_hash: Vec<u8>,
-        options: webauthn_rs_proto::PublicKeyCredentialCreationOptions,
-        _timeout_ms: u32,
-    ) -> Result<webauthn_rs_proto::RegisterPublicKeyCredential, WebauthnCError> {
+        options: PublicKeyCredentialCreationOptions,
+        timeout_ms: u32,
+    ) -> Result<RegisterPublicKeyCredential, WebauthnCError> {
         let c = self.connect().map_err(|_| WebauthnCError::Internal)?;
-
         let authenticator_selection = options.authenticator_selection.unwrap_or_default();
-        // let auth_token = block_on(self.get_pin_uv_auth_token(
-        //     client_data_hash.as_slice(),
-        //     Permissions::MAKE_CREDENTIAL,
-        //     Some(options.rp.id.clone()),
-        //     authenticator_selection.user_verification,
-        // ))?;
 
-        // let req_options = if let AuthToken::UvTrue = auth_token {
-        //     // No pin_uv_auth_param, but verification is configured, so use it
-        //     Some(BTreeMap::from([("uv".to_owned(), true)]))
-        // } else {
-        //     None
-        // };
-        // let (pin_uv_auth_proto, pin_uv_auth_param) = auth_token.into_pin_uv_params();
+        let mut flags = self.interface.as_flag()
+            | match authenticator_selection.user_verification {
+                UserVerificationPolicy::Discouraged_DO_NOT_USE => 0x0100_0000,
+                UserVerificationPolicy::Preferred => 0x0080_0000,
+                UserVerificationPolicy::Required => 0x0040_0000,
+            };
+
+        if self.test_mode {
+            warn!("Using test mode!");
+            flags |= 0x8000_0000;
+            if matches!(
+                authenticator_selection.user_verification,
+                UserVerificationPolicy::Required
+            ) {
+                warn!("user verification is not supported in test mode");
+            }
+
+            if !matches!(
+                authenticator_selection.authenticator_attachment,
+                Some(AuthenticatorAttachment::CrossPlatform)
+            ) {
+                warn!("test mode only supports cross-platform attachment");
+            }
+        }
 
         let mc = MakeCredentialRequest {
             client_data_hash,
@@ -133,17 +234,6 @@ impl AuthenticatorBackendHashedClientData for Win10Rdp {
 
         let window = Window::new()?;
 
-        let flags = if self.test_mode {
-            warn!("using test mode!");
-            0x8800_0000
-        } else {
-            0x0004_0000 // CTAPCLT_DUAL_FLAG    
-            | match authenticator_selection.user_verification {
-                UserVerificationPolicy::Discouraged_DO_NOT_USE => 0x0100_0000,
-                UserVerificationPolicy::Preferred => 0x0080_0000,
-                UserVerificationPolicy::Required => 0x0040_0000,
-            }
-        };
         let webauthn_para = WebauthnPara {
             wnd: window.hwnd.0,
             attachment: match authenticator_selection.authenticator_attachment {
@@ -190,12 +280,12 @@ impl AuthenticatorBackendHashedClientData for Win10Rdp {
         };
 
         let (channel_response, ret) = c
-            .transcieve_cbor(mc, flags, 60000, Uuid::nil(), webauthn_para)
+            .transcieve_cbor(mc, flags, timeout_ms, Uuid::nil(), webauthn_para)
             .map_err(|_| WebauthnCError::Internal)?;
 
         drop(window);
-        trace!(?channel_response, ?ret);
-        let ret = ret.unwrap();
+        trace!(?ret);
+        let ret = ret.ok_or(WebauthnCError::Internal)?;
 
         // The obvious thing to do here would be to pass the raw authenticator
         // data back, but it seems like everything expects a Map<String, Value>
@@ -237,10 +327,12 @@ impl AuthenticatorBackendHashedClientData for Win10Rdp {
     fn perform_auth(
         &mut self,
         client_data_hash: Vec<u8>,
-        options: webauthn_rs_proto::PublicKeyCredentialRequestOptions,
-        _timeout_ms: u32,
-    ) -> Result<webauthn_rs_proto::PublicKeyCredential, crate::prelude::WebauthnCError> {
-        todo!()
+        options: PublicKeyCredentialRequestOptions,
+        timeout_ms: u32,
+    ) -> Result<PublicKeyCredential, WebauthnCError> {
+        let c = self.connect().map_err(|_| WebauthnCError::Internal)?;
+
+        // todo!()
         // trace!("trying to authenticate...");
         // let auth_token = block_on(self.get_pin_uv_auth_token(
         //     client_data_hash.as_slice(),
@@ -257,46 +349,86 @@ impl AuthenticatorBackendHashedClientData for Win10Rdp {
         // };
         // let (pin_uv_auth_proto, pin_uv_auth_param) = auth_token.into_pin_uv_params();
 
-        // let ga = GetAssertionRequest {
-        //     rp_id: options.rp_id,
-        //     client_data_hash,
-        //     allow_list: options.allow_credentials,
-        //     options: req_options,
-        //     pin_uv_auth_param,
-        //     pin_uv_auth_proto,
-        // };
+        let mut flags = self.interface.as_flag()
+            | match options.user_verification {
+                UserVerificationPolicy::Discouraged_DO_NOT_USE => 0x0100_0000,
+                UserVerificationPolicy::Preferred => 0x0080_0000,
+                UserVerificationPolicy::Required => 0x0040_0000,
+            };
 
-        // trace!(?ga);
-        // let ret = block_on(self.token.transmit(ga, self.ui_callback))?;
-        // trace!(?ret);
+        if self.test_mode {
+            warn!("Using test mode!");
+            flags |= 0x8000_0000;
+            if matches!(options.user_verification, UserVerificationPolicy::Required) {
+                warn!("user verification is not supported in test mode");
+            }
+        }
 
-        // let raw_id = ret
-        //     .credential
-        //     .as_ref()
-        //     .map(|c| c.id.to_owned())
-        //     .ok_or(WebauthnCError::Cbor)?;
-        // let id = raw_id.to_string();
-        // let type_ = ret
-        //     .credential
-        //     .map(|c| c.type_)
-        //     .ok_or(WebauthnCError::Cbor)?;
-        // let signature = Base64UrlSafeData(ret.signature.ok_or(WebauthnCError::Cbor)?);
-        // let authenticator_data = Base64UrlSafeData(ret.auth_data.ok_or(WebauthnCError::Cbor)?);
+        let ga = GetAssertionRequest {
+            rp_id: options.rp_id,
+            client_data_hash,
+            allow_list: options.allow_credentials,
+            options: None,
+            pin_uv_auth_param: None,
+            pin_uv_auth_proto: None,
+        };
 
-        // Ok(PublicKeyCredential {
-        //     id,
-        //     raw_id,
-        //     response: AuthenticatorAssertionResponseRaw {
-        //         authenticator_data,
-        //         client_data_json: Base64UrlSafeData(vec![]),
-        //         signature,
-        //         // TODO
-        //         user_handle: None,
-        //     },
-        //     // TODO
-        //     extensions: AuthenticationExtensionsClientOutputs::default(),
-        //     type_,
-        // })
+        let window = Window::new()?;
+
+        let webauthn_para = WebauthnPara {
+            wnd: window.hwnd.0,
+            attachment: WEBAUTHN_AUTHENTICATOR_ATTACHMENT_ANY,
+            require_resident: false,
+            prefer_resident: false,
+            user_verification: match options.user_verification {
+                UserVerificationPolicy::Required => WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED,
+                UserVerificationPolicy::Preferred => {
+                    WEBAUTHN_USER_VERIFICATION_REQUIREMENT_PREFERRED
+                }
+                UserVerificationPolicy::Discouraged_DO_NOT_USE => {
+                    WEBAUTHN_USER_VERIFICATION_REQUIREMENT_DISCOURAGED
+                }
+            },
+            attestation_preference: WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_ANY,
+            enterprise_attestation: 0,
+            cancellation_id: Uuid::nil(),
+        };
+
+        let (channel_response, ret) = c
+            .transcieve_cbor(ga, flags, timeout_ms, Uuid::nil(), webauthn_para)
+            .map_err(|_| WebauthnCError::Internal)?;
+
+        drop(window);
+        trace!(?ret);
+        let ret = ret.ok_or(WebauthnCError::Internal)?;
+
+        let raw_id = ret
+            .credential
+            .as_ref()
+            .map(|c| c.id.to_owned())
+            .ok_or(WebauthnCError::Cbor)?;
+        let id = raw_id.to_string();
+        let type_ = ret
+            .credential
+            .map(|c| c.type_)
+            .ok_or(WebauthnCError::Cbor)?;
+        let signature = Base64UrlSafeData(ret.signature.ok_or(WebauthnCError::Cbor)?);
+        let authenticator_data = Base64UrlSafeData(ret.auth_data.ok_or(WebauthnCError::Cbor)?);
+
+        Ok(PublicKeyCredential {
+            id,
+            raw_id,
+            response: AuthenticatorAssertionResponseRaw {
+                authenticator_data,
+                client_data_json: Base64UrlSafeData(vec![]),
+                signature,
+                // TODO
+                user_handle: None,
+            },
+            // TODO
+            extensions: AuthenticationExtensionsClientOutputs::default(),
+            type_,
+        })
     }
 }
 

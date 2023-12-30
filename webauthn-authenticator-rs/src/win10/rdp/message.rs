@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_bytes::{ByteArray, ByteBuf};
+use serde_bytes::ByteBuf;
 use uuid::Uuid;
 use webauthn_rs_proto::AuthenticatorTransport;
 
@@ -9,7 +9,8 @@ use webauthn_rs_proto::AuthenticatorTransport;
 pub struct ChannelRequest {
     pub command: u8,
     pub flags: u32,
-    pub timeout: u32,
+    #[serde(rename = "timeout")]
+    pub timeout_ms: u32,
     // #[serde(with = "UuidDef")]
     pub transaction_id: Uuid,
     #[serde(rename = "webAuthNPara", skip_serializing_if = "Option::is_none")]
@@ -80,7 +81,7 @@ pub const CMD_API_VERSION: ChannelRequest = ChannelRequest {
     command: 8,
     request: None,
     flags: 0,
-    timeout: 0,
+    timeout_ms: 0,
     transaction_id: Uuid::nil(),
     webauthn_para: None,
 };
@@ -89,7 +90,7 @@ pub const CMD_IUVPA: ChannelRequest = ChannelRequest {
     command: 6,
     request: None,
     flags: 0,
-    timeout: 0,
+    timeout_ms: 0,
     transaction_id: Uuid::nil(),
     webauthn_para: None,
 };
