@@ -71,8 +71,10 @@ win10 = [
 # Windows 10 WebAuthn API, using IWTSVirtualChannel API.
 # This pretends to be an RDP client, to get access to extra features.
 win10-rdp = [
+    "dep:hex",
     "windows/implement",
     "windows/Win32_Foundation",
+    "windows/Win32_Networking_WindowsWebServices",
     "windows/Win32_System_Com_StructuredStorage",
     "windows/Win32_System_Com",
     "windows/Win32_System_LibraryLoader",

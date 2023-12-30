@@ -1,3 +1,4 @@
+//! [Win10] trait implementations
 use crate::{
     error::WebauthnCError,
     util::{creation_to_clientdata, get_to_clientdata},

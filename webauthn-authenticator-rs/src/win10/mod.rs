@@ -29,5 +29,6 @@ mod win10;
 #[cfg(feature = "win10-rdp")]
 pub mod rdp;
 
+#[cfg(feature = "win10")]
 /// Authenticator backend for Windows 10 WebAuthn API.
 pub struct Win10 {}
