@@ -280,7 +280,14 @@ impl AuthenticatorBackendHashedClientData for Win10Rdp {
         };
 
         let (channel_response, ret) = c
-            .transcieve_cbor(mc, flags, timeout_ms, Uuid::nil(), webauthn_para)
+            .transcieve_cbor(
+                mc,
+                5,
+                flags,
+                timeout_ms,
+                Uuid::new_v4(),
+                Some(webauthn_para),
+            )
             .map_err(|_| WebauthnCError::Internal)?;
 
         drop(window);
@@ -395,7 +402,14 @@ impl AuthenticatorBackendHashedClientData for Win10Rdp {
         };
 
         let (channel_response, ret) = c
-            .transcieve_cbor(ga, flags, timeout_ms, Uuid::nil(), webauthn_para)
+            .transcieve_cbor(
+                ga,
+                5,
+                flags,
+                timeout_ms,
+                Uuid::new_v4(),
+                Some(webauthn_para),
+            )
             .map_err(|_| WebauthnCError::Internal)?;
 
         drop(window);

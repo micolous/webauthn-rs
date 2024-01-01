@@ -226,10 +226,11 @@ impl Connection {
     pub fn transcieve_cbor<'a, C, R>(
         &self,
         cmd: C,
+        cmd_id: u8,
         flags: u32,
         timeout_ms: u32,
         transaction_id: Uuid,
-        webauthn_para: WebauthnPara,
+        webauthn_para: Option<WebauthnPara>,
     ) -> Result<(ChannelResponse, Option<R>)>
     where
         C: CBORCommand<Response = R>,
@@ -240,14 +241,16 @@ impl Connection {
 
         // Parcel into a message
         let req = ChannelRequest {
-            command: 5,
+            command: cmd_id,
             flags,
             timeout_ms,
             transaction_id,
-            webauthn_para: Some(webauthn_para),
+            webauthn_para,
             request: Some(ByteBuf::from(cbor)),
+            filter_hybrid_transport: None,
         };
 
+        trace!(?req);
         let req = serde_cbor_2::to_vec(&req).map_err(|_| E_FAIL)?;
         let resp = self.transceive_raw(&req)?;
 

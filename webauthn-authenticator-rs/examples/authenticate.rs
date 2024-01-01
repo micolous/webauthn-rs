@@ -162,6 +162,9 @@ impl CableOpt {
 pub struct Win10RdpOpt {
     #[clap(long)]
     pub test_mode: bool,
+
+    #[clap(long)]
+    pub device_list: bool,
 }
 
 
@@ -250,6 +253,13 @@ impl Provider {
                 let mut rdp = webauthn_authenticator_rs::win10::rdp::Win10Rdp::new().unwrap();
                 if o.test_mode {
                     rdp.enable_test_mode();
+                }
+                if o.device_list {
+                    let devices = rdp.get_device_list().unwrap();
+                    info!("{} device(s) found:", devices.len());
+                    for device in devices {
+                        info!("  {device:?}");
+                    }
                 }
                 Box::new(rdp)
             }

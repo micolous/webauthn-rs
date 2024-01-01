@@ -17,10 +17,13 @@ pub struct ChannelRequest {
     pub webauthn_para: Option<WebauthnPara>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<ByteBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Only supported on Windows 11 23H2
+    pub filter_hybrid_transport: Option<bool>,
 }
 
 /// <https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpewa/508c6afe-166c-4b4b-8a1f-8604d0d95c10>
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Default, Deserialize, Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct WebauthnPara {
     pub wnd: isize,
@@ -41,7 +44,7 @@ pub struct ChannelResponse {
     pub device_info: Option<DeviceInfo>,
     pub status: u8,
     pub response: Option<ByteBuf>,
-    // TODO: deviceInfoList
+    pub device_info_list: Option<Vec<DeviceInfo>>,
 }
 
 /// <https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpewa/ef4bafb6-0801-4c17-9238-99e3efdc0798>
@@ -84,6 +87,7 @@ pub const CMD_API_VERSION: ChannelRequest = ChannelRequest {
     timeout_ms: 0,
     transaction_id: Uuid::nil(),
     webauthn_para: None,
+    filter_hybrid_transport: None,
 };
 
 pub const CMD_IUVPA: ChannelRequest = ChannelRequest {
@@ -93,6 +97,7 @@ pub const CMD_IUVPA: ChannelRequest = ChannelRequest {
     timeout_ms: 0,
     transaction_id: Uuid::nil(),
     webauthn_para: None,
+    filter_hybrid_transport: None,
 };
 
 #[cfg(test)]
