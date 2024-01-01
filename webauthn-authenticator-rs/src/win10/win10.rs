@@ -30,23 +30,36 @@ use windows::{
     Win32::{Foundation::BOOL, Networking::WindowsWebServices::*},
 };
 
-impl Default for Win10 {
-    fn default() -> Self {
-        unsafe {
-            trace!(
-                "WebAuthNGetApiVersionNumber(): {}",
-                WebAuthNGetApiVersionNumber()
-            );
-            match WebAuthNIsUserVerifyingPlatformAuthenticatorAvailable() {
-                Ok(v) => trace!(
-                    "WebAuthNIsUserVerifyingPlatformAuthenticatorAvailable() = {:?}",
-                    <_ as Into<bool>>::into(v)
-                ),
-                Err(e) => trace!("error requesting platform authenticator: {:?}", e),
-            }
+impl Win10 {
+    pub fn new() -> Self {
+        debug!("WebAuthn API version: {}", Self::get_api_version());
+        if let Ok(r) = Self::is_user_verifying_platform_authenticator_available() {
+            debug!("User-verifying platform authenticator available? {r}");
+        } else {
+            debug!("Error getting user-verifying platform authenticator status");
         }
 
         Self {}
+    }
+
+    /// Gets the currently supported API version.
+    pub fn get_api_version() -> u32 {
+        unsafe { WebAuthNGetApiVersionNumber() }
+    }
+
+    /// Checks if a user-verifying platform authenticator is available.
+    pub fn is_user_verifying_platform_authenticator_available() -> Result<bool, WebauthnCError> {
+        match unsafe { WebAuthNIsUserVerifyingPlatformAuthenticatorAvailable() } {
+            Ok(r) => Ok(r.into()),
+            Err(_) => Err(WebauthnCError::Internal),
+        }
+    }
+}
+
+impl Default for Win10 {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
     }
 }
 

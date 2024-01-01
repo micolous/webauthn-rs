@@ -44,7 +44,8 @@
 //! * `softpasskey`: [SoftPasskey][] (for testing) [^openssl]
 //! * `softtoken`: [SoftToken][] (for testing) [^openssl]
 //! * `usb`: [USB HID][] [^openssl]
-//! * `win10`: [Windows 10][] WebAuthn API
+//! * `win10`: [Windows 10 WebAuthn API][win10]
+//! * `win10-rdp`: [Windows 10 WebAuthn Terminal Services Virtual Channel API][win10-rdp]
 //!
 //! [^openssl]: Feature requires OpenSSL.
 //!
@@ -82,7 +83,8 @@
 //! [SoftPasskey]: crate::softpasskey
 //! [SoftToken]: crate::softtoken
 //! [USB HID]: crate::usb
-//! [Windows 10]: crate::win10
+//! [win10]: crate::win10
+//! [win10-rdp]: crate::win10::rdp
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
