@@ -4,9 +4,7 @@ use std::collections::{HashSet, VecDeque};
 #[cfg(feature = "nfc")]
 use pcsc::MAX_ATR_SIZE;
 
-use crate::WebauthnCError;
-
-use super::tlv::*;
+use crate::{WebauthnCError, tlv::compact::CompactTlv};
 
 /// ISO/IEC 7816-3 _Answer-to-Reset_ and 7816-4 _Historical Bytes_ parser.
 ///

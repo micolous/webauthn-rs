@@ -129,7 +129,7 @@ mod crypto;
 #[cfg(any(all(doc, not(doctest)), feature = "ctap2"))]
 pub mod ctap2;
 pub mod error;
-#[cfg(any(all(doc, not(doctest)), feature = "vendor-yubikey"))]
+#[cfg(any(all(doc, not(doctest)), feature = "vendor-yubikey", feature = "nfc"))]
 mod tlv;
 #[cfg(any(all(doc, not(doctest)), feature = "ctap2"))]
 pub mod transport;

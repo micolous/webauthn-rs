@@ -80,7 +80,6 @@ use std::time::Duration;
 use webauthn_rs_proto::AuthenticatorTransport;
 
 mod atr;
-mod tlv;
 
 pub use self::atr::*;
 use crate::transport::iso7816::*;
